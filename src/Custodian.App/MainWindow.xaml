@@ -116,8 +116,8 @@
                     </MenuItem>
                 </Menu>
 
-                <Button Grid.Column="8" Style="{StaticResource HeaderIconButton}"
-                        Content="&#xE793;" Click="ToggleTheme_Click"
+                <Button Grid.Column="8" Style="{StaticResource ThemeToggleButton}"
+                        Content="Theme" Click="ToggleTheme_Click"
                         ToolTip="Toggle light/dark theme (Ctrl+T)"/>
 
                 <Border Grid.Column="9" Style="{StaticResource StatusChip}"
