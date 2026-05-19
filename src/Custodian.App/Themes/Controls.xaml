@@ -622,6 +622,30 @@
         </Setter>
     </Style>
 
+    <Style x:Key="HorizontalSectionSplitter" TargetType="{x:Type GridSplitter}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="SizeNS"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type GridSplitter}">
+                    <Border x:Name="Bd" Background="Transparent">
+                        <Border x:Name="Handle" Height="2" Background="{DynamicResource Divider}"
+                                VerticalAlignment="Center" Margin="6,0"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Handle" Property="Background" Value="{DynamicResource AccentRing}"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Handle" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ============================================================ -->
     <!--  Menu  -->
     <!-- ============================================================ -->
