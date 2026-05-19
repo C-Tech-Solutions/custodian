@@ -13,7 +13,7 @@ public static class ThemeManager
     private const string LightPalettePath = "/Custodian.App;component/Themes/Palette.Light.xaml";
     private const string DarkPalettePath = "/Custodian.App;component/Themes/Palette.Dark.xaml";
 
-    public static AppTheme Current { get; private set; } = AppTheme.Light;
+    public static AppTheme Current { get; private set; } = AppTheme.Dark;
 
     public static event EventHandler<AppTheme>? ThemeChanged;
 

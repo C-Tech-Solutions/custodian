@@ -6,7 +6,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/Custodian.App;component/Themes/Palette.Light.xaml"/>
+                <ResourceDictionary Source="/Custodian.App;component/Themes/Palette.Dark.xaml"/>
                 <ResourceDictionary Source="/Custodian.App;component/Themes/Controls.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
