@@ -377,15 +377,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var useDarkMode = ThemeManager.UsesDarkChrome ? 1 : 0;
-        _ = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref useDarkMode, sizeof(int));
+        SetDwmAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref useDarkMode, nameof(DwmwaUseImmersiveDarkMode));
 
         var caption = ThemeManager.CaptionColor;
         var captionColor = ColorRef(caption.R, caption.G, caption.B);
-        _ = DwmSetWindowAttribute(hwnd, DwmwaCaptionColor, ref captionColor, sizeof(int));
+        SetDwmAttribute(hwnd, DwmwaCaptionColor, ref captionColor, nameof(DwmwaCaptionColor));
 
         var captionText = ThemeManager.CaptionTextColor;
         var textColor = ColorRef(captionText.R, captionText.G, captionText.B);
-        _ = DwmSetWindowAttribute(hwnd, DwmwaTextColor, ref textColor, sizeof(int));
+        SetDwmAttribute(hwnd, DwmwaTextColor, ref textColor, nameof(DwmwaTextColor));
     }
 
     private async void OpenScan_Click(object sender, RoutedEventArgs e)
@@ -518,9 +518,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ViewMode_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
-        _viewMode = mode;
-        await RefreshDetailsAsync(refreshContext: false);
+        await RunUiActionAsync(async () =>
+        {
+            if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
+            _viewMode = mode;
+            await RefreshDetailsAsync(refreshContext: false);
+        }, "Failed to change view");
     }
 
     // ============================================================
@@ -542,18 +545,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
-    private async void Chart_SliceSelected(object sender, ChartSliceEventArgs e) => await SelectChartSliceAsync(e.Slice, drillIntoFolders: false);
-    private async void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e) => await SelectChartSliceAsync(e.Slice, drillIntoFolders: true);
+    private async void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
+        => await RunUiActionAsync(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false), "Chart selection failed");
+
+    private async void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
+        => await RunUiActionAsync(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true), "Chart selection failed");
 
     private async void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice) return;
-        await SelectChartSliceAsync(slice, drillIntoFolders: false);
+        await RunUiActionAsync(async () =>
+        {
+            if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice) return;
+            await SelectChartSliceAsync(slice, drillIntoFolders: false);
+        }, "Chart selection failed");
     }
 
     private async void ChartBars_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (ChartBars.SelectedItem is ChartSlice slice) await SelectChartSliceAsync(slice, drillIntoFolders: true);
+        await RunUiActionAsync(async () =>
+        {
+            if (ChartBars.SelectedItem is ChartSlice slice) await SelectChartSliceAsync(slice, drillIntoFolders: true);
+        }, "Chart selection failed");
     }
 
     // ============================================================
@@ -590,7 +602,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ActivateRow(DetailRow row)
     {
-        if (row.Entry.IsDirectory) { _ = NavigateToFolderAsync(row.Entry); return; }
+        if (row.Entry.IsDirectory) { NavigateToFolder(row.Entry); return; }
         if (IsExistingFileSystemPath(row.FullPath)) RevealPath(row.FullPath);
     }
 
@@ -672,16 +684,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RefreshThemeMenuChecks()
     {
-        var items = new[]
+        if (ThemeSelectorMenu.Items.Count == 0
+            || ThemeSelectorMenu.Items[0] is not System.Windows.Controls.MenuItem themeMenuItem)
         {
-            DarkThemeItem,
-            LightThemeItem,
-            OceanThemeItem,
-            ForestThemeItem,
-            EmberThemeItem
-        };
+            return;
+        }
 
-        foreach (var item in items)
+        foreach (var item in themeMenuItem.Items.OfType<System.Windows.Controls.MenuItem>())
         {
             if (item.Tag is AppTheme theme)
             {
@@ -1120,7 +1129,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
-        => _ = NavigateToFolderAsync(entry, addHistory, clearForward);
+        => _ = RunUiActionAsync(() => NavigateToFolderAsync(entry, addHistory, clearForward), "Navigation failed");
 
     private async Task NavigateToFolderAsync(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
     {
@@ -1398,6 +1407,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         WpfMessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
+    private async Task RunUiActionAsync(Func<Task> action, string title)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError(title, ex);
+        }
+    }
+
     // ============================================================
     //  Static helpers
     // ============================================================
@@ -1426,6 +1447,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static int ColorRef(byte red, byte green, byte blue)
         => red | (green << 8) | (blue << 16);
+
+    private static void SetDwmAttribute(IntPtr hwnd, int attribute, ref int value, string attributeName)
+    {
+        var result = DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int));
+        if (result != 0)
+        {
+            Debug.WriteLine($"DwmSetWindowAttribute {attributeName} failed with HRESULT 0x{result:X8}.");
+        }
+    }
 
     private static async Task WriteDetailRowsCsvAsync(IEnumerable<DetailRow> rows, string path)
     {
