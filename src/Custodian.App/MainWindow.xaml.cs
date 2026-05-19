@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Collections.Specialized;
+using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
@@ -13,6 +14,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using System.Windows.Interop;
 using Custodian.App.Controls;
 using Custodian.App.Services;
 using Custodian.Core.Export;
@@ -36,6 +38,10 @@ namespace Custodian.App;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaCaptionColor = 35;
+    private const int DwmwaTextColor = 36;
+
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
     private CancellationTokenSource? _scanCts;
@@ -114,9 +120,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         LocationChanged += (_, _) => ScheduleSettingsSave();
         StateChanged += (_, _) => ScheduleSettingsSave();
         Closing += (_, _) => PersistSettings();
+        SourceInitialized += (_, _) => ApplyNativeTitleBarTheme();
 
         ThemeManager.ThemeChanged += (_, _) =>
         {
+            ApplyNativeTitleBarTheme();
             Treemap?.InvalidateVisual();
             PieChart?.InvalidateVisual();
         };
@@ -350,6 +358,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ShowOperationError("Save failed", ex);
             }
         }
+    }
+
+    private void ApplyNativeTitleBarTheme()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var useDarkMode = ThemeManager.Current == AppTheme.Dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref useDarkMode, sizeof(int));
+
+        var captionColor = ThemeManager.Current == AppTheme.Dark
+            ? ColorRef(15, 17, 21)
+            : ColorRef(246, 247, 249);
+        _ = DwmSetWindowAttribute(hwnd, DwmwaCaptionColor, ref captionColor, sizeof(int));
+
+        var textColor = ThemeManager.Current == AppTheme.Dark
+            ? ColorRef(243, 245, 249)
+            : ColorRef(15, 23, 42);
+        _ = DwmSetWindowAttribute(hwnd, DwmwaTextColor, ref textColor, sizeof(int));
     }
 
     private async void OpenScan_Click(object sender, RoutedEventArgs e)
@@ -1252,6 +1282,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private static bool IsExistingFileSystemPath(string path)
         => Path.IsPathFullyQualified(path) && (File.Exists(path) || Directory.Exists(path));
 
+    private static int ColorRef(byte red, byte green, byte blue)
+        => red | (green << 8) | (blue << 16);
+
     private static async Task WriteDetailRowsCsvAsync(IEnumerable<DetailRow> rows, string path)
     {
         await using var stream = File.Create(path);
@@ -1290,6 +1323,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int pvAttribute, int cbAttribute);
 }
 
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>

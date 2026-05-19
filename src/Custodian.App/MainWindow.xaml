@@ -18,7 +18,7 @@
 
     <Window.Resources>
         <HierarchicalDataTemplate DataType="{x:Type presentation:FolderNode}" ItemsSource="{Binding Children}">
-            <Grid MinWidth="240" Margin="0,1">
+            <Grid MinWidth="240" Margin="0,1" ToolTip="{Binding FullPath}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -27,9 +27,16 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"/>
+                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
                 <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="8,0,0,0"/>
-                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="3" Maximum="100" Value="{Binding Percent}" Margin="0,3,0,2"/>
+                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,3,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ProgressBar Height="3" Maximum="100" Value="{Binding Percent}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="8,0,0,0"/>
+                </Grid>
             </Grid>
         </HierarchicalDataTemplate>
     </Window.Resources>
@@ -178,6 +185,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="170"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="14,12,14,4"/>
@@ -208,8 +216,12 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <TextBlock Grid.Row="2" Style="{StaticResource SectionHeader}" Text="FOLDERS" Margin="14,8,14,4"/>
-                    <TreeView x:Name="FolderTree" Grid.Row="3"
+                    <TextBlock Grid.Row="2" Style="{StaticResource SectionHeader}" Text="FOLDER MAP" Margin="14,8,14,2"/>
+                    <TextBlock Grid.Row="3" Text="Click any scanned folder to jump there."
+                               Foreground="{DynamicResource MutedBrush}"
+                               FontSize="11" TextWrapping="Wrap"
+                               Margin="14,0,14,6"/>
+                    <TreeView x:Name="FolderTree" Grid.Row="4"
                               ItemsSource="{Binding FolderNodes}"
                               SelectedItemChanged="FolderTree_SelectedItemChanged"
                               Margin="8,0,8,10"/>
