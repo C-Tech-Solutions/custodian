@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using Custodian.App.Services;
 using Custodian.Core.Presentation;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfColor = System.Windows.Media.Color;
@@ -42,6 +43,9 @@ public sealed class PieChartControl : FrameworkElement
     private readonly List<ChartSlice> _slices = [];
     private INotifyCollectionChanged? _sliceNotifications;
     private long _totalBytes;
+    private WpfBrush _centerBrush = System.Windows.Media.Brushes.White;
+    private WpfPen _separatorPen = CreatePen(System.Windows.Media.Brushes.White, 1);
+    private WpfPen _selectedPen = CreatePen(System.Windows.Media.Brushes.White, 3);
 
     public IEnumerable? Slices
     {
@@ -57,6 +61,36 @@ public sealed class PieChartControl : FrameworkElement
 
     public event EventHandler<ChartSliceEventArgs>? SliceSelected;
     public event EventHandler<ChartSliceEventArgs>? SliceDoubleClicked;
+
+    public PieChartControl()
+    {
+        Loaded += PieChartControl_Loaded;
+        Unloaded += PieChartControl_Unloaded;
+    }
+
+    private void PieChartControl_Loaded(object sender, RoutedEventArgs e)
+    {
+        ThemeManager.ThemeChanged += ThemeManager_ThemeChanged;
+        RefreshThemeResources();
+    }
+
+    private void PieChartControl_Unloaded(object sender, RoutedEventArgs e)
+    {
+        ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
+    }
+
+    private void ThemeManager_ThemeChanged(object? sender, AppTheme e)
+    {
+        RefreshThemeResources();
+        InvalidateVisual();
+    }
+
+    private void RefreshThemeResources()
+    {
+        _centerBrush = (WpfBrush?)TryFindResource("SurfaceRaised") ?? System.Windows.Media.Brushes.White;
+        _separatorPen = CreatePen((WpfBrush?)TryFindResource("Border") ?? System.Windows.Media.Brushes.White, 1);
+        _selectedPen = CreatePen((WpfBrush?)TryFindResource("AccentBrush") ?? System.Windows.Media.Brushes.White, 3);
+    }
 
     private static void OnSlicesChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
     {
@@ -127,9 +161,6 @@ public sealed class PieChartControl : FrameworkElement
         var innerRadius = radius * 0.58;
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var startAngle = 0.0;
-        var separatorPen = CreatePen((WpfBrush?)TryFindResource("Border") ?? System.Windows.Media.Brushes.White, 1);
-        var selectedPen = CreatePen((WpfBrush?)TryFindResource("AccentBrush") ?? System.Windows.Media.Brushes.White, 3);
-
         foreach (var slice in _slices)
         {
             var sweep = Math.Max(0.4, (double)slice.RawBytes / _totalBytes * 360);
@@ -137,14 +168,14 @@ public sealed class PieChartControl : FrameworkElement
             var brush = ResolveBrush(slice.Color);
 
             var isSelected = SelectedSlice is not null && string.Equals(SelectedSlice.SourceKey, slice.SourceKey, StringComparison.Ordinal);
-            var pen = isSelected ? selectedPen : separatorPen;
+            var pen = isSelected ? _selectedPen : _separatorPen;
 
             drawingContext.DrawGeometry(brush, pen, BuildSliceGeometry(center, radius, innerRadius, startAngle, endAngle));
             _renderedSlices.Add(new RenderedSlice(slice, startAngle, endAngle));
             startAngle = endAngle;
         }
 
-        drawingContext.DrawEllipse((WpfBrush?)TryFindResource("SurfaceRaised") ?? System.Windows.Media.Brushes.White, null, center, innerRadius - 2, innerRadius - 2);
+        drawingContext.DrawEllipse(_centerBrush, null, center, innerRadius - 2, innerRadius - 2);
         foreach (var rendered in _renderedSlices)
         {
             if (rendered.Slice.ShowCallout)

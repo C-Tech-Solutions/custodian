@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using Custodian.App.Services;
 using Custodian.Core.Presentation;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
@@ -46,6 +47,10 @@ public sealed class TreemapControl : FrameworkElement
     private readonly List<ChartSlice> _slices = [];
     private INotifyCollectionChanged? _sliceNotifications;
     private double _totalBytes;
+    private WpfBrush _backgroundBrush = WpfBrushes.Transparent;
+    private WpfBrush _emptyStateBrush = WpfBrushes.Gray;
+    private WpfPen _separatorPen = CreatePen(WpfBrushes.White, 1);
+    private WpfPen _selectionPen = CreatePen(WpfBrushes.White, 2.5);
 
     public IEnumerable? Slices
     {
@@ -65,6 +70,37 @@ public sealed class TreemapControl : FrameworkElement
     static TreemapControl()
     {
         FocusableProperty.OverrideMetadata(typeof(TreemapControl), new FrameworkPropertyMetadata(true));
+    }
+
+    public TreemapControl()
+    {
+        Loaded += TreemapControl_Loaded;
+        Unloaded += TreemapControl_Unloaded;
+    }
+
+    private void TreemapControl_Loaded(object sender, RoutedEventArgs e)
+    {
+        ThemeManager.ThemeChanged += ThemeManager_ThemeChanged;
+        RefreshThemeResources();
+    }
+
+    private void TreemapControl_Unloaded(object sender, RoutedEventArgs e)
+    {
+        ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
+    }
+
+    private void ThemeManager_ThemeChanged(object? sender, AppTheme e)
+    {
+        RefreshThemeResources();
+        InvalidateVisual();
+    }
+
+    private void RefreshThemeResources()
+    {
+        _backgroundBrush = (WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.Transparent;
+        _emptyStateBrush = (WpfBrush?)TryFindResource("MutedBrush") ?? WpfBrushes.Gray;
+        _separatorPen = CreatePen((WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.White, 1);
+        _selectionPen = CreatePen((WpfBrush?)TryFindResource("OnAccentBrush") ?? (WpfBrush?)TryFindResource("AccentBrush") ?? WpfBrushes.White, 2.5);
     }
 
     private static void OnSlicesChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
@@ -130,8 +166,7 @@ public sealed class TreemapControl : FrameworkElement
         }
 
         // Background plate so the empty area inside the panel matches surface color.
-        var bg = (WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.Transparent;
-        drawingContext.DrawRectangle(bg, null, new Rect(0, 0, width, height));
+        drawingContext.DrawRectangle(_backgroundBrush, null, new Rect(0, 0, width, height));
 
         if (_slices.Count == 0 || _totalBytes <= 0)
         {
@@ -143,11 +178,9 @@ public sealed class TreemapControl : FrameworkElement
         var bounds = new Rect(0, 0, width, height);
         Squarify(_slices, bounds, _totalBytes);
 
-        var separatorPen = CreatePen((WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.White, 1);
-        var selectionPen = CreatePen((WpfBrush?)TryFindResource("OnAccentBrush") ?? (WpfBrush?)TryFindResource("AccentBrush") ?? WpfBrushes.White, 2.5);
         foreach (var tile in _tiles)
         {
-            DrawTile(drawingContext, tile, separatorPen, selectionPen);
+            DrawTile(drawingContext, tile);
         }
     }
 
@@ -297,7 +330,7 @@ public sealed class TreemapControl : FrameworkElement
     // ============================================================
     //  Drawing
     // ============================================================
-    private void DrawTile(DrawingContext dc, RenderedTile tile, WpfPen separatorPen, WpfPen selectionPen)
+    private void DrawTile(DrawingContext dc, RenderedTile tile)
     {
         var rect = Shrink(tile.Bounds, 1.5);
         if (rect.Width < 1 || rect.Height < 1) return;
@@ -323,12 +356,12 @@ public sealed class TreemapControl : FrameworkElement
             var inner = Shrink(rect, 1.5);
             if (inner.Width > 0 && inner.Height > 0)
             {
-                dc.DrawGeometry(null, selectionPen, new RectangleGeometry(inner, 2.5, 2.5));
+                dc.DrawGeometry(null, _selectionPen, new RectangleGeometry(inner, 2.5, 2.5));
             }
         }
 
         // Separator
-        dc.DrawGeometry(null, separatorPen, geometry);
+        dc.DrawGeometry(null, _separatorPen, geometry);
 
         // Label
         if (rect.Width >= 70 && rect.Height >= 28)
@@ -402,13 +435,12 @@ public sealed class TreemapControl : FrameworkElement
     private void DrawEmptyState(DrawingContext dc, double width, double height)
     {
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        var brush = (WpfBrush?)TryFindResource("MutedBrush") ?? WpfBrushes.Gray;
         var text = new FormattedText(
             "No data to visualize",
             CultureInfo.CurrentCulture,
             WpfFlowDirection.LeftToRight,
             SemiBoldLabelTypeface,
-            13, brush, dpi);
+            13, _emptyStateBrush, dpi);
         dc.DrawText(text, new WpfPoint((width - text.Width) / 2, (height - text.Height) / 2));
     }
 

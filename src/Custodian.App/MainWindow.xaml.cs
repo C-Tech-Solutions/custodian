@@ -222,7 +222,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InputBindings.Add(new KeyBinding(new RelayCommand(_ => { PathBox.Focus(); (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) as WpfTextBox)?.SelectAll(); }), new KeyGesture(Key.L, ModifierKeys.Control)));
         InputBindings.Add(new KeyBinding(new RelayCommand(_ => { FilterBox.Focus(); FilterBox.SelectAll(); }), new KeyGesture(Key.F, ModifierKeys.Control)));
         InputBindings.Add(new KeyBinding(new RelayCommand(_ => { JumpBox.Focus(); JumpBox.IsDropDownOpen = true; }), new KeyGesture(Key.K, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => ThemeManager.Toggle()), new KeyGesture(Key.T, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { ThemeManager.Toggle(); ScheduleSettingsSave(); }), new KeyGesture(Key.T, ModifierKeys.Control)));
         InputBindings.Add(new KeyBinding(new RelayCommand(_ => ShowShortcuts()), new KeyGesture(Key.OemQuestion, ModifierKeys.Control)));
         InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoBack()), new KeyGesture(Key.Left, ModifierKeys.Alt)));
         InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoForward()), new KeyGesture(Key.Right, ModifierKeys.Alt)));
@@ -663,8 +663,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void Window_Drop(object sender, WpfDragEventArgs e)
     {
         if (!e.Data.GetDataPresent(WpfDataFormats.FileDrop)) return;
-        var paths = (string[])e.Data.GetData(WpfDataFormats.FileDrop);
-        var path = paths.FirstOrDefault(p => Directory.Exists(p)) ?? paths.FirstOrDefault();
+        if (e.Data.GetData(WpfDataFormats.FileDrop) is not string[] paths || paths.Length == 0) return;
+        var path = paths.FirstOrDefault(p => Directory.Exists(p)) ?? paths[0];
         if (string.IsNullOrWhiteSpace(path)) return;
         PathBox.Text = Directory.Exists(path) ? path : Path.GetDirectoryName(path) ?? path;
         await StartScanAsync();
@@ -1237,8 +1237,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private static string Csv(string value)
+    private static string Csv(string? value)
     {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
         if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
             return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
         return value;
