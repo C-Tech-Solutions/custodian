@@ -1,0 +1,177 @@
+<Window x:Class="Custodian.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:Custodian.Core.Model;assembly=Custodian.Core"
+        Title="Custodian Disk Analyzer" Height="820" Width="1240" MinHeight="680" MinWidth="1040"
+        Background="#f4f6f8">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,7"/>
+            <Setter Property="Margin" Value="4,0"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,6"/>
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="CanUserSortColumns" Value="True"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="SelectionMode" Value="Extended"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+        </Style>
+        <HierarchicalDataTemplate DataType="{x:Type core:FileSystemEntry}" ItemsSource="{Binding Children}">
+            <TextBlock Text="{Binding Path=Name}"/>
+        </HierarchicalDataTemplate>
+    </Window.Resources>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#111827" Padding="14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBox x:Name="PathBox" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Browse" Click="Browse_Click"/>
+                <ComboBox x:Name="ModeBox" Grid.Column="2" Width="130" Margin="4,0" SelectedIndex="0">
+                    <ComboBoxItem Content="Auto"/>
+                    <ComboBoxItem Content="Recursive"/>
+                    <ComboBoxItem Content="MFT"/>
+                </ComboBox>
+                <Button x:Name="StartButton" Grid.Column="3" Content="Start" Click="Start_Click"/>
+                <Button x:Name="StopButton" Grid.Column="4" Content="Stop" Click="Stop_Click" IsEnabled="False"/>
+                <CheckBox x:Name="AllocatedSizeBox" Grid.Column="5" Content="Allocated" Foreground="White" VerticalAlignment="Center" Margin="8,0"/>
+                <Button Grid.Column="6" Content="Open Scan" Click="OpenScan_Click"/>
+            </Grid>
+        </Border>
+
+        <Border DockPanel.Dock="Top" Background="White" BorderBrush="#d5dbe3" BorderThickness="0,0,0,1" Padding="14,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                <TextBlock x:Name="EngineText" Grid.Column="1" Margin="20,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TotalText" Grid.Column="2" Margin="20,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="CountText" Grid.Column="3" Margin="20,0,0,0" VerticalAlignment="Center"/>
+                <ProgressBar x:Name="ProgressBar" Grid.Column="4" Width="160" Height="16" IsIndeterminate="False"/>
+            </Grid>
+        </Border>
+
+        <Grid Margin="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Background="White" BorderBrush="#d5dbe3" BorderThickness="1">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Folders" FontSize="16" FontWeight="SemiBold" Margin="12"/>
+                    <TreeView x:Name="FolderTree" Margin="8,0,8,8" SelectedItemChanged="FolderTree_SelectedItemChanged"/>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="2" Background="White" BorderBrush="#d5dbe3" BorderThickness="1">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" HorizontalAlignment="Right" Margin="8">
+                        <Button Content="Save Scan" Click="SaveScan_Click"/>
+                        <Button Content="Export CSV" Click="ExportCsv_Click"/>
+                        <Button Content="Export JSON" Click="ExportJson_Click"/>
+                        <Button Content="Copy Rows" Click="CopyRows_Click"/>
+                        <Button Content="Open Path" Click="OpenPath_Click"/>
+                        <Button Content="Delete" Click="Delete_Click"/>
+                    </StackPanel>
+
+                    <TabControl x:Name="Tabs" Margin="8,0,8,8">
+                        <TabItem Header="Contents">
+                            <DataGrid x:Name="ContentsGrid" ItemsSource="{Binding CurrentRows}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+                                    <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="90"/>
+                                    <DataGridTextColumn Header="Logical" Binding="{Binding LogicalSize}" Width="110"/>
+                                    <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="110"/>
+                                    <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="90"/>
+                                    <DataGridTextColumn Header="Folders" Binding="{Binding DirectoryCount}" Width="90"/>
+                                    <DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </TabItem>
+                        <TabItem Header="Largest Files">
+                            <DataGrid x:Name="LargestFilesGrid" ItemsSource="{Binding LargestFileRows}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+                                    <DataGridTextColumn Header="Logical" Binding="{Binding LogicalSize}" Width="110"/>
+                                    <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="110"/>
+                                    <DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="90"/>
+                                    <DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="4*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </TabItem>
+                        <TabItem Header="Largest Folders">
+                            <DataGrid x:Name="LargestFoldersGrid" ItemsSource="{Binding LargestFolderRows}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+                                    <DataGridTextColumn Header="Logical" Binding="{Binding LogicalSize}" Width="110"/>
+                                    <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="110"/>
+                                    <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="90"/>
+                                    <DataGridTextColumn Header="Folders" Binding="{Binding DirectoryCount}" Width="90"/>
+                                    <DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="4*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </TabItem>
+                        <TabItem Header="Extensions">
+                            <DataGrid x:Name="ExtensionGrid" ItemsSource="{Binding ExtensionRows}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="*"/>
+                                    <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="120"/>
+                                    <DataGridTextColumn Header="Logical" Binding="{Binding LogicalSize}" Width="140"/>
+                                    <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="140"/>
+                                    <DataGridTextColumn Header="Share" Binding="{Binding Share}" Width="120"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </TabItem>
+                        <TabItem Header="Treemap">
+                            <ScrollViewer>
+                                <ItemsControl x:Name="TreemapItems" ItemsSource="{Binding TreemapRows}" Margin="8">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="{Binding BlockWidth}" Height="{Binding BlockHeight}" Background="{Binding Brush}" Margin="4" Padding="8">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding LogicalSize}" Foreground="White"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </TabItem>
+                    </TabControl>
+                </DockPanel>
+            </Border>
+
+            <TextBlock Grid.Row="1" Grid.ColumnSpan="3" x:Name="SkippedText" Margin="0,8,0,0" Foreground="#7a3412"/>
+        </Grid>
+    </DockPanel>
+</Window>

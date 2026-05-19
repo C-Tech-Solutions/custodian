@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Custodian.App/Custodian.App.csproj" />
+    <Project Path="src/Custodian.Cli/Custodian.Cli.csproj" />
+    <Project Path="src/Custodian.Core/Custodian.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Custodian.Tests/Custodian.Tests.csproj" />
+  </Folder>
+</Solution>

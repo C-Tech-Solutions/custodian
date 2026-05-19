@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.vscode/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.log
+*.custodian-scan-journal

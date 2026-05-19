@@ -1,0 +1,272 @@
+using System.Diagnostics;
+using Custodian.Core.Model;
+
+namespace Custodian.Core.Scanning;
+
+internal static class MftTreeBuilder
+{
+    public static MftTreeBuildResult Build(
+        IReadOnlyDictionary<ulong, NtfsFileRecord> records,
+        string requestedRootPath,
+        ScanOptions options,
+        ProgressThrottle progress,
+        List<SkippedEntry> skipped,
+        CancellationToken cancellationToken,
+        Func<string, NtfsFileRecord, (long LogicalSize, long AllocatedSize)>? sizeResolver = null)
+    {
+        var treeWatch = Stopwatch.StartNew();
+        var volumeRoot = Path.GetPathRoot(requestedRootPath) ?? requestedRootPath;
+        var normalizedVolumeRoot = ScanPathUtility.NormalizeRoot(volumeRoot);
+        var rootEntry = CreateRootEntry(normalizedVolumeRoot);
+        var directoryNodes = new Dictionary<ulong, FileSystemEntry>();
+        var rootRecordIds = new HashSet<ulong>();
+        var missingParentMeansRoot = true;
+
+        foreach (var record in records.Values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!record.IsDirectory)
+            {
+                continue;
+            }
+
+            if (record.IsRootRecord)
+            {
+                directoryNodes[record.FileReferenceNumber] = rootEntry;
+                rootRecordIds.Add(record.FileReferenceNumber);
+                missingParentMeansRoot = false;
+                continue;
+            }
+
+            if (!options.FollowReparsePoints && record.IsReparsePoint)
+            {
+                continue;
+            }
+
+            directoryNodes[record.FileReferenceNumber] = new FileSystemEntry
+            {
+                Name = record.FileName,
+                IsDirectory = true,
+                Attributes = record.FileAttributes.ToString()
+            };
+        }
+
+        foreach (var record in records.Values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!record.IsDirectory || record.IsRootRecord || !directoryNodes.TryGetValue(record.FileReferenceNumber, out var directory))
+            {
+                continue;
+            }
+
+            var parent = ResolveParentDirectory(record.ParentFileReferenceNumber, directoryNodes, rootEntry, missingParentMeansRoot);
+            if (parent is null)
+            {
+                continue;
+            }
+
+            parent.Children.Add(directory);
+        }
+
+        AssignPaths(rootEntry, normalizedVolumeRoot);
+        treeWatch.Stop();
+
+        var requestedComparisonPath = ScanPathUtility.TrimForComparison(requestedRootPath);
+        var rootComparisonPath = ScanPathUtility.TrimForComparison(normalizedVolumeRoot);
+        var isVolumeRootRequest = string.Equals(requestedComparisonPath, rootComparisonPath, StringComparison.OrdinalIgnoreCase);
+        var scanRoot = isVolumeRootRequest
+            ? rootEntry
+            : FindDirectory(rootEntry, requestedComparisonPath);
+
+        if (scanRoot is null)
+        {
+            throw new DirectoryNotFoundException($"MFT records did not include the requested root: {requestedRootPath}");
+        }
+
+        var sizeWatch = Stopwatch.StartNew();
+        var filesSeen = 0L;
+        var bytesSeen = 0L;
+
+        foreach (var record in records.Values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (record.IsDirectory)
+            {
+                continue;
+            }
+
+            var parent = ResolveParentDirectory(record.ParentFileReferenceNumber, directoryNodes, rootEntry, missingParentMeansRoot);
+            if (parent is null)
+            {
+                continue;
+            }
+
+            if (!isVolumeRootRequest && !IsInsideSelectedRoot(parent, scanRoot))
+            {
+                continue;
+            }
+
+            var fullPath = Path.Combine(parent.FullPath, record.FileName);
+            if (!isVolumeRootRequest && !IsUnderRoot(ScanPathUtility.TrimForComparison(fullPath), requestedComparisonPath))
+            {
+                continue;
+            }
+
+            if (!options.FollowReparsePoints && record.IsReparsePoint)
+            {
+                skipped.Add(new SkippedEntry(fullPath, "Skipped reparse point"));
+                continue;
+            }
+
+            filesSeen++;
+            progress.Report(fullPath, filesSeen, directoryNodes.Count, bytesSeen, "Resolving file sizes");
+
+            try
+            {
+                var (logicalSize, allocatedSize) = sizeResolver is null
+                    ? ResolveSize(fullPath, record, options)
+                    : sizeResolver(fullPath, record);
+
+                parent.Children.Add(new FileSystemEntry
+                {
+                    Name = record.FileName,
+                    FullPath = fullPath,
+                    IsDirectory = false,
+                    LogicalSizeBytes = logicalSize,
+                    AllocatedSizeBytes = allocatedSize,
+                    FileCount = 1,
+                    Extension = Path.GetExtension(record.FileName).ToLowerInvariant(),
+                    Attributes = record.FileAttributes.ToString()
+                });
+                bytesSeen += logicalSize;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+            {
+                skipped.Add(new SkippedEntry(fullPath, ex.Message));
+            }
+        }
+
+        sizeWatch.Stop();
+        progress.Report(scanRoot.FullPath, filesSeen, directoryNodes.Count, bytesSeen, "Building folder totals", force: true);
+
+        var aggregateWatch = Stopwatch.StartNew();
+        Aggregate(scanRoot);
+        aggregateWatch.Stop();
+
+        return new MftTreeBuildResult(
+            scanRoot,
+            filesSeen,
+            bytesSeen,
+            treeWatch.Elapsed,
+            sizeWatch.Elapsed,
+            aggregateWatch.Elapsed);
+    }
+
+    private static FileSystemEntry CreateRootEntry(string rootPath)
+    {
+        return new FileSystemEntry
+        {
+            Name = rootPath,
+            FullPath = rootPath,
+            IsDirectory = true,
+            Attributes = FileAttributes.Directory.ToString()
+        };
+    }
+
+    private static FileSystemEntry? ResolveParentDirectory(
+        ulong parentReference,
+        IReadOnlyDictionary<ulong, FileSystemEntry> directoryNodes,
+        FileSystemEntry rootEntry,
+        bool missingParentMeansRoot)
+    {
+        if (directoryNodes.TryGetValue(parentReference, out var parent))
+        {
+            return parent;
+        }
+
+        return missingParentMeansRoot ? rootEntry : null;
+    }
+
+    private static void AssignPaths(FileSystemEntry directory, string fullPath)
+    {
+        directory.FullPath = fullPath;
+
+        foreach (var child in directory.Children.Where(c => c.IsDirectory))
+        {
+            AssignPaths(child, Path.Combine(directory.FullPath, child.Name));
+        }
+    }
+
+    private static FileSystemEntry? FindDirectory(FileSystemEntry directory, string comparisonPath)
+    {
+        if (string.Equals(ScanPathUtility.TrimForComparison(directory.FullPath), comparisonPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return directory;
+        }
+
+        foreach (var child in directory.Children.Where(c => c.IsDirectory))
+        {
+            var found = FindDirectory(child, comparisonPath);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsInsideSelectedRoot(FileSystemEntry candidateParent, FileSystemEntry scanRoot)
+    {
+        var rootPath = ScanPathUtility.TrimForComparison(scanRoot.FullPath);
+        var candidatePath = ScanPathUtility.TrimForComparison(candidateParent.FullPath);
+        return IsUnderRoot(candidatePath, rootPath);
+    }
+
+    private static bool IsUnderRoot(string candidatePath, string rootPath)
+    {
+        return string.Equals(candidatePath, rootPath, StringComparison.OrdinalIgnoreCase) ||
+               candidatePath.StartsWith(rootPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (long LogicalSize, long AllocatedSize) ResolveSize(string fullPath, NtfsFileRecord record, ScanOptions options)
+    {
+        var info = new FileInfo(fullPath);
+        var length = info.Length;
+        var allocated = options.CollectAllocatedSize ? FileSizeUtilities.GetAllocatedSize(fullPath, length) : length;
+        return (length, allocated);
+    }
+
+    private static void Aggregate(FileSystemEntry entry)
+    {
+        if (!entry.IsDirectory)
+        {
+            return;
+        }
+
+        entry.LogicalSizeBytes = 0;
+        entry.AllocatedSizeBytes = 0;
+        entry.FileCount = 0;
+        entry.DirectoryCount = 0;
+
+        foreach (var child in entry.Children)
+        {
+            Aggregate(child);
+            entry.LogicalSizeBytes += child.LogicalSizeBytes;
+            entry.AllocatedSizeBytes += child.AllocatedSizeBytes;
+            entry.FileCount += child.IsDirectory ? child.FileCount : 1;
+            entry.DirectoryCount += child.IsDirectory ? child.DirectoryCount + 1 : 0;
+        }
+    }
+}
+
+internal sealed record MftTreeBuildResult(
+    FileSystemEntry Root,
+    long FilesSeen,
+    long BytesSeen,
+    TimeSpan TreeConstructionDuration,
+    TimeSpan SizeResolutionDuration,
+    TimeSpan AggregationDuration);
