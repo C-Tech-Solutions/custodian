@@ -6,17 +6,16 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
-using Custodian.Core.Analysis;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
+using Custodian.Core.Presentation;
 using Custodian.Core.Scanning;
 using Custodian.Core.Storage;
 using WinForms = System.Windows.Forms;
 using WpfClipboard = System.Windows.Clipboard;
-using WpfColor = System.Windows.Media.Color;
-using WpfColorConverter = System.Windows.Media.ColorConverter;
 using WpfDataGrid = System.Windows.Controls.DataGrid;
 using WpfMessageBox = System.Windows.MessageBox;
 
@@ -29,17 +28,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private CancellationTokenSource? _scanCts;
     private ScanResult? _currentScan;
     private FileSystemEntry? _selectedEntry;
+    private DetailViewMode _viewMode = DetailViewMode.Contents;
 
-    public ObservableCollection<EntryRow> CurrentRows { get; } = [];
-    public ObservableCollection<EntryRow> LargestFileRows { get; } = [];
-    public ObservableCollection<EntryRow> LargestFolderRows { get; } = [];
-    public ObservableCollection<ExtensionRow> ExtensionRows { get; } = [];
-    public ObservableCollection<TreemapRow> TreemapRows { get; } = [];
+    public ObservableCollection<DriveRow> DriveRows { get; } = [];
+    public ObservableCollection<string> RecentPaths { get; } = [];
+    public ObservableCollection<FolderNode> FolderNodes { get; } = [];
+    public ObservableCollection<DetailRow> DetailRows { get; } = [];
+    public ObservableCollection<ChartRow> ChartRows { get; } = [];
+    public ObservableCollection<SummaryMetric> SummaryMetrics { get; } = [];
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
+        PathBox.ItemsSource = RecentPaths;
+        LoadDriveRows();
         PathBox.Text = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
@@ -62,17 +65,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        var path = PathBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            FooterText.Text = "Choose a path to scan.";
+            return;
+        }
+
         _scanCts = new CancellationTokenSource();
         SetScanningState(true);
         ClearViews();
+        AddRecentPath(path);
 
         try
         {
             var progress = new Progress<ScanProgress>(p =>
             {
-                StatusText.Text = $"{p.Message}: {p.CurrentPath}";
-                CountText.Text = $"{p.FilesSeen:n0} files, {p.DirectoriesSeen:n0} folders";
-                TotalText.Text = SizeFormatter.Format(p.BytesSeen);
+                var currentPath = string.IsNullOrWhiteSpace(p.CurrentPath) ? path : p.CurrentPath;
+                FooterText.Text = $"{p.Message}: {currentPath} | {p.FilesSeen:n0} files, {p.DirectoriesSeen:n0} folders | {SizeFormatter.Format(p.BytesSeen)}";
             });
 
             var mode = ModeBox.SelectedIndex switch
@@ -81,20 +91,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 2 => ScanMode.Mft,
                 _ => ScanMode.Auto
             };
+
             _currentScan = await _scanner.ScanAsync(
-                new ScanOptions(PathBox.Text, mode, CollectAllocatedSize: AllocatedSizeBox.IsChecked == true),
+                new ScanOptions(path, mode, CollectAllocatedSize: AllocatedSizeBox.IsChecked == true),
                 progress,
                 _scanCts.Token);
+
             LoadScanIntoUi(_currentScan);
         }
         catch (OperationCanceledException)
         {
-            StatusText.Text = "Scan cancelled";
+            FooterText.Text = "Scan cancelled.";
+            EngineBadge.Text = "Cancelled";
         }
         catch (Exception ex)
         {
             WpfMessageBox.Show(this, ex.Message, "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            StatusText.Text = "Scan failed";
+            FooterText.Text = "Scan failed.";
+            EngineBadge.Text = "Failed";
         }
         finally
         {
@@ -110,12 +124,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             Description = "Choose a folder to scan",
             UseDescriptionForTitle = true,
-            SelectedPath = Directory.Exists(PathBox.Text) ? PathBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            SelectedPath = Directory.Exists(PathBox.Text)
+                ? PathBox.Text
+                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
         };
 
         if (dialog.ShowDialog() == WinForms.DialogResult.OK)
         {
             PathBox.Text = dialog.SelectedPath;
+            AddRecentPath(dialog.SelectedPath);
         }
     }
 
@@ -123,6 +140,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_currentScan is null)
         {
+            FooterText.Text = "Run or open a scan before saving.";
             return;
         }
 
@@ -135,7 +153,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (dialog.ShowDialog(this) == true)
         {
             await _store.SaveAsync(_currentScan, dialog.FileName);
-            StatusText.Text = $"Saved {dialog.FileName}";
+            FooterText.Text = $"Saved {dialog.FileName}";
         }
     }
 
@@ -150,6 +168,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _currentScan = await _store.LoadAsync(dialog.FileName);
             PathBox.Text = _currentScan.RootPath;
+            AddRecentPath(_currentScan.RootPath);
             LoadScanIntoUi(_currentScan);
         }
     }
@@ -168,6 +187,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_currentScan is null)
         {
+            FooterText.Text = "Run or open a scan before exporting.";
             return;
         }
 
@@ -180,35 +200,74 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (dialog.ShowDialog(this) == true)
         {
             await exporter(_currentScan, dialog.FileName);
-            StatusText.Text = $"Exported {dialog.FileName}";
+            FooterText.Text = $"Exported {dialog.FileName}";
+        }
+    }
+
+    private void DriveList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DriveList.SelectedItem is DriveRow row)
+        {
+            PathBox.Text = row.RootPath;
+            AddRecentPath(row.RootPath);
         }
     }
 
     private void FolderTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        if (e.NewValue is FileSystemEntry entry)
+        if (e.NewValue is FolderNode node)
         {
-            _selectedEntry = entry;
-            LoadCurrentRows(entry);
+            _selectedEntry = node.Entry;
+            _viewMode = DetailViewMode.Contents;
+            RefreshDetails();
         }
     }
 
-    private void CopyRows_Click(object sender, RoutedEventArgs e)
+    private void ViewMode_Click(object sender, RoutedEventArgs e)
     {
-        var grid = ActiveGrid();
-        if (grid?.SelectedItems.Count > 0)
+        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode))
         {
-            var builder = new StringBuilder();
-            foreach (var item in grid.SelectedItems)
-            {
-                builder.AppendLine(item.ToString());
-            }
+            return;
+        }
 
-            WpfClipboard.SetText(builder.ToString());
+        _viewMode = mode;
+        RefreshDetails();
+    }
+
+    private void DetailsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DetailsGrid.SelectedItem is not DetailRow row)
+        {
+            return;
+        }
+
+        if (row.Entry.IsDirectory)
+        {
+            _selectedEntry = row.Entry;
+            _viewMode = DetailViewMode.Contents;
+            RefreshDetails();
+            return;
+        }
+
+        if (IsExistingFileSystemPath(row.FullPath))
+        {
+            RevealPath(row.FullPath);
         }
     }
 
-    private void OpenPath_Click(object sender, RoutedEventArgs e)
+    private void DetailsGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var row = FindVisualParent<DataGridRow>((DependencyObject)e.OriginalSource);
+        if (row is null)
+        {
+            return;
+        }
+
+        row.IsSelected = true;
+        row.Focus();
+    }
+
+    private void OpenSelected_Click(object sender, RoutedEventArgs e)
     {
         var path = SelectedPath();
         if (path is null)
@@ -216,19 +275,101 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var args = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
-        Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+        if (Directory.Exists(path))
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            return;
+        }
+
+        if (File.Exists(path))
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
     }
 
-    private void Delete_Click(object sender, RoutedEventArgs e)
+    private void RevealSelected_Click(object sender, RoutedEventArgs e)
     {
         var path = SelectedPath();
-        if (path is null || !File.Exists(path) && !Directory.Exists(path))
+        if (path is not null && IsExistingFileSystemPath(path))
+        {
+            RevealPath(path);
+        }
+    }
+
+    private void CopyPath_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = SelectedDetailRows().ToList();
+        if (rows.Count > 0)
+        {
+            WpfClipboard.SetText(string.Join(Environment.NewLine, rows.Select(row => row.FullPath)));
+            FooterText.Text = $"Copied {rows.Count:n0} path(s).";
+            return;
+        }
+
+        var path = SelectedPath();
+        if (path is not null)
+        {
+            WpfClipboard.SetText(path);
+            FooterText.Text = "Copied path.";
+        }
+    }
+
+    private void CopyRows_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = SelectedDetailRows().ToList();
+        if (rows.Count == 0)
         {
             return;
         }
 
-        var answer = WpfMessageBox.Show(this, $"Move to Recycle Bin?\n\n{path}", "Confirm delete", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        var builder = new StringBuilder();
+        foreach (var row in rows)
+        {
+            builder.AppendLine(row.ToString());
+        }
+
+        WpfClipboard.SetText(builder.ToString());
+        FooterText.Text = $"Copied {rows.Count:n0} row(s).";
+    }
+
+    private async void ExportSelectionCsv_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = SelectedDetailRows().ToList();
+        if (rows.Count == 0)
+        {
+            FooterText.Text = "Select one or more rows before exporting.";
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "CSV files (*.csv)|*.csv",
+            FileName = "selection.csv"
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            await WriteDetailRowsCsvAsync(rows, dialog.FileName);
+            FooterText.Text = $"Exported {rows.Count:n0} row(s) to {dialog.FileName}";
+        }
+    }
+
+    private void DeleteSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var path = SelectedPath();
+        if (path is null || !File.Exists(path) && !Directory.Exists(path))
+        {
+            FooterText.Text = "Select an existing file or folder before deleting.";
+            return;
+        }
+
+        var answer = WpfMessageBox.Show(
+            this,
+            $"Move to Recycle Bin?\n\n{path}",
+            "Confirm delete",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
         if (answer != MessageBoxResult.Yes)
         {
             return;
@@ -238,14 +379,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (Directory.Exists(path))
             {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                    path,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
             }
             else
             {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
+                    path,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
             }
 
-            StatusText.Text = $"Moved to Recycle Bin: {path}";
+            FooterText.Text = $"Moved to Recycle Bin: {path}";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -255,108 +402,122 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void LoadScanIntoUi(ScanResult result)
     {
-        FolderTree.ItemsSource = new[] { result.Root };
-        _selectedEntry = result.Root;
-        LoadCurrentRows(result.Root);
         var analysisWatch = Stopwatch.StartNew();
-        LoadAnalysisRows(result);
+
+        FolderNodes.Clear();
+        FolderNodes.Add(FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)));
+
+        _selectedEntry = result.Root;
+        _viewMode = DetailViewMode.Contents;
+        ReplaceCollection(SummaryMetrics, ScanViewProjector.SummaryMetrics(result));
+        RefreshDetails();
+
         analysisWatch.Stop();
         result.PhaseTimings.RemoveAll(t => t.Name == "UI analysis preparation");
         result.PhaseTimings.Add(new ScanPhaseTiming("UI analysis preparation", analysisWatch.Elapsed));
 
-        StatusText.Text = $"Scan complete in {result.Duration:g}";
-        EngineText.Text = $"Engine: {result.Engine}";
-        TotalText.Text = $"Size: {SizeFormatter.Format(result.Root.LogicalSizeBytes)} logical / {SizeFormatter.Format(result.Root.AllocatedSizeBytes)} allocated";
-        CountText.Text = $"{result.Root.FileCount:n0} files, {result.Root.DirectoryCount:n0} folders";
-        SkippedText.Text = BuildFooterText(result);
+        EngineBadge.Text = result.Engine;
+        FooterText.Text = BuildFooterText(result);
     }
 
-    private void LoadCurrentRows(FileSystemEntry entry)
+    private void RefreshDetails()
     {
-        CurrentRows.Clear();
-        foreach (var child in entry.Children.OrderByDescending(c => c.IsDirectory).ThenByDescending(c => c.LogicalSizeBytes))
+        var result = _currentScan;
+        if (result is null)
         {
-            CurrentRows.Add(EntryRow.From(child));
-        }
-    }
-
-    private void LoadAnalysisRows(ScanResult result)
-    {
-        LargestFileRows.Clear();
-        foreach (var entry in ScanAnalysis.LargestFiles(result))
-        {
-            LargestFileRows.Add(EntryRow.From(entry));
+            SelectedTitleText.Text = "No scan loaded";
+            SelectedSubText.Text = "Choose a path and scan.";
+            DetailRows.Clear();
+            ChartRows.Clear();
+            SummaryMetrics.Clear();
+            return;
         }
 
-        LargestFolderRows.Clear();
-        foreach (var entry in ScanAnalysis.LargestFolders(result))
+        var selected = _selectedEntry ?? result.Root;
+        var rows = _viewMode switch
         {
-            LargestFolderRows.Add(EntryRow.From(entry));
-        }
+            DetailViewMode.LargestFiles => ScanViewProjector.LargestFileRows(result),
+            DetailViewMode.LargestFolders => ScanViewProjector.LargestFolderRows(result),
+            DetailViewMode.Extensions => ScanViewProjector.ExtensionRows(result),
+            _ => ScanViewProjector.ChildRows(selected)
+        };
 
-        ExtensionRows.Clear();
-        foreach (var extension in ScanAnalysis.ExtensionSummary(result))
-        {
-            ExtensionRows.Add(ExtensionRow.From(extension, result.Root.LogicalSizeBytes));
-        }
+        ReplaceCollection(DetailRows, rows);
+        ReplaceCollection(ChartRows, ScanViewProjector.TopChildChartRows(selected));
 
-        TreemapRows.Clear();
-        var palette = new[] { "#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#ea580c", "#0891b2", "#4f46e5", "#be123c" };
-        var top = result.Root.Children.OrderByDescending(c => c.LogicalSizeBytes).Take(48).ToList();
-        var max = Math.Max(1, top.FirstOrDefault()?.LogicalSizeBytes ?? 1);
-        for (var i = 0; i < top.Count; i++)
-        {
-            var item = top[i];
-            var scale = Math.Max(0.3, Math.Sqrt((double)item.LogicalSizeBytes / max));
-            TreemapRows.Add(new TreemapRow(
-                item.Name,
-                SizeFormatter.Format(item.LogicalSizeBytes),
-                140 + (220 * scale),
-                70 + (120 * scale),
-                new SolidColorBrush((WpfColor)WpfColorConverter.ConvertFromString(palette[i % palette.Length]))));
-        }
+        SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
+        SelectedSubText.Text = $"{ViewModeLabel(_viewMode)} | {selected.FullPath} | {SizeFormatter.Format(selected.LogicalSizeBytes)} logical | {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
     }
 
     private void ClearViews()
     {
-        FolderTree.ItemsSource = null;
-        CurrentRows.Clear();
-        LargestFileRows.Clear();
-        LargestFolderRows.Clear();
-        ExtensionRows.Clear();
-        TreemapRows.Clear();
-        SkippedText.Text = string.Empty;
+        FolderNodes.Clear();
+        DetailRows.Clear();
+        ChartRows.Clear();
+        SummaryMetrics.Clear();
+        _selectedEntry = null;
+        SelectedTitleText.Text = "Scanning...";
+        SelectedSubText.Text = PathBox.Text;
+        FooterText.Text = "Preparing scan...";
+        EngineBadge.Text = "Scanning";
     }
 
-    private static string BuildFooterText(ScanResult result)
+    private void LoadDriveRows()
     {
-        var parts = new List<string>();
-        if (result.SkippedEntries.Count > 0)
-        {
-            parts.Add($"{result.SkippedEntries.Count:n0} skipped entries");
-        }
+        DriveRows.Clear();
+        RecentPaths.Clear();
 
-        if (result.PhaseTimings.Count > 0)
+        foreach (var drive in DriveInfo.GetDrives())
         {
-            parts.Add("Timings: " + string.Join(", ", result.PhaseTimings.Select(t => $"{t.Name} {t.Duration.TotalSeconds:0.###}s")));
-        }
+            try
+            {
+                var total = drive.IsReady ? drive.TotalSize : 0;
+                var free = drive.IsReady ? drive.AvailableFreeSpace : 0;
+                var used = Math.Max(0, total - free);
+                var percent = total <= 0 ? 0 : (double)used / total * 100;
+                var label = drive.IsReady && !string.IsNullOrWhiteSpace(drive.VolumeLabel)
+                    ? $"{drive.Name} {drive.VolumeLabel}"
+                    : drive.Name;
 
-        if (result.Diagnostics.Count > 0)
-        {
-            parts.Add(string.Join(", ", result.Diagnostics));
+                DriveRows.Add(new DriveRow(
+                    label,
+                    drive.Name,
+                    total <= 0 ? "Not ready" : $"{SizeFormatter.Format(used)} used",
+                    total <= 0 ? string.Empty : $"{SizeFormatter.Format(free)} free",
+                    percent));
+                AddRecentPath(drive.Name);
+            }
+            catch (IOException)
+            {
+                DriveRows.Add(new DriveRow(drive.Name, drive.Name, "Not ready", string.Empty, 0));
+                AddRecentPath(drive.Name);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                DriveRows.Add(new DriveRow(drive.Name, drive.Name, "Access denied", string.Empty, 0));
+                AddRecentPath(drive.Name);
+            }
         }
-
-        return string.Join(". ", parts);
     }
 
-    private WpfDataGrid? ActiveGrid()
+    private void AddRecentPath(string path)
     {
-        return (Tabs.SelectedItem as TabItem)?.Content as WpfDataGrid;
+        if (string.IsNullOrWhiteSpace(path) || RecentPaths.Any(existing => string.Equals(existing, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        RecentPaths.Add(path);
+    }
+
+    private IEnumerable<DetailRow> SelectedDetailRows()
+    {
+        return DetailsGrid.SelectedItems.OfType<DetailRow>();
     }
 
     private string? SelectedPath()
     {
-        if (ActiveGrid()?.SelectedItem is EntryRow row)
+        if (DetailsGrid.SelectedItem is DetailRow row)
         {
             return row.FullPath;
         }
@@ -371,63 +532,134 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ProgressBar.IsIndeterminate = scanning;
     }
 
+    private static string BuildFooterText(ScanResult result)
+    {
+        var parts = new List<string>
+        {
+            $"Scan complete in {result.Duration:g}",
+            $"{SizeFormatter.Format(result.Root.LogicalSizeBytes)} logical",
+            $"{result.Root.FileCount:n0} files",
+            $"{result.Root.DirectoryCount:n0} folders"
+        };
+
+        if (result.SkippedEntries.Count > 0)
+        {
+            parts.Add($"{result.SkippedEntries.Count:n0} skipped");
+        }
+
+        if (result.PhaseTimings.Count > 0)
+        {
+            parts.Add("Timings: " + string.Join(", ", result.PhaseTimings.Select(t => $"{t.Name} {t.Duration.TotalSeconds:0.###}s")));
+        }
+
+        if (result.Diagnostics.Count > 0)
+        {
+            parts.Add(string.Join(", ", result.Diagnostics));
+        }
+
+        return string.Join(" | ", parts);
+    }
+
+    private static string ViewModeLabel(DetailViewMode mode)
+    {
+        return mode switch
+        {
+            DetailViewMode.LargestFiles => "Largest files",
+            DetailViewMode.LargestFolders => "Largest folders",
+            DetailViewMode.Extensions => "Extensions",
+            _ => "Contents"
+        };
+    }
+
+    private static void RevealPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var args = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
+        Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+    }
+
+    private static bool IsExistingFileSystemPath(string path)
+    {
+        return Path.IsPathFullyQualified(path) && (File.Exists(path) || Directory.Exists(path));
+    }
+
+    private static async Task WriteDetailRowsCsvAsync(IEnumerable<DetailRow> rows, string path)
+    {
+        await using var stream = File.Create(path);
+        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        await writer.WriteLineAsync("Kind,Name,LogicalSize,AllocatedSize,Percent,Files,Folders,Path");
+
+        foreach (var row in rows)
+        {
+            await writer.WriteLineAsync(string.Join(
+                ',',
+                Csv(row.Kind),
+                Csv(row.Name),
+                Csv(row.LogicalSize),
+                Csv(row.AllocatedSize),
+                Csv(row.PercentText),
+                row.FileCount,
+                row.DirectoryCount,
+                Csv(row.FullPath)));
+        }
+    }
+
+    private static string Csv(string value)
+    {
+        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
+        {
+            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+        }
+
+        return value;
+    }
+
+    private static void ReplaceCollection<T>(ObservableCollection<T> collection, IEnumerable<T> items)
+    {
+        collection.Clear();
+        foreach (var item in items)
+        {
+            collection.Add(item);
+        }
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T match)
+            {
+                return match;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return null;
+    }
+
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
 
-public sealed record EntryRow(
-    string Name,
-    string Type,
-    string LogicalSize,
-    string AllocatedSize,
-    long FileCount,
-    long DirectoryCount,
-    string Extension,
-    string FullPath)
+public sealed record DriveRow(
+    string Label,
+    string RootPath,
+    string UsedText,
+    string FreeText,
+    double UsedPercent);
+
+internal enum DetailViewMode
 {
-    public static EntryRow From(FileSystemEntry entry)
-    {
-        return new EntryRow(
-            entry.Name,
-            entry.IsDirectory ? "Folder" : "File",
-            SizeFormatter.Format(entry.LogicalSizeBytes),
-            SizeFormatter.Format(entry.AllocatedSizeBytes),
-            entry.FileCount,
-            entry.DirectoryCount,
-            entry.Extension,
-            entry.FullPath);
-    }
-
-    public override string ToString()
-    {
-        return $"{Type}\t{LogicalSize}\t{FullPath}";
-    }
+    Contents,
+    LargestFiles,
+    LargestFolders,
+    Extensions
 }
-
-public sealed record ExtensionRow(
-    string Extension,
-    long FileCount,
-    string LogicalSize,
-    string AllocatedSize,
-    string Share)
-{
-    public static ExtensionRow From(ExtensionSummary summary, long totalBytes)
-    {
-        var share = totalBytes <= 0 ? 0 : (double)summary.LogicalSizeBytes / totalBytes;
-        return new ExtensionRow(
-            summary.Extension,
-            summary.FileCount,
-            SizeFormatter.Format(summary.LogicalSizeBytes),
-            SizeFormatter.Format(summary.AllocatedSizeBytes),
-            share.ToString("P1"));
-    }
-}
-
-public sealed record TreemapRow(
-    string Name,
-    string LogicalSize,
-    double BlockWidth,
-    double BlockHeight,
-    System.Windows.Media.Brush Brush);
