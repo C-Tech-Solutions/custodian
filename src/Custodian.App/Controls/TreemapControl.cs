@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
@@ -7,7 +8,6 @@ using Custodian.Core.Presentation;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
-using WpfColorConverter = System.Windows.Media.ColorConverter;
 using WpfCursors = System.Windows.Input.Cursors;
 using WpfFlowDirection = System.Windows.FlowDirection;
 using WpfFontFamily = System.Windows.Media.FontFamily;
@@ -41,6 +41,7 @@ public sealed class TreemapControl : FrameworkElement
     private static readonly Typeface LabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldLabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private static readonly LinearGradientBrush TileHighlightBrush = CreateTileHighlightBrush();
+    private static readonly ConcurrentDictionary<string, WpfBrush> TileTextBrushCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<RenderedTile> _tiles = [];
     private readonly List<ChartSlice> _slices = [];
     private INotifyCollectionChanged? _sliceNotifications;
@@ -142,9 +143,11 @@ public sealed class TreemapControl : FrameworkElement
         var bounds = new Rect(0, 0, width, height);
         Squarify(_slices, bounds, _totalBytes);
 
+        var separatorPen = CreatePen((WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.White, 1);
+        var selectionPen = CreatePen((WpfBrush?)TryFindResource("OnAccentBrush") ?? WpfBrushes.White, 2.5);
         foreach (var tile in _tiles)
         {
-            DrawTile(drawingContext, tile);
+            DrawTile(drawingContext, tile, separatorPen, selectionPen);
         }
     }
 
@@ -294,14 +297,13 @@ public sealed class TreemapControl : FrameworkElement
     // ============================================================
     //  Drawing
     // ============================================================
-    private void DrawTile(DrawingContext dc, RenderedTile tile)
+    private void DrawTile(DrawingContext dc, RenderedTile tile, WpfPen separatorPen, WpfPen selectionPen)
     {
         var rect = Shrink(tile.Bounds, 1.5);
         if (rect.Width < 1 || rect.Height < 1) return;
 
         var fill = ResolveBrush(tile.Slice.Color);
         var isSelected = SelectedSlice is not null && string.Equals(SelectedSlice.SourceKey, tile.Slice.SourceKey, StringComparison.Ordinal);
-        var separatorBrush = (WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.White;
 
         // Filled rectangle
         var geometry = new RectangleGeometry(rect, 3, 3);
@@ -318,19 +320,14 @@ public sealed class TreemapControl : FrameworkElement
         // Selection ring
         if (isSelected)
         {
-            var ringBrush = (WpfBrush?)TryFindResource("OnAccentBrush") ?? WpfBrushes.White;
-            var pen = new WpfPen(ringBrush, 2.5) { LineJoin = PenLineJoin.Round };
-            pen.Freeze();
             var inner = Shrink(rect, 1.5);
             if (inner.Width > 0 && inner.Height > 0)
             {
-                dc.DrawGeometry(null, pen, new RectangleGeometry(inner, 2.5, 2.5));
+                dc.DrawGeometry(null, selectionPen, new RectangleGeometry(inner, 2.5, 2.5));
             }
         }
 
         // Separator
-        var separatorPen = new WpfPen(separatorBrush, 1);
-        separatorPen.Freeze();
         dc.DrawGeometry(null, separatorPen, geometry);
 
         // Label
@@ -416,23 +413,19 @@ public sealed class TreemapControl : FrameworkElement
     }
 
     private static WpfBrush OnTileTextBrush(string color, bool secondary = false)
+        => TileTextBrushCache.GetOrAdd((secondary ? "1|" : "0|") + color, _ => CreateTileTextBrush(color, secondary));
+
+    private static WpfBrush CreateTileTextBrush(string color, bool secondary)
     {
-        // Pick white or near-black based on perceived luminance.
-        try
-        {
-            var c = (WpfColor)WpfColorConverter.ConvertFromString(color);
-            var luminance = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
-            var on = luminance > 0.62
-                ? WpfColor.FromArgb((byte)(secondary ? 200 : 255), 15, 23, 42)
-                : WpfColor.FromArgb((byte)(secondary ? 200 : 255), 255, 255, 255);
-            var b = new SolidColorBrush(on);
-            b.Freeze();
-            return b;
-        }
-        catch
-        {
-            return WpfBrushes.White;
-        }
+        var source = ResolveBrush(color) as SolidColorBrush;
+        var c = source?.Color ?? WpfColor.FromRgb(59, 130, 246);
+        var luminance = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
+        var on = luminance > 0.62
+            ? WpfColor.FromArgb((byte)(secondary ? 200 : 255), 15, 23, 42)
+            : WpfColor.FromArgb((byte)(secondary ? 200 : 255), 255, 255, 255);
+        var brush = new SolidColorBrush(on);
+        brush.Freeze();
+        return brush;
     }
 
     private static WpfBrush ResolveBrush(string color)
@@ -457,6 +450,17 @@ public sealed class TreemapControl : FrameworkElement
             new WpfPoint(0, 1));
         brush.Freeze();
         return brush;
+    }
+
+    private static WpfPen CreatePen(WpfBrush brush, double thickness)
+    {
+        var pen = new WpfPen(brush, thickness) { LineJoin = PenLineJoin.Round };
+        if (pen.CanFreeze)
+        {
+            pen.Freeze();
+        }
+
+        return pen;
     }
 
     private sealed record RenderedTile(ChartSlice Slice, Rect Bounds);

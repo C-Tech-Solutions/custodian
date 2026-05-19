@@ -32,6 +32,12 @@ public sealed class PieChartControl : FrameworkElement
 
     private static readonly Typeface NormalTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+    private static readonly WpfBrush CalloutBrush = CreateBrush(WpfColor.FromRgb(51, 65, 85));
+    private static readonly WpfPen CalloutPen = CreatePen(CalloutBrush, 1);
+    private static readonly WpfBrush EmptyStateBrush = CreateBrush(WpfColor.FromRgb(100, 116, 139));
+    private static readonly WpfPen EmptyStatePen = CreatePen(CreateBrush(WpfColor.FromRgb(203, 213, 225)), 1);
+    private static readonly WpfBrush CenterStrongBrush = CreateBrush(WpfColor.FromRgb(15, 23, 42));
+    private static readonly WpfBrush CenterMutedBrush = CreateBrush(WpfColor.FromRgb(100, 116, 139));
     private readonly List<RenderedSlice> _renderedSlices = [];
     private readonly List<ChartSlice> _slices = [];
     private INotifyCollectionChanged? _sliceNotifications;
@@ -234,14 +240,14 @@ public sealed class PieChartControl : FrameworkElement
     {
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var radius = Math.Max(0, Math.Min(ActualWidth, ActualHeight) / 2 - 16);
-        drawingContext.DrawEllipse(null, new WpfPen(new SolidColorBrush(WpfColor.FromRgb(203, 213, 225)), 1), center, radius, radius);
-        DrawText(drawingContext, "No chart data", center, 13, FontWeights.SemiBold, WpfColor.FromRgb(100, 116, 139));
+        drawingContext.DrawEllipse(null, EmptyStatePen, center, radius, radius);
+        DrawText(drawingContext, "No chart data", center, 13, FontWeights.SemiBold, EmptyStateBrush);
     }
 
     private void DrawCenterText(DrawingContext drawingContext, WpfPoint center, int count)
     {
-        DrawText(drawingContext, $"{count}", new WpfPoint(center.X, center.Y - 8), 20, FontWeights.SemiBold, WpfColor.FromRgb(15, 23, 42));
-        DrawText(drawingContext, "items", new WpfPoint(center.X, center.Y + 14), 11, FontWeights.Normal, WpfColor.FromRgb(100, 116, 139));
+        DrawText(drawingContext, $"{count}", new WpfPoint(center.X, center.Y - 8), 20, FontWeights.SemiBold, CenterStrongBrush);
+        DrawText(drawingContext, "items", new WpfPoint(center.X, center.Y + 14), 11, FontWeights.Normal, CenterMutedBrush);
     }
 
     private void DrawCallout(DrawingContext drawingContext, WpfPoint center, double radius, RenderedSlice rendered)
@@ -251,13 +257,8 @@ public sealed class PieChartControl : FrameworkElement
         var lineEnd = PointAt(center, radius + 16, midpoint);
         var labelPoint = PointAt(center, radius + 20, midpoint);
         var text = $"{rendered.Slice.ShortLabel} {rendered.Slice.PercentText}";
-        var color = WpfColor.FromRgb(51, 65, 85);
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        var pen = new WpfPen(brush, 1);
-        pen.Freeze();
 
-        drawingContext.DrawLine(pen, lineStart, lineEnd);
+        drawingContext.DrawLine(CalloutPen, lineStart, lineEnd);
 
         var isLeftSide = midpoint is > 180 and < 360;
         const double EdgePadding = 4;
@@ -271,7 +272,7 @@ public sealed class PieChartControl : FrameworkElement
             System.Windows.FlowDirection.LeftToRight,
             SemiBoldTypeface,
             10,
-            brush,
+            CalloutBrush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip)
         {
             MaxTextWidth = maxWidth,
@@ -284,7 +285,7 @@ public sealed class PieChartControl : FrameworkElement
         drawingContext.DrawText(formatted, new WpfPoint(x, y));
     }
 
-    private void DrawText(DrawingContext drawingContext, string text, WpfPoint center, double size, FontWeight weight, WpfColor color)
+    private void DrawText(DrawingContext drawingContext, string text, WpfPoint center, double size, FontWeight weight, WpfBrush brush)
     {
         var formatted = new FormattedText(
             text,
@@ -292,7 +293,7 @@ public sealed class PieChartControl : FrameworkElement
             System.Windows.FlowDirection.LeftToRight,
             weight == FontWeights.SemiBold ? SemiBoldTypeface : NormalTypeface,
             size,
-            new SolidColorBrush(color),
+            brush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
         drawingContext.DrawText(formatted, new WpfPoint(center.X - formatted.Width / 2, center.Y - formatted.Height / 2));
@@ -311,6 +312,13 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         return pen;
+    }
+
+    private static WpfBrush CreateBrush(WpfColor color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
     }
 
     private sealed record RenderedSlice(ChartSlice Slice, double StartAngle, double EndAngle);
