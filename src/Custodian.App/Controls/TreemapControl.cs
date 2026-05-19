@@ -274,6 +274,8 @@ public sealed class TreemapControl : FrameworkElement
     private static double Worst(IReadOnlyList<(ChartSlice slice, double area)> row, double shortSide)
     {
         if (row.Count == 0) return double.PositiveInfinity;
+        if (shortSide <= double.Epsilon) return double.PositiveInfinity;
+
         var sum = 0.0;
         var max = double.MinValue;
         var min = double.MaxValue;
@@ -284,7 +286,17 @@ public sealed class TreemapControl : FrameworkElement
             min = Math.Min(min, item.area);
         }
 
+        if (sum <= double.Epsilon || min <= double.Epsilon)
+        {
+            return double.PositiveInfinity;
+        }
+
         var s2 = shortSide * shortSide;
+        if (s2 <= double.Epsilon)
+        {
+            return double.PositiveInfinity;
+        }
+
         var sum2 = sum * sum;
         return Math.Max(s2 * max / sum2, sum2 / (s2 * min));
     }

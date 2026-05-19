@@ -1138,7 +1138,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void UpdateScanRate()
     {
         var elapsed = (DateTime.UtcNow - _scanStarted).TotalSeconds;
-        if (elapsed <= 0) return;
+        if (elapsed < 0.1) return;
+
         var filesPerSec = _scanFilesSeen / elapsed;
         var bytesPerSec = _scanBytesSeen / elapsed;
         FooterRate.Text = $"{filesPerSec:n0} files/s · {SizeFormatter.Format((long)bytesPerSec)}/s";
