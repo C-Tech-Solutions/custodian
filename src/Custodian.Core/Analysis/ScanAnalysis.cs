@@ -47,7 +47,8 @@ public static class ScanAnalysis
             return [];
         }
 
-        var top = new List<FileSystemEntry>(capacity: take);
+        var top = new PriorityQueue<FileSystemEntry, FileSystemEntry>(
+            Comparer<FileSystemEntry>.Create(CompareForTop));
 
         Traverse(root, entry =>
         {
@@ -58,27 +59,25 @@ public static class ScanAnalysis
 
             if (top.Count < take)
             {
-                top.Add(entry);
+                top.Enqueue(entry, entry);
                 return;
             }
 
-            var smallestIndex = 0;
-            for (var i = 1; i < top.Count; i++)
+            if (CompareForTop(entry, top.Peek()) > 0)
             {
-                if (CompareForTop(top[i], top[smallestIndex]) < 0)
-                {
-                    smallestIndex = i;
-                }
-            }
-
-            if (CompareForTop(entry, top[smallestIndex]) > 0)
-            {
-                top[smallestIndex] = entry;
+                top.Dequeue();
+                top.Enqueue(entry, entry);
             }
         });
 
-        top.Sort((left, right) => -CompareForTop(left, right));
-        return top;
+        var results = new List<FileSystemEntry>(capacity: top.Count);
+        while (top.TryDequeue(out var entry, out _))
+        {
+            results.Add(entry);
+        }
+
+        results.Sort((left, right) => -CompareForTop(left, right));
+        return results;
     }
 
     private static int CompareForTop(FileSystemEntry left, FileSystemEntry right)

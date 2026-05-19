@@ -172,6 +172,25 @@
         <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
     </Style>
 
+    <Style x:Key="SidebarToggleButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="Width" Value="30"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
+    <Style x:Key="SidebarRevealButton" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarToggleButton}">
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="MinHeight" Value="28"/>
+    </Style>
+
     <!-- ============================================================ -->
     <!--  ToggleButton (used by ComboBox)  -->
     <!-- ============================================================ -->
@@ -707,11 +726,27 @@
                 CornerRadius="4"
                 Padding="{TemplateBinding Padding}"
                 SnapsToDevicePixels="True">
-            <ContentPresenter ContentSource="Header"
-                              RecognizesAccessKey="True"
-                              VerticalAlignment="Center"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="18"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="CheckIndicator"
+                         Width="6" Height="6"
+                         Fill="{DynamicResource AccentBrush}"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         Visibility="Collapsed"/>
+                <ContentPresenter Grid.Column="1"
+                                  ContentSource="Header"
+                                  RecognizesAccessKey="True"
+                                  VerticalAlignment="Center"/>
+            </Grid>
         </Border>
         <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="CheckIndicator" Property="Visibility" Value="Visible"/>
+            </Trigger>
             <Trigger Property="IsHighlighted" Value="True">
                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverFill}"/>
                 <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
