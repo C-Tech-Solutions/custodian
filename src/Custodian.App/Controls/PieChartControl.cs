@@ -58,7 +58,7 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 40);
+        var radius = Math.Max(0, size / 2 - 52);
         if (radius <= 0)
         {
             return;
@@ -158,7 +158,7 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 40);
+        var radius = Math.Max(0, size / 2 - 52);
         var innerRadius = radius * 0.58;
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var dx = point.X - center.X;
@@ -212,8 +212,8 @@ public sealed class PieChartControl : FrameworkElement
     {
         var midpoint = rendered.StartAngle + (rendered.EndAngle - rendered.StartAngle) / 2;
         var lineStart = PointAt(center, radius + 2, midpoint);
-        var lineEnd = PointAt(center, radius + 18, midpoint);
-        var labelPoint = PointAt(center, radius + 24, midpoint);
+        var lineEnd = PointAt(center, radius + 16, midpoint);
+        var labelPoint = PointAt(center, radius + 20, midpoint);
         var text = $"{rendered.Slice.ShortLabel} {rendered.Slice.PercentText}";
         var color = WpfColor.FromRgb(51, 65, 85);
         var brush = new SolidColorBrush(color);
@@ -223,6 +223,12 @@ public sealed class PieChartControl : FrameworkElement
 
         drawingContext.DrawLine(pen, lineStart, lineEnd);
 
+        var isLeftSide = midpoint is > 180 and < 360;
+        const double EdgePadding = 4;
+        var maxWidth = Math.Max(20, isLeftSide
+            ? labelPoint.X - EdgePadding
+            : ActualWidth - labelPoint.X - EdgePadding);
+
         var formatted = new FormattedText(
             text,
             System.Globalization.CultureInfo.CurrentCulture,
@@ -230,9 +236,14 @@ public sealed class PieChartControl : FrameworkElement
             new Typeface(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
             10,
             brush,
-            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            VisualTreeHelper.GetDpi(this).PixelsPerDip)
+        {
+            MaxTextWidth = maxWidth,
+            MaxLineCount = 1,
+            Trimming = TextTrimming.CharacterEllipsis
+        };
 
-        var x = midpoint is > 180 and < 360 ? labelPoint.X - formatted.Width : labelPoint.X;
+        var x = isLeftSide ? labelPoint.X - formatted.Width : labelPoint.X;
         var y = labelPoint.Y - formatted.Height / 2;
         drawingContext.DrawText(formatted, new WpfPoint(x, y));
     }

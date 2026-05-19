@@ -15,6 +15,8 @@ public sealed record DetailRow(
     string FullPath,
     double Percent,
     string PercentText,
+    FileCategory Category,
+    string CategoryColor,
     FileSystemEntry Entry)
 {
     public static DetailRow From(FileSystemEntry entry, long parentBytes)
@@ -23,9 +25,10 @@ public sealed record DetailRow(
         var kind = entry.IsDirectory ? "Folder" : string.IsNullOrWhiteSpace(entry.Extension) ? "File" : entry.Extension.TrimStart('.').ToUpperInvariant();
 
         var name = string.IsNullOrWhiteSpace(entry.Name) ? entry.FullPath : entry.Name;
+        var category = FileCategoryClassifier.Classify(entry);
 
         return new DetailRow(
-            entry.IsDirectory ? "\uE8B7" : "\uE8A5",
+            FileCategoryClassifier.Glyph(category),
             name,
             kind,
             SizeFormatter.Format(entry.LogicalSizeBytes),
@@ -36,6 +39,8 @@ public sealed record DetailRow(
             entry.FullPath,
             percent,
             percent.ToString("0.0") + "%",
+            category,
+            FileCategoryClassifier.DefaultColor(category),
             entry);
     }
 

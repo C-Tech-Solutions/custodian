@@ -3,41 +3,22 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Custodian.App.Controls"
         xmlns:presentation="clr-namespace:Custodian.Core.Presentation;assembly=Custodian.Core"
-        Title="Custodian Disk Analyzer" Height="860" Width="1360" MinHeight="720" MinWidth="1120"
-        Background="#eef2f6">
+        Title="Custodian Disk Analyzer"
+        Height="880" Width="1400" MinHeight="720" MinWidth="1120"
+        Background="{DynamicResource Surface}"
+        Foreground="{DynamicResource TextBrush}"
+        FontFamily="{StaticResource UiFont}"
+        FontSize="12.5"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        UseLayoutRounding="True"
+        AllowDrop="True"
+        Drop="Window_Drop"
+        DragOver="Window_DragOver">
+
     <Window.Resources>
-        <SolidColorBrush x:Key="PanelBrush" Color="#ffffff"/>
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#cfd8e3"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#2563eb"/>
-        <SolidColorBrush x:Key="MutedBrush" Color="#64748b"/>
-        <SolidColorBrush x:Key="TextBrush" Color="#0f172a"/>
-
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="Margin" Value="3,0"/>
-            <Setter Property="MinHeight" Value="30"/>
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="8,5"/>
-            <Setter Property="MinHeight" Value="30"/>
-        </Style>
-        <Style TargetType="ComboBox">
-            <Setter Property="MinHeight" Value="30"/>
-        </Style>
-        <Style TargetType="DataGrid">
-            <Setter Property="AutoGenerateColumns" Value="False"/>
-            <Setter Property="CanUserSortColumns" Value="True"/>
-            <Setter Property="IsReadOnly" Value="True"/>
-            <Setter Property="SelectionMode" Value="Extended"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-            <Setter Property="HeadersVisibility" Value="Column"/>
-            <Setter Property="RowHeight" Value="28"/>
-            <Setter Property="AlternatingRowBackground" Value="#f8fafc"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-
         <HierarchicalDataTemplate DataType="{x:Type presentation:FolderNode}" ItemsSource="{Binding Children}">
-            <Grid MinWidth="250" Margin="0,2">
+            <Grid MinWidth="240" Margin="0,1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -46,15 +27,21 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
-                <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
-                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="3" Maximum="100" Value="{Binding Percent}" Foreground="{StaticResource AccentBrush}" Background="#e2e8f0" BorderThickness="0" Margin="0,3,0,0"/>
+                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="8,0,0,0"/>
+                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="3" Maximum="100" Value="{Binding Percent}" Margin="0,3,0,2"/>
             </Grid>
         </HierarchicalDataTemplate>
     </Window.Resources>
 
-    <DockPanel>
-        <Border DockPanel.Dock="Top" Background="#162033" Padding="10" BorderBrush="#0f172a" BorderThickness="0,0,0,1">
+    <DockPanel LastChildFill="True">
+
+        <!-- =============== TOP COMMAND BAR =============== -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource HeaderSurface}"
+                BorderBrush="{DynamicResource Border}"
+                BorderThickness="0,0,0,1"
+                Padding="14,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -66,64 +53,138 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Text="Custodian" Foreground="White" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center" Margin="2,0,14,0"/>
-                <ComboBox x:Name="PathBox" Grid.Column="1" IsEditable="True" VerticalAlignment="Center"/>
-                <Button Grid.Column="2" Content="Browse" Click="Browse_Click"/>
-                <Button x:Name="StartButton" Grid.Column="3" Content="Scan" Click="Start_Click"/>
-                <Button x:Name="StopButton" Grid.Column="4" Content="Stop" Click="Stop_Click" IsEnabled="False"/>
-                <ComboBox x:Name="ModeBox" Grid.Column="5" Width="118" Margin="4,0" SelectedIndex="0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <Border Width="26" Height="26" CornerRadius="6"
+                            Background="{DynamicResource AccentBrush}"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="C" Foreground="{DynamicResource OnAccentBrush}"
+                                   FontWeight="Bold" FontSize="14"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Custodian"
+                               FontFamily="{StaticResource UiFontDisplay}"
+                               FontWeight="SemiBold" FontSize="15"
+                               Foreground="{DynamicResource TextStrong}"
+                               VerticalAlignment="Center" Margin="10,0,0,0"/>
+                </StackPanel>
+
+                <Grid Grid.Column="1" VerticalAlignment="Center">
+                    <ComboBox x:Name="PathBox" IsEditable="True" Padding="34,7,10,7"
+                              ToolTip="Folder or drive to scan (Ctrl+L)"/>
+                    <TextBlock Text="&#xE8B7;" FontFamily="{StaticResource IconFont}"
+                               FontSize="14" Foreground="{DynamicResource MutedBrush}"
+                               VerticalAlignment="Center" Margin="11,0,0,0"
+                               IsHitTestVisible="False"/>
+                </Grid>
+
+                <Button Grid.Column="2" Content="Browse" Click="Browse_Click" ToolTip="Browse for folder..."/>
+                <Button x:Name="StartButton" Grid.Column="3" Content="Scan" Click="Start_Click"
+                        Style="{StaticResource AccentButton}" ToolTip="Start scan"/>
+                <Button x:Name="StopButton" Grid.Column="4" Content="Stop" Click="Stop_Click"
+                        IsEnabled="False" ToolTip="Stop scan (Esc)"/>
+
+                <ComboBox x:Name="ModeBox" Grid.Column="5" Width="118" Margin="6,0,3,0" SelectedIndex="0"
+                          ToolTip="Scan engine">
                     <ComboBoxItem Content="Auto"/>
                     <ComboBoxItem Content="Recursive"/>
                     <ComboBoxItem Content="MFT"/>
                 </ComboBox>
-                <CheckBox x:Name="AllocatedSizeBox" Grid.Column="6" Content="Allocated" Foreground="White" VerticalAlignment="Center" Margin="8,0"/>
-                <Menu Grid.Column="7" VerticalAlignment="Center" Background="Transparent" Foreground="White" BorderThickness="0">
-                    <MenuItem Header="File">
-                        <MenuItem Header="Open Scan" Click="OpenScan_Click"/>
-                        <MenuItem Header="Save Scan" Click="SaveScan_Click"/>
+
+                <CheckBox x:Name="AllocatedSizeBox" Grid.Column="6" Content="Allocated"
+                          VerticalAlignment="Center" Margin="10,0,6,0"
+                          ToolTip="Include on-disk allocated size"/>
+
+                <Menu Grid.Column="7" VerticalAlignment="Center" Margin="6,0,0,0">
+                    <MenuItem Header="File" Padding="8,4">
+                        <MenuItem Header="Open Scan...                Ctrl+O" Click="OpenScan_Click"/>
+                        <MenuItem Header="Save Scan...                Ctrl+S" Click="SaveScan_Click"/>
                         <Separator/>
-                        <MenuItem Header="Export CSV" Click="ExportCsv_Click"/>
-                        <MenuItem Header="Export JSON" Click="ExportJson_Click"/>
+                        <MenuItem Header="Export CSV...               Ctrl+E" Click="ExportCsv_Click"/>
+                        <MenuItem Header="Export JSON..." Click="ExportJson_Click"/>
+                    </MenuItem>
+                    <MenuItem Header="View" Padding="8,4">
+                        <MenuItem Header="Toggle Theme                Ctrl+T" Click="ToggleTheme_Click"/>
+                        <MenuItem Header="Keyboard Shortcuts          Ctrl+/" Click="ShowShortcuts_Click"/>
                     </MenuItem>
                 </Menu>
-                <Border Grid.Column="8" BorderBrush="#334155" BorderThickness="1" Background="#0f172a" Padding="8,4" Margin="6,0,0,0">
-                    <TextBlock x:Name="EngineBadge" Text="Ready" Foreground="#bfdbfe" FontSize="12" VerticalAlignment="Center"/>
+
+                <Button Grid.Column="8" Style="{StaticResource HeaderIconButton}"
+                        Content="&#xE793;" Click="ToggleTheme_Click"
+                        ToolTip="Toggle light/dark theme (Ctrl+T)"/>
+
+                <Border Grid.Column="9" Style="{StaticResource StatusChip}"
+                        Margin="8,0,0,0" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="EngineBadgeDot" Width="6" Height="6"
+                                 Fill="{DynamicResource SuccessBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="EngineBadge" Text="Ready"
+                                   Foreground="{DynamicResource MutedStrong}"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Margin="6,0,0,0"/>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Border>
 
-        <Border DockPanel.Dock="Bottom" Background="#f8fafc" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,1,0,0" Padding="10,6">
+        <!-- =============== BOTTOM FOOTER =============== -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource SurfaceSubtle}"
+                BorderBrush="{DynamicResource Border}"
+                BorderThickness="0,1,0,0"
+                Padding="14,7">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="FooterText" Text="Ready" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
-                <ProgressBar x:Name="ProgressBar" Grid.Column="1" Width="180" Height="14" IsIndeterminate="False" Margin="12,0,0,0"/>
+                <TextBlock x:Name="FooterStatus" Text="Ready"
+                           Foreground="{DynamicResource MutedStrong}"
+                           FontWeight="SemiBold" FontSize="11.5"
+                           VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <TextBlock Grid.Column="1" x:Name="FooterDetail"
+                           Foreground="{DynamicResource MutedBrush}" FontSize="11.5"
+                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="2" x:Name="FooterRate"
+                           Foreground="{DynamicResource MutedBrush}" FontSize="11.5"
+                           VerticalAlignment="Center" Margin="12,0,0,0"/>
+                <TextBlock Grid.Column="3" x:Name="FooterEta"
+                           Foreground="{DynamicResource MutedBrush}" FontSize="11.5"
+                           VerticalAlignment="Center" Margin="12,0,0,0"/>
+                <ProgressBar x:Name="ProgressBar" Grid.Column="4" Width="180" Height="6"
+                             IsIndeterminate="False" Margin="14,0,0,0" VerticalAlignment="Center"/>
             </Grid>
         </Border>
 
-        <Grid Margin="10">
+        <!-- =============== MAIN GRID =============== -->
+        <Grid Margin="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="320"/>
-                <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="10"/>
-                <ColumnDefinition Width="330"/>
+                <ColumnDefinition x:Name="LeftCol" Width="320" MinWidth="220"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*" MinWidth="400"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition x:Name="RightCol" Width="350" MinWidth="0"/>
             </Grid.ColumnDefinitions>
 
-            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
+            <!-- LEFT PANEL -->
+            <Border Style="{StaticResource Panel}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="160"/>
+                        <RowDefinition Height="170"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Text="Targets" FontWeight="SemiBold" FontSize="14" Margin="10,8"/>
-                    <ListBox x:Name="DriveList" Grid.Row="1" ItemsSource="{Binding DriveRows}" SelectionChanged="DriveList_SelectionChanged" BorderThickness="0" Margin="6,0,6,6">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="14,12,14,4"/>
+                    <ListBox x:Name="DriveList" Grid.Row="1"
+                             ItemsSource="{Binding DriveRows}"
+                             SelectionChanged="DriveList_SelectionChanged"
+                             Margin="8,0,8,8">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid Margin="2,3">
@@ -136,151 +197,408 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding UsedText}" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
-                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="5" Maximum="100" Value="{Binding UsedPercent}" Foreground="{StaticResource AccentBrush}" Background="#e2e8f0" BorderThickness="0" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding UsedText}"
+                                               Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                                               Margin="8,0,0,0"/>
+                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="4"
+                                                 Maximum="100" Value="{Binding UsedPercent}"
+                                                 Margin="0,4,0,0"/>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <TextBlock Grid.Row="2" Text="Folders" FontWeight="SemiBold" FontSize="14" Margin="10,6"/>
-                    <TreeView x:Name="FolderTree" Grid.Row="3" ItemsSource="{Binding FolderNodes}" SelectedItemChanged="FolderTree_SelectedItemChanged" BorderThickness="0" Margin="6,0,6,6"/>
+                    <TextBlock Grid.Row="2" Style="{StaticResource SectionHeader}" Text="FOLDERS" Margin="14,8,14,4"/>
+                    <TreeView x:Name="FolderTree" Grid.Row="3"
+                              ItemsSource="{Binding FolderNodes}"
+                              SelectedItemChanged="FolderTree_SelectedItemChanged"
+                              Margin="8,0,8,10"/>
                 </Grid>
             </Border>
 
-            <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch" Background="#dbe3ec"/>
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
 
-            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
-                <DockPanel>
-                    <Border DockPanel.Dock="Top" Background="#f8fafc" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,0,0,1" Padding="10">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid Grid.ColumnSpan="2">
+            <!-- CENTER PANEL -->
+            <Border Grid.Column="2" Style="{StaticResource Panel}">
+                <Grid>
+                    <DockPanel x:Name="WorkspaceHost">
+
+                        <!-- Folder header -->
+                        <Border DockPanel.Dock="Top"
+                                Background="{DynamicResource SurfaceSubtle}"
+                                BorderBrush="{DynamicResource Border}"
+                                BorderThickness="0,0,0,1"
+                                Padding="14,12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="260"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <StackPanel Orientation="Horizontal">
-                                    <Button x:Name="BackButton" Click="Back_Click" ToolTip="Back" IsEnabled="False" Width="30" Padding="0">
-                                        <TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" HorizontalAlignment="Center"/>
-                                    </Button>
-                                    <Button x:Name="ForwardButton" Click="Forward_Click" ToolTip="Forward" IsEnabled="False" Width="30" Padding="0">
-                                        <TextBlock Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" HorizontalAlignment="Center"/>
-                                    </Button>
-                                    <Button x:Name="UpButton" Click="Up_Click" ToolTip="Up one level" IsEnabled="False" Width="30" Padding="0">
-                                        <TextBlock Text="&#xE74A;" FontFamily="Segoe MDL2 Assets" HorizontalAlignment="Center"/>
-                                    </Button>
+
+                                <Grid Grid.ColumnSpan="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="240"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="BackButton" Style="{StaticResource IconButton}"
+                                                Click="Back_Click" Content="&#xE72B;" IsEnabled="False"
+                                                ToolTip="Back (Alt+Left)"/>
+                                        <Button x:Name="ForwardButton" Style="{StaticResource IconButton}"
+                                                Click="Forward_Click" Content="&#xE72A;" IsEnabled="False"
+                                                ToolTip="Forward (Alt+Right)"/>
+                                        <Button x:Name="UpButton" Style="{StaticResource IconButton}"
+                                                Click="Up_Click" Content="&#xE74A;" IsEnabled="False"
+                                                ToolTip="Up (Alt+Up / Backspace)"/>
+                                        <Button x:Name="RefreshButton" Style="{StaticResource IconButton}"
+                                                Click="Refresh_Click" Content="&#xE72C;"
+                                                ToolTip="Refresh (F5)"/>
+                                    </StackPanel>
+                                    <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled" Margin="10,0">
+                                        <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <Button Style="{StaticResource BreadcrumbButton}"
+                                                                Content="{Binding Name}" Tag="{Binding}"
+                                                                Click="Breadcrumb_Click"/>
+                                                        <TextBlock Text="&#xE76C;" FontFamily="{StaticResource IconFont}"
+                                                                   FontSize="10"
+                                                                   Foreground="{DynamicResource DisabledTextBrush}"
+                                                                   VerticalAlignment="Center" Margin="2,0"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <Grid Grid.Column="2">
+                                        <ComboBox x:Name="JumpBox" IsEditable="True"
+                                                  IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                                                  Padding="30,7,10,7"
+                                                  KeyUp="JumpBox_KeyUp"
+                                                  SelectionChanged="JumpBox_SelectionChanged"
+                                                  ToolTip="Jump to folder (Ctrl+K)">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid MinWidth="220">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding Size}"
+                                                                   Foreground="{DynamicResource MutedBrush}"
+                                                                   FontSize="11" Margin="8,0,0,0"/>
+                                                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                                                   Text="{Binding FullPath}"
+                                                                   Foreground="{DynamicResource MutedBrush}"
+                                                                   FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource MutedBrush}"
+                                                   VerticalAlignment="Center" Margin="10,0,0,0"
+                                                   IsHitTestVisible="False"/>
+                                    </Grid>
+                                </Grid>
+
+                                <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                                    <TextBlock x:Name="SelectedTitleText" Text="No scan loaded"
+                                               Style="{StaticResource DisplayHeader}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="SelectedSubText" Text="Choose a path and scan."
+                                               Foreground="{DynamicResource MutedBrush}"
+                                               TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
                                 </StackPanel>
-                                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="8,0">
-                                    <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal"/>
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <Button Content="{Binding Name}" Tag="{Binding}" Click="Breadcrumb_Click" Padding="6,2" MinHeight="24" Margin="0"/>
-                                                    <TextBlock Text=">" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="5,0"/>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </ScrollViewer>
-                                <ComboBox x:Name="JumpBox" Grid.Column="2" IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True" KeyUp="JumpBox_KeyUp" SelectionChanged="JumpBox_SelectionChanged" ToolTip="Jump to folder">
-                                    <ComboBox.ItemTemplate>
+
+                                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SegmentedGroup}"
+                                        VerticalAlignment="Top" Margin="0,12,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="ViewContents" Content="Contents" Tag="Contents"
+                                                     GroupName="ViewMode" IsChecked="True" Click="ViewMode_Click"/>
+                                        <RadioButton x:Name="ViewLargestFiles" Content="Largest files" Tag="LargestFiles"
+                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
+                                        <RadioButton x:Name="ViewLargestFolders" Content="Largest folders" Tag="LargestFolders"
+                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
+                                        <RadioButton x:Name="ViewExtensions" Content="Extensions" Tag="Extensions"
+                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Filter bar -->
+                        <Border DockPanel.Dock="Top"
+                                Background="{DynamicResource SurfaceRaised}"
+                                BorderBrush="{DynamicResource Border}"
+                                BorderThickness="0,0,0,1"
+                                Padding="14,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid>
+                                    <TextBox x:Name="FilterBox" Padding="32,6,28,6"
+                                             TextChanged="FilterBox_TextChanged"
+                                             KeyDown="FilterBox_KeyDown"
+                                             ToolTip="Filter rows by name or path (Ctrl+F)"/>
+                                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}"
+                                               FontSize="13" Foreground="{DynamicResource MutedBrush}"
+                                               VerticalAlignment="Center" Margin="11,0,0,0"
+                                               IsHitTestVisible="False"/>
+                                    <TextBlock x:Name="FilterPlaceholder" Text="Filter rows by name or path..."
+                                               Foreground="{DynamicResource DisabledTextBrush}"
+                                               VerticalAlignment="Center" Margin="36,0,0,0"
+                                               IsHitTestVisible="False"/>
+                                    <Button x:Name="FilterClearButton" Style="{StaticResource IconButton}"
+                                            Content="&#xE711;" Width="24" Visibility="Collapsed"
+                                            HorizontalAlignment="Right" Margin="0,0,2,0"
+                                            Click="FilterClear_Click" ToolTip="Clear filter (Esc)"/>
+                                </Grid>
+                                <TextBlock Grid.Column="1" x:Name="FilterCountText"
+                                           Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                                           VerticalAlignment="Center" Margin="12,0,0,0"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Data grid -->
+                        <DataGrid x:Name="DetailsGrid"
+                                  ItemsSource="{Binding DetailRowsView}"
+                                  MouseDoubleClick="DetailsGrid_MouseDoubleClick"
+                                  PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown"
+                                  PreviewKeyDown="DetailsGrid_PreviewKeyDown">
+                            <DataGrid.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Open" Click="OpenSelected_Click"/>
+                                    <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
+                                    <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
+                                    <MenuItem Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
+                                </ContextMenu>
+                            </DataGrid.ContextMenu>
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="" Width="36" CanUserSort="False">
+                                    <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
-                                            <Grid MinWidth="230">
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                </Grid.RowDefinitions>
+                                            <TextBlock Text="{Binding Icon}" FontFamily="{StaticResource IconFont}"
+                                                       FontSize="14" HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{Binding CategoryColor, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="4*"
+                                                    SortMemberPath="Name"/>
+                                <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="64"
+                                                    SortMemberPath="Kind"/>
+                                <DataGridTextColumn Header="Size" Binding="{Binding LogicalSize}" Width="92"
+                                                    SortMemberPath="Entry.LogicalSizeBytes"/>
+                                <DataGridTemplateColumn Header="Share" Width="130" SortMemberPath="Percent">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Grid VerticalAlignment="Center">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="46"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
-                                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding FullPath}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                <ProgressBar Height="6" Maximum="100" Value="{Binding Percent}"
+                                                             Foreground="{Binding CategoryColor, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                             VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding PercentText}"
+                                                           HorizontalAlignment="Right"
+                                                           Foreground="{DynamicResource MutedBrush}"
+                                                           FontSize="11.5"/>
                                             </Grid>
                                         </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
-                            </Grid>
-                            <TextBlock Grid.Row="1" x:Name="SelectedTitleText" Text="No scan loaded" FontWeight="SemiBold" FontSize="18" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" Margin="0,8,0,0"/>
-                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
-                                <Button Content="Contents" Tag="Contents" Click="ViewMode_Click"/>
-                                <Button Content="Largest Files" Tag="LargestFiles" Click="ViewMode_Click"/>
-                                <Button Content="Largest Folders" Tag="LargestFolders" Click="ViewMode_Click"/>
-                                <Button Content="Extensions" Tag="Extensions" Click="ViewMode_Click"/>
-                            </StackPanel>
-                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" x:Name="SelectedSubText" Text="Choose a path and scan." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-                        </Grid>
-                    </Border>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="92"
+                                                    SortMemberPath="Entry.AllocatedSizeBytes"/>
+                                <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="68"
+                                                    SortMemberPath="FileCount"/>
+                                <DataGridTextColumn Header="Folders" Binding="{Binding DirectoryCount}" Width="72"
+                                                    SortMemberPath="DirectoryCount"/>
+                                <DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*"
+                                                    SortMemberPath="FullPath"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
 
-                    <DataGrid x:Name="DetailsGrid" ItemsSource="{Binding DetailRows}" MouseDoubleClick="DetailsGrid_MouseDoubleClick" PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown">
-                        <DataGrid.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="Open" Click="OpenSelected_Click"/>
-                                <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
-                                <Separator/>
-                                <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
-                                <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
-                                <MenuItem Header="Export Selection CSV" Click="ExportSelectionCsv_Click"/>
-                                <Separator/>
-                                <MenuItem Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
-                            </ContextMenu>
-                        </DataGrid.ContextMenu>
-                        <DataGrid.Columns>
-                            <DataGridTemplateColumn Header="" Width="34">
-                                <DataGridTemplateColumn.CellTemplate>
+                    <!-- Empty state -->
+                    <Grid x:Name="EmptyStateHost" Background="{DynamicResource SurfaceRaised}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="540">
+                            <Border Width="64" Height="64" CornerRadius="14"
+                                    Background="{DynamicResource AccentSubtle}"
+                                    HorizontalAlignment="Center">
+                                <TextBlock Text="&#xE8B7;" FontFamily="{StaticResource IconFont}"
+                                           FontSize="32" Foreground="{DynamicResource AccentBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="Scan a folder to get started"
+                                       Style="{StaticResource DisplayHeader}"
+                                       HorizontalAlignment="Center" Margin="0,20,0,4"/>
+                            <TextBlock Text="Pick a drive or folder, then press Scan. You can also drag a folder onto this window."
+                                       Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                                       TextAlignment="Center" Margin="20,0,20,18"/>
+                            <ItemsControl x:Name="EmptyStateDrives" Margin="0,0,0,18">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel HorizontalAlignment="Center"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding Icon}" FontFamily="Segoe MDL2 Assets" FontSize="14" HorizontalAlignment="Center"/>
+                                        <Button Click="EmptyStateDrive_Click" Tag="{Binding RootPath}"
+                                                Margin="4" Padding="14,8">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xEDA2;" FontFamily="{StaticResource IconFont}"
+                                                           FontSize="14"
+                                                           Foreground="{DynamicResource AccentBrush}"
+                                                           VerticalAlignment="Center"/>
+                                                <StackPanel Margin="10,0,0,0">
+                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding UsedText}"
+                                                               Foreground="{DynamicResource MutedBrush}" FontSize="10.5"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Button>
                                     </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2.4*"/>
-                            <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="90"/>
-                            <DataGridTextColumn Header="Size" Binding="{Binding LogicalSize}" Width="110"/>
-                            <DataGridTemplateColumn Header="Share" Width="150">
-                                <DataGridTemplateColumn.CellTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Button Click="OpenScan_Click" Margin="4">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE8E5;" FontFamily="{StaticResource IconFont}"
+                                                   FontSize="12" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Open saved scan"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Click="ShowShortcuts_Click" Margin="4">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE765;" FontFamily="{StaticResource IconFont}"
+                                                   FontSize="12" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Keyboard shortcuts"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Loading skeleton -->
+                    <Grid x:Name="LoadingHost" Background="{DynamicResource SurfaceRaised}" Visibility="Collapsed">
+                        <StackPanel VerticalAlignment="Top" Margin="14,14">
+                            <TextBlock Text="Scanning..." Style="{StaticResource DisplayHeader}"/>
+                            <TextBlock x:Name="LoadingPathText" Foreground="{DynamicResource MutedBrush}"
+                                       FontSize="11.5" Margin="0,4,0,16"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <ItemsControl x:Name="SkeletonRows">
+                                <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="48"/>
-                                            </Grid.ColumnDefinitions>
-                                            <ProgressBar Height="8" Maximum="100" Value="{Binding Percent}" Foreground="{StaticResource AccentBrush}" Background="#e2e8f0" BorderThickness="0" VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding PercentText}" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}"/>
-                                        </Grid>
+                                        <Border Height="28" Margin="0,2"
+                                                CornerRadius="4"
+                                                Background="{DynamicResource SurfaceSubtle}"
+                                                Opacity="{Binding}"/>
                                     </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="110"/>
-                            <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="86"/>
-                            <DataGridTextColumn Header="Folders" Binding="{Binding DirectoryCount}" Width="86"/>
-                            <DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </DockPanel>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Shortcut overlay -->
+                    <Grid x:Name="ShortcutOverlay" Background="{DynamicResource OverlayScrim}"
+                          Visibility="Collapsed" MouseDown="ShortcutOverlay_MouseDown">
+                        <Border Style="{StaticResource Panel}" MaxWidth="520"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Padding="20" CornerRadius="10">
+                            <StackPanel>
+                                <TextBlock Text="Keyboard shortcuts" Style="{StaticResource DisplayHeader}" Margin="0,0,0,12"/>
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Row="0" Text="Ctrl+O" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Open saved scan" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="1" Text="Ctrl+S" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="Save current scan" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="2" Text="Ctrl+E" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Export CSV" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="3" Text="Ctrl+L" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Focus path box" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="4" Text="Ctrl+F" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Filter rows" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="5" Text="Ctrl+K" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Jump to folder" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="6" Text="Ctrl+T" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="6" Grid.Column="1" Text="Toggle theme" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="7" Text="F5" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="7" Grid.Column="1" Text="Re-scan current path" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="8" Text="Esc" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="8" Grid.Column="1" Text="Stop scan / clear filter / close dialog" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="9" Text="Alt+Left / Right" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="9" Grid.Column="1" Text="Back / forward" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="10" Text="Alt+Up / Backspace" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="10" Grid.Column="1" Text="Up one folder" Foreground="{DynamicResource MutedStrong}"/>
+                                    <TextBlock Grid.Row="11" Text="Enter" FontFamily="Consolas"/>
+                                    <TextBlock Grid.Row="11" Grid.Column="1" Text="Open / drill into selected row" Foreground="{DynamicResource MutedStrong}"/>
+                                </Grid>
+                                <Button HorizontalAlignment="Right" Margin="0,16,0,0"
+                                        Style="{StaticResource AccentButton}"
+                                        Content="Got it" Click="ShortcutClose_Click"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Toast container -->
+                    <StackPanel x:Name="ToastHost" VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                                Margin="14" IsHitTestVisible="True"/>
+                </Grid>
             </Border>
 
-            <GridSplitter Grid.Column="3" Width="10" HorizontalAlignment="Stretch" Background="#dbe3ec"/>
+            <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch"/>
 
-            <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
+            <!-- RIGHT PANEL -->
+            <Border x:Name="RightPanel" Grid.Column="4" Style="{StaticResource Panel}">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Summary" FontWeight="SemiBold" FontSize="14" Margin="10,8"/>
-                    <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding SummaryMetrics}" Margin="8,0,8,8">
+                    <Grid DockPanel.Dock="Top" Margin="14,12,14,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource SectionHeader}" Text="SUMMARY" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                                Content="&#xE89F;" Width="24"
+                                Click="CollapseRight_Click" ToolTip="Collapse panel"/>
+                    </Grid>
+                    <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding SummaryMetrics}" Margin="11,4,11,8">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <UniformGrid Columns="2"/>
@@ -288,18 +606,23 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border BorderBrush="#e2e8f0" BorderThickness="1" Padding="8" Margin="3" Background="#f8fafc">
+                                <Border Style="{StaticResource Tile}">
                                     <StackPanel>
-                                        <TextBlock Text="{Binding Label}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
-                                        <TextBlock Text="{Binding Value}" FontWeight="SemiBold" FontSize="16" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Style="{StaticResource TileLabel}" Text="{Binding Label}"/>
+                                        <TextBlock Style="{StaticResource TileValue}" Text="{Binding Value}"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                        <TextBlock Style="{StaticResource TileDetail}" Text="{Binding Detail}"
+                                                   TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <Border DockPanel.Dock="Top" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,1,0,0" Margin="8,2,8,0" Padding="0,8,0,0">
+                    <Border DockPanel.Dock="Top"
+                            BorderBrush="{DynamicResource Divider}"
+                            BorderThickness="0,1,0,0"
+                            Margin="14,4,14,0" Padding="0,12,0,0">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -310,49 +633,85 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="ChartTitleText" Text="Disk Distribution" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <RadioButton x:Name="PieChartModeButton" Content="Pie" GroupName="ChartMode" Tag="Pie" IsChecked="True" Click="ChartMode_Click" Margin="0,0,8,0"/>
-                                <RadioButton Content="Bars" GroupName="ChartMode" Tag="Bars" Click="ChartMode_Click"/>
-                            </StackPanel>
-                            <TextBlock x:Name="ChartTotalText" Grid.Row="1" Grid.ColumnSpan="2" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,2,0,6" Text="Run a scan to render chart data." TextTrimming="CharacterEllipsis"/>
-                            <ComboBox x:Name="ChartScopeBox" Grid.Row="2" Grid.ColumnSpan="2" SelectionChanged="ChartScope_SelectionChanged">
-                                <ComboBoxItem Content="Selected Folder" Tag="SelectedFolder"/>
-                                <ComboBoxItem Content="Largest Folders" Tag="LargestFolders"/>
-                                <ComboBoxItem Content="Largest Files" Tag="LargestFiles"/>
+                            <TextBlock x:Name="ChartTitleText" Text="Disk distribution"
+                                       FontWeight="SemiBold" FontSize="13"
+                                       Foreground="{DynamicResource TextStrong}"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
+                            <Border Grid.Column="1" Style="{StaticResource SegmentedGroup}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="TreemapChartModeButton" Content="Treemap" Tag="Treemap"
+                                                 GroupName="ChartMode" IsChecked="True" Click="ChartMode_Click"/>
+                                    <RadioButton x:Name="PieChartModeButton" Content="Pie" Tag="Pie"
+                                                 GroupName="ChartMode" Click="ChartMode_Click"/>
+                                    <RadioButton x:Name="BarsChartModeButton" Content="Bars" Tag="Bars"
+                                                 GroupName="ChartMode" Click="ChartMode_Click"/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="ChartTotalText" Grid.Row="1" Grid.ColumnSpan="2"
+                                       Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                                       Margin="0,4,0,8" Text="Run a scan to render chart data."
+                                       TextTrimming="CharacterEllipsis"/>
+                            <ComboBox x:Name="ChartScopeBox" Grid.Row="2" Grid.ColumnSpan="2"
+                                      SelectionChanged="ChartScope_SelectionChanged">
+                                <ComboBoxItem Content="Selected folder" Tag="SelectedFolder"/>
+                                <ComboBoxItem Content="Largest folders" Tag="LargestFolders"/>
+                                <ComboBoxItem Content="Largest files" Tag="LargestFiles"/>
                                 <ComboBoxItem Content="Extensions" Tag="Extensions"/>
                             </ComboBox>
                         </Grid>
                     </Border>
 
-                    <TextBlock x:Name="ChartSelectionText" DockPanel.Dock="Bottom" Text="Select a chart slice to locate it in the grid." Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="10,6" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ChartSelectionText" DockPanel.Dock="Bottom"
+                               Text="Select a slice to locate it in the grid."
+                               Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                               Margin="14,8,14,12" TextWrapping="Wrap"/>
 
-                    <Grid Margin="8,8,8,0">
-                        <Grid x:Name="PieHost" MinHeight="240">
+                    <Grid Margin="11,10,11,0">
+                        <Grid x:Name="TreemapHost">
+                            <controls:TreemapControl x:Name="Treemap"
+                                                     Slices="{Binding ChartSlices}"
+                                                     SliceSelected="Chart_SliceSelected"
+                                                     SliceDoubleClicked="Chart_SliceDoubleClicked"/>
+                        </Grid>
+                        <Grid x:Name="PieHost" Visibility="Collapsed">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="230"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <controls:PieChartControl x:Name="PieChart" Slices="{Binding ChartSlices}" SliceSelected="PieChart_SliceSelected" SliceDoubleClicked="PieChart_SliceDoubleClicked"/>
-                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="190" Margin="0,8,0,0">
+                            <controls:PieChartControl x:Name="PieChart"
+                                                      Slices="{Binding ChartSlices}"
+                                                      SliceSelected="Chart_SliceSelected"
+                                                      SliceDoubleClicked="Chart_SliceDoubleClicked"/>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="220" Margin="0,6,0,0">
                                 <ItemsControl ItemsSource="{Binding ChartSlices}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Padding="4" Margin="0,1" BorderBrush="#e2e8f0" BorderThickness="0,0,0,1">
+                                            <Border Padding="4" Margin="0,1"
+                                                    BorderBrush="{DynamicResource Divider}"
+                                                    BorderThickness="0,0,0,1">
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="12"/>
+                                                        <ColumnDefinition Width="14"/>
                                                         <ColumnDefinition Width="*"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <Border Width="9" Height="9" Background="{Binding Color}" VerticalAlignment="Center"/>
+                                                    <Border Width="10" Height="10" CornerRadius="2"
+                                                            Background="{Binding Color, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                            VerticalAlignment="Center"/>
                                                     <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="11" TextTrimming="CharacterEllipsis"/>
-                                                        <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
+                                                                   FontSize="11.5" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Detail}"
+                                                                   Foreground="{DynamicResource MutedBrush}"
+                                                                   FontSize="10.5" TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="2" Margin="8,0,0,0" HorizontalAlignment="Right">
-                                                        <TextBlock Text="{Binding FormattedSize}" FontSize="11" HorizontalAlignment="Right"/>
-                                                        <TextBlock Text="{Binding PercentText}" Foreground="{StaticResource MutedBrush}" FontSize="10" HorizontalAlignment="Right"/>
+                                                        <TextBlock Text="{Binding FormattedSize}" FontSize="11.5"
+                                                                   HorizontalAlignment="Right"/>
+                                                        <TextBlock Text="{Binding PercentText}"
+                                                                   Foreground="{DynamicResource MutedBrush}"
+                                                                   FontSize="10.5" HorizontalAlignment="Right"/>
                                                     </StackPanel>
                                                 </Grid>
                                             </Border>
@@ -363,25 +722,39 @@
                         </Grid>
 
                         <Grid x:Name="BarHost" Visibility="Collapsed">
-                            <ListBox x:Name="ChartBars" ItemsSource="{Binding ChartSlices}" SelectionChanged="ChartBars_SelectionChanged" MouseDoubleClick="ChartBars_MouseDoubleClick" BorderThickness="0">
+                            <ListBox x:Name="ChartBars" ItemsSource="{Binding ChartSlices}"
+                                     SelectionChanged="ChartBars_SelectionChanged"
+                                     MouseDoubleClick="ChartBars_MouseDoubleClick">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Padding="5" Margin="0,1" BorderBrush="#e2e8f0" BorderThickness="0,0,0,1">
+                                        <Border Padding="6" Margin="0,1"
+                                                BorderBrush="{DynamicResource Divider}"
+                                                BorderThickness="0,0,0,1">
                                             <Grid>
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto"/>
                                                     <RowDefinition Height="Auto"/>
                                                 </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="10"/>
+                                                    <ColumnDefinition Width="14"/>
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <Border Width="8" Height="18" Background="{Binding Color}" VerticalAlignment="Center"/>
-                                                <TextBlock Grid.Column="1" Text="{Binding Label}" FontWeight="SemiBold" Margin="8,0,0,0" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Grid.Column="2" Text="{Binding FormattedSize}" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
-                                                <ProgressBar Grid.Row="1" Grid.Column="1" Height="7" Maximum="100" Value="{Binding Percent}" Foreground="{Binding Color}" Background="#e2e8f0" BorderThickness="0" Margin="8,5,0,0"/>
-                                                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding PercentText}" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                                <Border Width="10" Height="20" CornerRadius="3"
+                                                        Background="{Binding Color, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                        VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                                           FontWeight="SemiBold" Margin="10,0,0,0"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2" Text="{Binding FormattedSize}"
+                                                           Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/>
+                                                <ProgressBar Grid.Row="1" Grid.Column="1" Height="6"
+                                                             Maximum="100" Value="{Binding Percent}"
+                                                             Foreground="{Binding Color, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                             Margin="10,5,0,2"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding PercentText}"
+                                                           Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"
+                                                           FontSize="11" VerticalAlignment="Center"/>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -390,6 +763,17 @@
                         </Grid>
                     </Grid>
                 </DockPanel>
+            </Border>
+
+            <Border x:Name="RightPanelTab" Grid.Column="4"
+                    Background="{DynamicResource SurfaceRaised}"
+                    BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                    CornerRadius="8" Width="32"
+                    HorizontalAlignment="Right"
+                    Visibility="Collapsed">
+                <Button Style="{StaticResource IconButton}" Content="&#xE89E;"
+                        Click="ExpandRight_Click" VerticalAlignment="Top" Margin="0,8,0,0"
+                        ToolTip="Show summary panel"/>
             </Border>
         </Grid>
     </DockPanel>

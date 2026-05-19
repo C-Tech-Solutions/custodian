@@ -30,9 +30,10 @@ public sealed record ExtensionDetailRow(
             FileCount = summary.FileCount,
             Extension = summary.Extension
         };
+        var category = FileCategoryClassifier.ClassifyExtension(summary.Extension);
 
         return new DetailRow(
-            "\uE8A5",
+            FileCategoryClassifier.Glyph(category),
             name,
             "Extension",
             SizeFormatter.Format(summary.LogicalSizeBytes),
@@ -43,6 +44,8 @@ public sealed record ExtensionDetailRow(
             name,
             percent,
             percent.ToString("0.0") + "%",
+            category,
+            FileCategoryClassifier.DefaultColor(category),
             entry);
     }
 }

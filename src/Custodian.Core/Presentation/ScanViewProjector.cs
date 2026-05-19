@@ -266,6 +266,7 @@ public static class ScanViewProjector
         var detail = entry.IsDirectory
             ? $"{entry.FileCount:n0} files, {entry.DirectoryCount:n0} folders"
             : string.IsNullOrWhiteSpace(entry.Extension) ? "No extension" : entry.Extension;
+        var category = FileCategoryClassifier.Classify(entry);
 
         return new ChartSlice(
             label,
@@ -274,17 +275,20 @@ public static class ScanViewProjector
             entry.LogicalSizeBytes,
             percent,
             percent.ToString("0.0") + "%",
-            ColorAt(index),
+            // Folders get rotating palette colors (no inherent category); files get category color.
+            entry.IsDirectory ? ColorAt(index) : FileCategoryClassifier.DefaultColor(category),
             ChartSliceKind.Entry,
             entry.FullPath,
             entry,
             ShortLabel(label),
-            ShouldShowCallout(ChartSliceKind.Entry, percent));
+            ShouldShowCallout(ChartSliceKind.Entry, percent),
+            category);
     }
 
     private static ChartSlice ExtensionSlice(ExtensionSummary summary, long totalBytes, int index)
     {
         var percent = Percent(summary.LogicalSizeBytes, totalBytes);
+        var category = FileCategoryClassifier.ClassifyExtension(summary.Extension);
         return new ChartSlice(
             summary.Extension,
             $"{summary.FileCount:n0} files",
@@ -292,12 +296,13 @@ public static class ScanViewProjector
             summary.LogicalSizeBytes,
             percent,
             percent.ToString("0.0") + "%",
-            ColorAt(index),
+            FileCategoryClassifier.DefaultColor(category),
             ChartSliceKind.Extension,
             summary.Extension,
             null,
             ShortLabel(summary.Extension),
-            ShouldShowCallout(ChartSliceKind.Extension, percent));
+            ShouldShowCallout(ChartSliceKind.Extension, percent),
+            category);
     }
 
     private static ChartSlice OtherSlice(long bytes, long totalBytes, string label)
@@ -315,7 +320,8 @@ public static class ScanViewProjector
             "other",
             null,
             ShortLabel(label),
-            false);
+            false,
+            FileCategory.Other);
     }
 
     private static string ColorAt(int index)
