@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
@@ -28,7 +29,7 @@ public sealed class TreemapControl : FrameworkElement
         nameof(Slices),
         typeof(IEnumerable),
         typeof(TreemapControl),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnSlicesChanged));
 
     public static readonly DependencyProperty SelectedSliceProperty = DependencyProperty.Register(
         nameof(SelectedSlice),
@@ -39,7 +40,11 @@ public sealed class TreemapControl : FrameworkElement
     private static readonly WpfFontFamily LabelFontFamily = new("Segoe UI Variable Text, Segoe UI");
     private static readonly Typeface LabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldLabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+    private static readonly LinearGradientBrush TileHighlightBrush = CreateTileHighlightBrush();
     private readonly List<RenderedTile> _tiles = [];
+    private readonly List<ChartSlice> _slices = [];
+    private INotifyCollectionChanged? _sliceNotifications;
+    private double _totalBytes;
 
     public IEnumerable? Slices
     {
@@ -61,6 +66,56 @@ public sealed class TreemapControl : FrameworkElement
         FocusableProperty.OverrideMetadata(typeof(TreemapControl), new FrameworkPropertyMetadata(true));
     }
 
+    private static void OnSlicesChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
+    {
+        ((TreemapControl)source).SetSliceSource(e.NewValue as IEnumerable);
+    }
+
+    private void SetSliceSource(IEnumerable? slices)
+    {
+        if (_sliceNotifications is not null)
+        {
+            _sliceNotifications.CollectionChanged -= Slices_CollectionChanged;
+        }
+
+        _sliceNotifications = slices as INotifyCollectionChanged;
+        if (_sliceNotifications is not null)
+        {
+            _sliceNotifications.CollectionChanged += Slices_CollectionChanged;
+        }
+
+        RefreshSliceCache(slices);
+    }
+
+    private void Slices_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RefreshSliceCache(Slices);
+        InvalidateVisual();
+    }
+
+    private void RefreshSliceCache(IEnumerable? slices)
+    {
+        _slices.Clear();
+        _totalBytes = 0;
+        if (slices is null)
+        {
+            return;
+        }
+
+        foreach (var slice in slices.OfType<ChartSlice>())
+        {
+            if (slice.RawBytes <= 0)
+            {
+                continue;
+            }
+
+            _slices.Add(slice);
+            _totalBytes += slice.RawBytes;
+        }
+
+        _slices.Sort(static (left, right) => right.RawBytes.CompareTo(left.RawBytes));
+    }
+
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
@@ -77,8 +132,7 @@ public sealed class TreemapControl : FrameworkElement
         var bg = (WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.Transparent;
         drawingContext.DrawRectangle(bg, null, new Rect(0, 0, width, height));
 
-        var slices = (Slices?.OfType<ChartSlice>() ?? []).Where(s => s.RawBytes > 0).ToList();
-        if (slices.Count == 0)
+        if (_slices.Count == 0 || _totalBytes <= 0)
         {
             DrawEmptyState(drawingContext, width, height);
             return;
@@ -86,9 +140,7 @@ public sealed class TreemapControl : FrameworkElement
 
         // Squarified treemap layout.
         var bounds = new Rect(0, 0, width, height);
-        var total = slices.Sum(s => (double)s.RawBytes);
-        var sorted = slices.OrderByDescending(s => s.RawBytes).ToList();
-        Squarify(sorted, bounds, total);
+        Squarify(_slices, bounds, _totalBytes);
 
         foreach (var tile in _tiles)
         {
@@ -147,7 +199,12 @@ public sealed class TreemapControl : FrameworkElement
         }
 
         var scale = (rect.Width * rect.Height) / total;
-        var remaining = children.Select(c => (slice: c, area: c.RawBytes * scale)).ToList();
+        var remaining = new List<(ChartSlice slice, double area)>(children.Count);
+        foreach (var child in children)
+        {
+            remaining.Add((child, child.RawBytes * scale));
+        }
+
         Layout(remaining, rect);
     }
 
@@ -181,9 +238,16 @@ public sealed class TreemapControl : FrameworkElement
     private static double Worst(IReadOnlyList<(ChartSlice slice, double area)> row, double shortSide)
     {
         if (row.Count == 0) return double.PositiveInfinity;
-        var sum = row.Sum(r => r.area);
-        var max = row.Max(r => r.area);
-        var min = row.Min(r => r.area);
+        var sum = 0.0;
+        var max = double.MinValue;
+        var min = double.MaxValue;
+        foreach (var item in row)
+        {
+            sum += item.area;
+            max = Math.Max(max, item.area);
+            min = Math.Min(min, item.area);
+        }
+
         var s2 = shortSide * shortSide;
         var sum2 = sum * sum;
         return Math.Max(s2 * max / sum2, sum2 / (s2 * min));
@@ -191,7 +255,12 @@ public sealed class TreemapControl : FrameworkElement
 
     private Rect PlaceRow(IReadOnlyList<(ChartSlice slice, double area)> row, Rect rect)
     {
-        var sum = row.Sum(r => r.area);
+        var sum = 0.0;
+        foreach (var item in row)
+        {
+            sum += item.area;
+        }
+
         if (sum <= 0) return rect;
 
         if (rect.Width >= rect.Height)
@@ -243,12 +312,7 @@ public sealed class TreemapControl : FrameworkElement
         if (rect.Height > 16 && rect.Width > 16)
         {
             var highlightHeight = Math.Min(rect.Height * 0.18, 14);
-            var highlight = new LinearGradientBrush(
-                WpfColor.FromArgb(48, 255, 255, 255),
-                WpfColor.FromArgb(0, 255, 255, 255),
-                new WpfPoint(0, 0), new WpfPoint(0, 1));
-            highlight.Freeze();
-            dc.DrawRectangle(highlight, null, new Rect(rect.X, rect.Y, rect.Width, highlightHeight));
+            dc.DrawRectangle(TileHighlightBrush, null, new Rect(rect.X, rect.Y, rect.Width, highlightHeight));
         }
 
         // Selection ring
@@ -382,6 +446,17 @@ public sealed class TreemapControl : FrameworkElement
         var w = Math.Max(0, r.Width - by * 2);
         var h = Math.Max(0, r.Height - by * 2);
         return new Rect(x, y, w, h);
+    }
+
+    private static LinearGradientBrush CreateTileHighlightBrush()
+    {
+        var brush = new LinearGradientBrush(
+            WpfColor.FromArgb(48, 255, 255, 255),
+            WpfColor.FromArgb(0, 255, 255, 255),
+            new WpfPoint(0, 0),
+            new WpfPoint(0, 1));
+        brush.Freeze();
+        return brush;
     }
 
     private sealed record RenderedTile(ChartSlice Slice, Rect Bounds);

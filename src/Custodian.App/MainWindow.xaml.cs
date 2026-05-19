@@ -49,7 +49,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _suppressJumpSelection;
     private readonly Stack<FileSystemEntry> _backStack = new();
     private readonly Stack<FileSystemEntry> _forwardStack = new();
-    private readonly Dictionary<string, FileSystemEntry> _parentByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly UiSettings _settings;
     private DispatcherTimer? _scanProgressTimer;
     private DateTime _scanStarted;
@@ -776,7 +775,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         FolderNodes.Clear();
         FolderNodes.Add(FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)));
-        RebuildNavigationIndex(result.Root);
         _folderJumpIndex = ScanViewProjector.FolderJumpIndex(result.Root);
         _backStack.Clear();
         _forwardStack.Clear();
@@ -981,21 +979,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void RebuildNavigationIndex(FileSystemEntry root)
-    {
-        _parentByPath.Clear();
-        foreach (var child in root.Children.Where(c => c.IsDirectory)) IndexParent(root, child);
-    }
-
-    private void IndexParent(FileSystemEntry parent, FileSystemEntry entry)
-    {
-        _parentByPath[entry.FullPath] = parent;
-        foreach (var child in entry.Children.Where(c => c.IsDirectory)) IndexParent(entry, child);
-    }
-
     private bool TryGetParent(FileSystemEntry entry, out FileSystemEntry parent)
     {
-        if (_parentByPath.TryGetValue(entry.FullPath, out var value)) { parent = value; return true; }
+        var root = _currentScan?.Root;
+        if (root is null || string.Equals(root.FullPath, entry.FullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            parent = null!;
+            return false;
+        }
+
+        var normalized = entry.FullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parentPath = Path.GetDirectoryName(normalized);
+        if (!string.IsNullOrWhiteSpace(parentPath) && ScanViewProjector.TryFindDirectoryByPath(root, parentPath, out parent))
+        {
+            return true;
+        }
+
         parent = null!;
         return false;
     }
@@ -1024,7 +1023,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
         _folderJumpIndex = [];
-        _parentByPath.Clear();
         _backStack.Clear();
         _forwardStack.Clear();
         _selectedChartSourceKey = null;

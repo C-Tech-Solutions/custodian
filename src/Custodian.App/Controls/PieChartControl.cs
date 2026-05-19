@@ -1,10 +1,12 @@
 using System.Collections;
+using System.Collections.Specialized;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using Custodian.Core.Presentation;
+using WpfBrush = System.Windows.Media.Brush;
 using WpfColor = System.Windows.Media.Color;
-using WpfColorConverter = System.Windows.Media.ColorConverter;
 using WpfCursors = System.Windows.Input.Cursors;
 using WpfFontFamily = System.Windows.Media.FontFamily;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
@@ -20,7 +22,7 @@ public sealed class PieChartControl : FrameworkElement
         nameof(Slices),
         typeof(IEnumerable),
         typeof(PieChartControl),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnSlicesChanged));
 
     public static readonly DependencyProperty SelectedSliceProperty = DependencyProperty.Register(
         nameof(SelectedSlice),
@@ -31,6 +33,9 @@ public sealed class PieChartControl : FrameworkElement
     private static readonly Typeface NormalTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private readonly List<RenderedSlice> _renderedSlices = [];
+    private readonly List<ChartSlice> _slices = [];
+    private INotifyCollectionChanged? _sliceNotifications;
+    private long _totalBytes;
 
     public IEnumerable? Slices
     {
@@ -47,13 +52,60 @@ public sealed class PieChartControl : FrameworkElement
     public event EventHandler<ChartSliceEventArgs>? SliceSelected;
     public event EventHandler<ChartSliceEventArgs>? SliceDoubleClicked;
 
+    private static void OnSlicesChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
+    {
+        ((PieChartControl)source).SetSliceSource(e.NewValue as IEnumerable);
+    }
+
+    private void SetSliceSource(IEnumerable? slices)
+    {
+        if (_sliceNotifications is not null)
+        {
+            _sliceNotifications.CollectionChanged -= Slices_CollectionChanged;
+        }
+
+        _sliceNotifications = slices as INotifyCollectionChanged;
+        if (_sliceNotifications is not null)
+        {
+            _sliceNotifications.CollectionChanged += Slices_CollectionChanged;
+        }
+
+        RefreshSliceCache(slices);
+    }
+
+    private void Slices_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RefreshSliceCache(Slices);
+        InvalidateVisual();
+    }
+
+    private void RefreshSliceCache(IEnumerable? slices)
+    {
+        _slices.Clear();
+        _totalBytes = 0;
+        if (slices is null)
+        {
+            return;
+        }
+
+        foreach (var slice in slices.OfType<ChartSlice>())
+        {
+            if (slice.RawBytes <= 0)
+            {
+                continue;
+            }
+
+            _slices.Add(slice);
+            _totalBytes += slice.RawBytes;
+        }
+    }
+
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
         _renderedSlices.Clear();
 
-        var slices = Slices?.OfType<ChartSlice>().Where(slice => slice.RawBytes > 0).ToList() ?? [];
-        if (slices.Count == 0)
+        if (_slices.Count == 0 || _totalBytes <= 0)
         {
             DrawEmptyState(drawingContext);
             return;
@@ -68,25 +120,18 @@ public sealed class PieChartControl : FrameworkElement
 
         var innerRadius = radius * 0.58;
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
-        var total = slices.Sum(slice => slice.RawBytes);
         var startAngle = 0.0;
+        var separatorPen = CreatePen((WpfBrush?)TryFindResource("Border") ?? System.Windows.Media.Brushes.White, 1);
+        var selectedPen = CreatePen(System.Windows.Media.Brushes.White, 3);
 
-        foreach (var slice in slices)
+        foreach (var slice in _slices)
         {
-            var sweep = Math.Max(0.4, (double)slice.RawBytes / total * 360);
+            var sweep = Math.Max(0.4, (double)slice.RawBytes / _totalBytes * 360);
             var endAngle = startAngle + sweep;
-            var brush = new SolidColorBrush(ParseColor(slice.Color));
-            brush.Freeze();
+            var brush = ResolveBrush(slice.Color);
 
             var isSelected = SelectedSlice is not null && string.Equals(SelectedSlice.SourceKey, slice.SourceKey, StringComparison.Ordinal);
-            var pen = isSelected
-                ? new WpfPen(System.Windows.Media.Brushes.White, 3)
-                : new WpfPen(new SolidColorBrush(WpfColor.FromRgb(248, 250, 252)), 1);
-            if (pen.Brush.CanFreeze)
-            {
-                pen.Brush.Freeze();
-            }
-            pen.Freeze();
+            var pen = isSelected ? selectedPen : separatorPen;
 
             drawingContext.DrawGeometry(brush, pen, BuildSliceGeometry(center, radius, innerRadius, startAngle, endAngle));
             _renderedSlices.Add(new RenderedSlice(slice, startAngle, endAngle));
@@ -94,12 +139,15 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         drawingContext.DrawEllipse(System.Windows.Media.Brushes.White, null, center, innerRadius - 2, innerRadius - 2);
-        foreach (var rendered in _renderedSlices.Where(slice => slice.Slice.ShowCallout))
+        foreach (var rendered in _renderedSlices)
         {
-            DrawCallout(drawingContext, center, radius, rendered);
+            if (rendered.Slice.ShowCallout)
+            {
+                DrawCallout(drawingContext, center, radius, rendered);
+            }
         }
 
-        DrawCenterText(drawingContext, center, slices.Count);
+        DrawCenterText(drawingContext, center, _slices.Count);
     }
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
@@ -118,8 +166,6 @@ public sealed class PieChartControl : FrameworkElement
             SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice));
         }
 
-        CaptureMouse();
-        ReleaseMouseCapture();
     }
 
     protected override void OnMouseMove(WpfMouseEventArgs e)
@@ -182,18 +228,6 @@ public sealed class PieChartControl : FrameworkElement
         return new WpfPoint(
             center.X + radius * Math.Sin(radians),
             center.Y - radius * Math.Cos(radians));
-    }
-
-    private static WpfColor ParseColor(string color)
-    {
-        try
-        {
-            return (WpfColor)WpfColorConverter.ConvertFromString(color);
-        }
-        catch (FormatException)
-        {
-            return WpfColor.FromRgb(37, 99, 235);
-        }
     }
 
     private void DrawEmptyState(DrawingContext drawingContext)
@@ -262,6 +296,21 @@ public sealed class PieChartControl : FrameworkElement
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
         drawingContext.DrawText(formatted, new WpfPoint(center.X - formatted.Width / 2, center.Y - formatted.Height / 2));
+    }
+
+    private static WpfBrush ResolveBrush(string color)
+        => ColorStringToBrushConverter.Instance.Convert(color, typeof(WpfBrush), null, CultureInfo.InvariantCulture) as WpfBrush
+           ?? System.Windows.Media.Brushes.Transparent;
+
+    private static WpfPen CreatePen(WpfBrush brush, double thickness)
+    {
+        var pen = new WpfPen(brush, thickness);
+        if (pen.CanFreeze)
+        {
+            pen.Freeze();
+        }
+
+        return pen;
     }
 
     private sealed record RenderedSlice(ChartSlice Slice, double StartAngle, double EndAngle);

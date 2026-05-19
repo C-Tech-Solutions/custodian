@@ -147,13 +147,24 @@ public static class ScanViewProjector
 
     public static IReadOnlyList<BreadcrumbItem> Breadcrumb(FileSystemEntry root, FileSystemEntry selected)
     {
-        var path = new List<FileSystemEntry>();
-        if (!FindPath(root, selected, path))
+        if (!TryBuildPathBySegments(root, selected.FullPath, out var path))
         {
             return [];
         }
 
         return path.Select(entry => new BreadcrumbItem(DisplayName(entry), entry.FullPath, entry)).ToList();
+    }
+
+    public static bool TryFindDirectoryByPath(FileSystemEntry root, string fullPath, out FileSystemEntry entry)
+    {
+        if (TryBuildPathBySegments(root, fullPath, out var path) && path.Count > 0)
+        {
+            entry = path[^1];
+            return true;
+        }
+
+        entry = null!;
+        return false;
     }
 
     public static IReadOnlyList<FolderJumpRow> FolderJumpIndex(FileSystemEntry root)
@@ -351,24 +362,51 @@ public static class ScanViewProjector
         return -StringComparer.OrdinalIgnoreCase.Compare(left.FullPath, right.FullPath);
     }
 
-    private static bool FindPath(FileSystemEntry current, FileSystemEntry selected, List<FileSystemEntry> path)
+    private static bool TryBuildPathBySegments(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
     {
-        path.Add(current);
-        if (ReferenceEquals(current, selected) || string.Equals(current.FullPath, selected.FullPath, StringComparison.OrdinalIgnoreCase))
+        path = [];
+        if (!root.IsDirectory)
+        {
+            return false;
+        }
+
+        path.Add(root);
+        if (string.Equals(root.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        foreach (var child in current.Children.Where(child => child.IsDirectory))
+        var relativePath = Path.GetRelativePath(root.FullPath, fullPath);
+        if (relativePath == "." || Path.IsPathRooted(relativePath) || IsParentRelativePath(relativePath))
         {
-            if (FindPath(child, selected, path))
-            {
-                return true;
-            }
+            path.Clear();
+            return false;
         }
 
-        path.RemoveAt(path.Count - 1);
-        return false;
+        var current = root;
+        foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var next = current.Children.FirstOrDefault(child =>
+                child.IsDirectory &&
+                string.Equals(child.Name, segment, StringComparison.OrdinalIgnoreCase));
+            if (next is null)
+            {
+                path.Clear();
+                return false;
+            }
+
+            current = next;
+            path.Add(current);
+        }
+
+        return string.Equals(current.FullPath, fullPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsParentRelativePath(string relativePath)
+    {
+        return relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     private static string DisplayName(FileSystemEntry entry)
