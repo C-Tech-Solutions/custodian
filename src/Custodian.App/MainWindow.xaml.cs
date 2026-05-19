@@ -287,7 +287,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 progress,
                 _scanCts.Token);
 
-            LoadScanIntoUi(_currentScan);
+            await LoadScanIntoUiAsync(_currentScan);
             ShowToast($"Scan complete: {SizeFormatter.Format(_currentScan.Root.LogicalSizeBytes)} in {_currentScan.Duration:m\\:ss}");
         }
         catch (OperationCanceledException)
@@ -365,7 +365,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _currentScan = await _store.LoadAsync(dialog.FileName);
                 PathBox.Text = _currentScan.RootPath;
                 AddRecentPath(_currentScan.RootPath);
-                LoadScanIntoUi(_currentScan);
+                await LoadScanIntoUiAsync(_currentScan);
                 ShowToast($"Opened {Path.GetFileName(dialog.FileName)}");
             }
             catch (Exception ex)
@@ -769,13 +769,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     //  UI population
     // ============================================================
-    private void LoadScanIntoUi(ScanResult result)
+    private async Task LoadScanIntoUiAsync(ScanResult result)
     {
         var analysisWatch = Stopwatch.StartNew();
+        var prepared = await Task.Run(() => new ScanUiPreparation(
+            FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)),
+            ScanViewProjector.FolderJumpIndex(result.Root)));
 
         FolderNodes.Clear();
-        FolderNodes.Add(FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)));
-        _folderJumpIndex = ScanViewProjector.FolderJumpIndex(result.Root);
+        FolderNodes.Add(prepared.RootNode);
+        _folderJumpIndex = prepared.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
 
@@ -1305,6 +1308,8 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         }
     }
 }
+
+public sealed record ScanUiPreparation(FolderNode RootNode, IReadOnlyList<FolderJumpRow> FolderJumpIndex);
 
 public sealed record DriveRow(
     string Label, string RootPath, string UsedText, string FreeText, double UsedPercent);

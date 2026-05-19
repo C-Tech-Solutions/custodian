@@ -14,6 +14,7 @@ public sealed class ColorStringToBrushConverter : IValueConverter
 {
     public static readonly ColorStringToBrushConverter Instance = new();
 
+    private const int MaxCacheEntries = 256;
     private static readonly ConcurrentDictionary<string, WpfBrush> Cache = new(StringComparer.OrdinalIgnoreCase);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
@@ -21,6 +22,11 @@ public sealed class ColorStringToBrushConverter : IValueConverter
         if (value is not string color || string.IsNullOrWhiteSpace(color))
         {
             return WpfBrushes.Transparent;
+        }
+
+        if (Cache.Count > MaxCacheEntries)
+        {
+            Cache.Clear();
         }
 
         return Cache.GetOrAdd(color, key =>
