@@ -516,9 +516,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         NavigateToFolder(row.Entry);
     }
 
-    private async void ViewMode_Click(object sender, RoutedEventArgs e)
+    private void ViewMode_Click(object sender, RoutedEventArgs e)
     {
-        await RunUiActionAsync(async () =>
+        RunUiAction(async () =>
         {
             if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
             _viewMode = mode;
@@ -545,24 +545,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
-    private async void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
-        => await RunUiActionAsync(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false), "Chart selection failed");
+    private void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
+        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false), "Chart selection failed");
 
-    private async void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
-        => await RunUiActionAsync(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true), "Chart selection failed");
+    private void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
+        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true), "Chart selection failed");
 
-    private async void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        await RunUiActionAsync(async () =>
+        RunUiAction(async () =>
         {
             if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice) return;
             await SelectChartSliceAsync(slice, drillIntoFolders: false);
         }, "Chart selection failed");
     }
 
-    private async void ChartBars_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    private void ChartBars_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        await RunUiActionAsync(async () =>
+        RunUiAction(async () =>
         {
             if (ChartBars.SelectedItem is ChartSlice slice) await SelectChartSliceAsync(slice, drillIntoFolders: true);
         }, "Chart selection failed");
@@ -1129,7 +1129,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
-        => _ = RunUiActionAsync(() => NavigateToFolderAsync(entry, addHistory, clearForward), "Navigation failed");
+        => RunUiAction(() => NavigateToFolderAsync(entry, addHistory, clearForward), "Navigation failed");
 
     private async Task NavigateToFolderAsync(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
     {
@@ -1405,6 +1405,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ShowOperationError(string title, Exception ex)
     {
         WpfMessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private void RunUiAction(Func<Task> action, string title)
+    {
+        _ = RunUiActionAsync(action, title);
     }
 
     private async Task RunUiActionAsync(Func<Task> action, string title)
