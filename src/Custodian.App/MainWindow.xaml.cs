@@ -833,7 +833,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshNavigationState(selected, result.Root);
         RefreshChart();
 
-        PathBox.Text = selected.FullPath;
+        UpdatePathDisplay(selected.FullPath);
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
         SelectedSubText.Text = $"{ViewModeLabel(_viewMode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
     }
@@ -980,7 +980,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (selected is not null && root is not null)
         {
             ReplaceCollection(BreadcrumbItems, ScanViewProjector.Breadcrumb(root, selected));
+            ScrollBreadcrumbsToEnd();
         }
+    }
+
+    private void UpdatePathDisplay(string path)
+    {
+        PathBox.Text = path;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) is WpfTextBox textBox)
+            {
+                textBox.CaretIndex = textBox.Text.Length;
+                textBox.ScrollToEnd();
+            }
+        }), DispatcherPriority.ContextIdle);
+    }
+
+    private void ScrollBreadcrumbsToEnd()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            BreadcrumbScrollViewer.UpdateLayout();
+            BreadcrumbScrollViewer.ScrollToRightEnd();
+        }), DispatcherPriority.ContextIdle);
     }
 
     private bool TryGetParent(FileSystemEntry entry, out FileSystemEntry parent)

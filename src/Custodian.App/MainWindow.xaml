@@ -259,7 +259,7 @@
                                                 Click="Refresh_Click" Content="Rescan"
                                                 ToolTip="Scan the folder shown in the path box (F5)"/>
                                     </StackPanel>
-                                    <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
+                                    <ScrollViewer x:Name="BreadcrumbScrollViewer" Grid.Column="1" HorizontalScrollBarVisibility="Auto"
                                                   VerticalScrollBarVisibility="Disabled" Margin="10,0">
                                         <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
                                             <ItemsControl.ItemsPanel>
