@@ -905,13 +905,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            BeginGlobalDetailLoading(viewMode, selected);
+            var rowsTask = GetOrCreateGlobalDetailRowsTask(result, viewMode);
+            if (!rowsTask.IsCompleted)
+            {
+                BeginGlobalDetailLoading(viewMode, selected);
+            }
+
             try
             {
-                rows = await GetGlobalDetailRowsAsync(result, viewMode);
+                rows = await rowsTask;
             }
             catch (Exception ex)
             {
+                RemoveFaultedGlobalDetailRowsTask(viewMode, rowsTask);
                 if (IsCurrentDetailRequest(requestVersion, result, selected, viewMode))
                 {
                     DetailsGrid.IsEnabled = true;
@@ -951,7 +957,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SelectedSubText.Text = $"{ViewModeLabel(mode)} · loading rows...";
     }
 
-    private async Task<IReadOnlyList<DetailRow>> GetGlobalDetailRowsAsync(ScanResult result, DetailViewMode mode)
+    private Task<IReadOnlyList<DetailRow>> GetOrCreateGlobalDetailRowsTask(ScanResult result, DetailViewMode mode)
     {
         if (!_globalDetailRowsCache.TryGetValue(mode, out var task))
         {
@@ -959,18 +965,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _globalDetailRowsCache[mode] = task;
         }
 
-        try
-        {
-            return await task;
-        }
-        catch
-        {
-            if (_globalDetailRowsCache.TryGetValue(mode, out var cachedTask) && ReferenceEquals(cachedTask, task))
-            {
-                _globalDetailRowsCache.Remove(mode);
-            }
+        return task;
+    }
 
-            throw;
+    private void RemoveFaultedGlobalDetailRowsTask(DetailViewMode mode, Task<IReadOnlyList<DetailRow>> task)
+    {
+        if (_globalDetailRowsCache.TryGetValue(mode, out var cachedTask) && ReferenceEquals(cachedTask, task))
+        {
+            _globalDetailRowsCache.Remove(mode);
         }
     }
 
