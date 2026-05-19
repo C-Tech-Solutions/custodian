@@ -11,6 +11,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Assets\Custodian.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Custodian.ico" />
+    <Resource Include="Assets\CustodianIcon.png" />
+  </ItemGroup>
 
 </Project>

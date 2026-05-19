@@ -4,6 +4,7 @@
         xmlns:controls="clr-namespace:Custodian.App.Controls"
         xmlns:presentation="clr-namespace:Custodian.Core.Presentation;assembly=Custodian.Core"
         Title="Custodian Disk Analyzer"
+        Icon="Assets/Custodian.ico"
         Height="880" Width="1400" MinHeight="720" MinWidth="1120"
         Background="{DynamicResource Surface}"
         Foreground="{DynamicResource TextBrush}"
@@ -64,13 +65,10 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
-                    <Border Width="26" Height="26" CornerRadius="6"
-                            Background="{DynamicResource AccentBrush}"
-                            VerticalAlignment="Center">
-                        <TextBlock Text="C" Foreground="{DynamicResource OnAccentBrush}"
-                                   FontWeight="Bold" FontSize="14"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Image Width="28" Height="28"
+                           Source="Assets/CustodianIcon.png"
+                           Stretch="Uniform"
+                           VerticalAlignment="Center"/>
                     <TextBlock Text="Custodian"
                                FontFamily="{StaticResource UiFontDisplay}"
                                FontWeight="SemiBold" FontSize="15"
