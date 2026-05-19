@@ -130,6 +130,47 @@ public static class ScanViewProjector
         ];
     }
 
+    public static IReadOnlyList<SummaryMetric> SelectedSummaryMetrics(ScanResult result, FileSystemEntry selected)
+    {
+        var rootBytes = Math.Max(1, result.Root.LogicalSizeBytes);
+        var percent = Percent(selected.LogicalSizeBytes, rootBytes);
+        return
+        [
+            new("Logical", SizeFormatter.Format(selected.LogicalSizeBytes), "selected folder size"),
+            new("Allocated", SizeFormatter.Format(selected.AllocatedSizeBytes), "selected disk usage"),
+            new("Files", $"{selected.FileCount:n0}", "inside selected folder"),
+            new("Folders", $"{selected.DirectoryCount:n0}", "inside selected folder"),
+            new("Skipped", $"{result.SkippedEntries.Count:n0}", "scan-level skips"),
+            new("Root Share", percent.ToString("0.0") + "%", "of scanned root")
+        ];
+    }
+
+    public static IReadOnlyList<BreadcrumbItem> Breadcrumb(FileSystemEntry root, FileSystemEntry selected)
+    {
+        var path = new List<FileSystemEntry>();
+        if (!FindPath(root, selected, path))
+        {
+            return [];
+        }
+
+        return path.Select(entry => new BreadcrumbItem(DisplayName(entry), entry.FullPath, entry)).ToList();
+    }
+
+    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(FileSystemEntry root, string query, int take = 50)
+    {
+        var trimmed = query.Trim();
+        return root
+            .Flatten()
+            .Where(entry => entry.IsDirectory)
+            .Where(entry => string.IsNullOrWhiteSpace(trimmed)
+                || entry.Name.Contains(trimmed, StringComparison.OrdinalIgnoreCase)
+                || entry.FullPath.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(entry => entry.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Take(take)
+            .Select(FolderJumpRow.From)
+            .ToList();
+    }
+
     public static double Percent(long value, long total)
     {
         if (value <= 0 || total <= 0)
@@ -138,6 +179,26 @@ public static class ScanViewProjector
         }
 
         return Math.Min(100, (double)value / total * 100);
+    }
+
+    public static bool ShouldShowCallout(ChartSliceKind kind, double percent, double minimumPercent = 6)
+    {
+        return kind != ChartSliceKind.Other && percent >= minimumPercent;
+    }
+
+    public static string ShortLabel(string label, int maxLength = 16)
+    {
+        if (string.IsNullOrWhiteSpace(label) || label.Length <= maxLength)
+        {
+            return label;
+        }
+
+        if (maxLength <= 3)
+        {
+            return label[..maxLength];
+        }
+
+        return label[..(maxLength - 3)] + "...";
     }
 
     private static ChartDataset EntryChart(string title, IEnumerable<FileSystemEntry> entries, int take)
@@ -216,7 +277,9 @@ public static class ScanViewProjector
             ColorAt(index),
             ChartSliceKind.Entry,
             entry.FullPath,
-            entry);
+            entry,
+            ShortLabel(label),
+            ShouldShowCallout(ChartSliceKind.Entry, percent));
     }
 
     private static ChartSlice ExtensionSlice(ExtensionSummary summary, long totalBytes, int index)
@@ -232,7 +295,9 @@ public static class ScanViewProjector
             ColorAt(index),
             ChartSliceKind.Extension,
             summary.Extension,
-            null);
+            null,
+            ShortLabel(summary.Extension),
+            ShouldShowCallout(ChartSliceKind.Extension, percent));
     }
 
     private static ChartSlice OtherSlice(long bytes, long totalBytes, string label)
@@ -248,7 +313,9 @@ public static class ScanViewProjector
             "#94a3b8",
             ChartSliceKind.Other,
             "other",
-            null);
+            null,
+            ShortLabel(label),
+            false);
     }
 
     private static string ColorAt(int index)
@@ -265,5 +332,36 @@ public static class ScanViewProjector
         }
 
         return -StringComparer.OrdinalIgnoreCase.Compare(left.FullPath, right.FullPath);
+    }
+
+    private static bool FindPath(FileSystemEntry current, FileSystemEntry selected, List<FileSystemEntry> path)
+    {
+        path.Add(current);
+        if (ReferenceEquals(current, selected) || string.Equals(current.FullPath, selected.FullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var child in current.Children.Where(child => child.IsDirectory))
+        {
+            if (FindPath(child, selected, path))
+            {
+                return true;
+            }
+        }
+
+        path.RemoveAt(path.Count - 1);
+        return false;
+    }
+
+    private static string DisplayName(FileSystemEntry entry)
+    {
+        var root = Path.GetPathRoot(entry.FullPath);
+        if (!string.IsNullOrWhiteSpace(root) && string.Equals(root.TrimEnd('\\'), entry.FullPath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+        {
+            return entry.FullPath;
+        }
+
+        return string.IsNullOrWhiteSpace(entry.Name) ? entry.FullPath : entry.Name;
     }
 }

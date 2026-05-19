@@ -58,7 +58,7 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 10);
+        var radius = Math.Max(0, size / 2 - 40);
         if (radius <= 0)
         {
             return;
@@ -92,6 +92,11 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         drawingContext.DrawEllipse(System.Windows.Media.Brushes.White, null, center, innerRadius - 2, innerRadius - 2);
+        foreach (var rendered in _renderedSlices.Where(slice => slice.Slice.ShowCallout))
+        {
+            DrawCallout(drawingContext, center, radius, rendered);
+        }
+
         DrawCenterText(drawingContext, center, slices.Count);
     }
 
@@ -153,7 +158,7 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 10);
+        var radius = Math.Max(0, size / 2 - 40);
         var innerRadius = radius * 0.58;
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var dx = point.X - center.X;
@@ -201,6 +206,35 @@ public sealed class PieChartControl : FrameworkElement
     {
         DrawText(drawingContext, $"{count}", new WpfPoint(center.X, center.Y - 8), 20, FontWeights.SemiBold, WpfColor.FromRgb(15, 23, 42));
         DrawText(drawingContext, "items", new WpfPoint(center.X, center.Y + 14), 11, FontWeights.Normal, WpfColor.FromRgb(100, 116, 139));
+    }
+
+    private void DrawCallout(DrawingContext drawingContext, WpfPoint center, double radius, RenderedSlice rendered)
+    {
+        var midpoint = rendered.StartAngle + (rendered.EndAngle - rendered.StartAngle) / 2;
+        var lineStart = PointAt(center, radius + 2, midpoint);
+        var lineEnd = PointAt(center, radius + 18, midpoint);
+        var labelPoint = PointAt(center, radius + 24, midpoint);
+        var text = $"{rendered.Slice.ShortLabel} {rendered.Slice.PercentText}";
+        var color = WpfColor.FromRgb(51, 65, 85);
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        var pen = new WpfPen(brush, 1);
+        pen.Freeze();
+
+        drawingContext.DrawLine(pen, lineStart, lineEnd);
+
+        var formatted = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentCulture,
+            System.Windows.FlowDirection.LeftToRight,
+            new Typeface(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+            10,
+            brush,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+
+        var x = midpoint is > 180 and < 360 ? labelPoint.X - formatted.Width : labelPoint.X;
+        var y = labelPoint.Y - formatted.Height / 2;
+        drawingContext.DrawText(formatted, new WpfPoint(x, y));
     }
 
     private void DrawText(DrawingContext drawingContext, string text, WpfPoint center, double size, FontWeight weight, WpfColor color)

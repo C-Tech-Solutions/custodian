@@ -33,6 +33,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ChartDisplayMode _chartDisplayMode = ChartDisplayMode.Pie;
     private string? _selectedChartSourceKey;
     private bool _suppressChartSelection;
+    private bool _suppressJumpSelection;
+    private readonly Stack<FileSystemEntry> _backStack = new();
+    private readonly Stack<FileSystemEntry> _forwardStack = new();
+    private readonly Dictionary<string, FileSystemEntry> _parentByPath = new(StringComparer.OrdinalIgnoreCase);
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
@@ -40,12 +44,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
     public ObservableCollection<ChartSlice> ChartSlices { get; } = [];
     public ObservableCollection<SummaryMetric> SummaryMetrics { get; } = [];
+    public ObservableCollection<BreadcrumbItem> BreadcrumbItems { get; } = [];
+    public ObservableCollection<FolderJumpRow> FolderJumpRows { get; } = [];
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
         PathBox.ItemsSource = RecentPaths;
+        JumpBox.ItemsSource = FolderJumpRows;
         ChartScopeBox.SelectedIndex = 0;
         LoadDriveRows();
         PathBox.Text = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -223,10 +230,86 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (e.NewValue is FolderNode node)
         {
-            _selectedEntry = node.Entry;
-            _viewMode = DetailViewMode.Contents;
-            RefreshDetails();
+            NavigateToFolder(node.Entry);
         }
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        if (_backStack.Count == 0 || _selectedEntry is null)
+        {
+            return;
+        }
+
+        _forwardStack.Push(_selectedEntry);
+        NavigateToFolder(_backStack.Pop(), addHistory: false, clearForward: false);
+    }
+
+    private void Forward_Click(object sender, RoutedEventArgs e)
+    {
+        if (_forwardStack.Count == 0 || _selectedEntry is null)
+        {
+            return;
+        }
+
+        _backStack.Push(_selectedEntry);
+        NavigateToFolder(_forwardStack.Pop(), addHistory: false, clearForward: false);
+    }
+
+    private void Up_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedEntry is not null && TryGetParent(_selectedEntry, out var parent))
+        {
+            NavigateToFolder(parent);
+        }
+    }
+
+    private void Breadcrumb_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: BreadcrumbItem item })
+        {
+            NavigateToFolder(item.Entry);
+        }
+    }
+
+    private void JumpBox_KeyUp(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            if (JumpBox.SelectedItem is FolderJumpRow selected)
+            {
+                NavigateToFolder(selected.Entry);
+                return;
+            }
+
+            if (FolderJumpRows.FirstOrDefault() is { } first)
+            {
+                NavigateToFolder(first.Entry);
+            }
+
+            return;
+        }
+
+        if (e.Key is Key.Up or Key.Down or Key.Escape or Key.Tab)
+        {
+            return;
+        }
+
+        RefreshFolderJumpRows(JumpBox.Text);
+        if (FolderJumpRows.Count > 0)
+        {
+            JumpBox.IsDropDownOpen = true;
+        }
+    }
+
+    private void JumpBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressJumpSelection || JumpBox.SelectedItem is not FolderJumpRow row)
+        {
+            return;
+        }
+
+        NavigateToFolder(row.Entry);
     }
 
     private void ViewMode_Click(object sender, RoutedEventArgs e)
@@ -300,9 +383,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (row.Entry.IsDirectory)
         {
-            _selectedEntry = row.Entry;
-            _viewMode = DetailViewMode.Contents;
-            RefreshDetails();
+            NavigateToFolder(row.Entry);
             return;
         }
 
@@ -463,10 +544,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         FolderNodes.Clear();
         FolderNodes.Add(FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)));
+        RebuildNavigationIndex(result.Root);
+        _backStack.Clear();
+        _forwardStack.Clear();
 
         _selectedEntry = result.Root;
         _viewMode = DetailViewMode.Contents;
-        ReplaceCollection(SummaryMetrics, ScanViewProjector.SummaryMetrics(result));
+        _selectedChartSourceKey = null;
+        RefreshFolderJumpRows(string.Empty);
         RefreshDetails();
 
         analysisWatch.Stop();
@@ -487,7 +572,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             DetailRows.Clear();
             ChartSlices.Clear();
             SummaryMetrics.Clear();
+            BreadcrumbItems.Clear();
             RefreshChart();
+            RefreshNavigationState(null, null);
             return;
         }
 
@@ -501,6 +588,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
 
         ReplaceCollection(DetailRows, rows);
+        ReplaceCollection(SummaryMetrics, ScanViewProjector.SelectedSummaryMetrics(result, selected));
+        RefreshNavigationState(selected, result.Root);
         RefreshChart();
 
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
@@ -573,11 +662,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (drillIntoFolders && slice.Entry is { IsDirectory: true } folder)
         {
-            _selectedEntry = folder;
-            _viewMode = DetailViewMode.Contents;
             _chartScope = ChartScope.SelectedFolder;
             ChartScopeBox.SelectedIndex = 0;
-            RefreshDetails();
+            NavigateToFolder(folder);
             return;
         }
 
@@ -628,12 +715,99 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailsGrid.Focus();
     }
 
+    private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
+    {
+        if (_selectedEntry is not null && string.Equals(_selectedEntry.FullPath, entry.FullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (addHistory && _selectedEntry is not null)
+        {
+            _backStack.Push(_selectedEntry);
+        }
+
+        if (clearForward)
+        {
+            _forwardStack.Clear();
+        }
+
+        _selectedEntry = entry;
+        _viewMode = DetailViewMode.Contents;
+        _selectedChartSourceKey = null;
+        RefreshDetails();
+    }
+
+    private void RefreshNavigationState(FileSystemEntry? selected, FileSystemEntry? root)
+    {
+        BackButton.IsEnabled = _backStack.Count > 0;
+        ForwardButton.IsEnabled = _forwardStack.Count > 0;
+        UpButton.IsEnabled = selected is not null && TryGetParent(selected, out _);
+
+        BreadcrumbItems.Clear();
+        if (selected is not null && root is not null)
+        {
+            ReplaceCollection(BreadcrumbItems, ScanViewProjector.Breadcrumb(root, selected));
+        }
+    }
+
+    private void RebuildNavigationIndex(FileSystemEntry root)
+    {
+        _parentByPath.Clear();
+        foreach (var child in root.Children.Where(child => child.IsDirectory))
+        {
+            IndexParent(root, child);
+        }
+    }
+
+    private void IndexParent(FileSystemEntry parent, FileSystemEntry entry)
+    {
+        _parentByPath[entry.FullPath] = parent;
+        foreach (var child in entry.Children.Where(child => child.IsDirectory))
+        {
+            IndexParent(entry, child);
+        }
+    }
+
+    private bool TryGetParent(FileSystemEntry entry, out FileSystemEntry parent)
+    {
+        if (_parentByPath.TryGetValue(entry.FullPath, out var value))
+        {
+            parent = value;
+            return true;
+        }
+
+        parent = null!;
+        return false;
+    }
+
+    private void RefreshFolderJumpRows(string query)
+    {
+        var result = _currentScan;
+        _suppressJumpSelection = true;
+        FolderJumpRows.Clear();
+        if (result is not null)
+        {
+            foreach (var row in ScanViewProjector.FolderJumpRows(result.Root, query))
+            {
+                FolderJumpRows.Add(row);
+            }
+        }
+
+        _suppressJumpSelection = false;
+    }
+
     private void ClearViews()
     {
         FolderNodes.Clear();
         DetailRows.Clear();
         ChartSlices.Clear();
         SummaryMetrics.Clear();
+        BreadcrumbItems.Clear();
+        FolderJumpRows.Clear();
+        _parentByPath.Clear();
+        _backStack.Clear();
+        _forwardStack.Clear();
         _selectedChartSourceKey = null;
         _selectedEntry = null;
         SelectedTitleText.Text = "Scanning...";
@@ -643,6 +817,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ChartTitleText.Text = "Disk Distribution";
         ChartTotalText.Text = "Run a scan to render chart data.";
         ChartSelectionText.Text = "Select a chart slice to locate it in the grid.";
+        RefreshNavigationState(null, null);
     }
 
     private void LoadDriveRows()

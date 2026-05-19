@@ -12,4 +12,6 @@ public sealed record ChartSlice(
     string Color,
     ChartSliceKind Kind,
     string SourceKey,
-    FileSystemEntry? Entry);
+    FileSystemEntry? Entry,
+    string ShortLabel,
+    bool ShowCallout);

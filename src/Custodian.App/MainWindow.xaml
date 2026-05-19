@@ -157,19 +157,74 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SelectedTitleText" Text="No scan loaded" FontWeight="SemiBold" FontSize="18" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis"/>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Grid Grid.ColumnSpan="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="260"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="BackButton" Click="Back_Click" ToolTip="Back" IsEnabled="False" Width="30" Padding="0">
+                                        <TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" HorizontalAlignment="Center"/>
+                                    </Button>
+                                    <Button x:Name="ForwardButton" Click="Forward_Click" ToolTip="Forward" IsEnabled="False" Width="30" Padding="0">
+                                        <TextBlock Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" HorizontalAlignment="Center"/>
+                                    </Button>
+                                    <Button x:Name="UpButton" Click="Up_Click" ToolTip="Up one level" IsEnabled="False" Width="30" Padding="0">
+                                        <TextBlock Text="&#xE74A;" FontFamily="Segoe MDL2 Assets" HorizontalAlignment="Center"/>
+                                    </Button>
+                                </StackPanel>
+                                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="8,0">
+                                    <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Content="{Binding Name}" Tag="{Binding}" Click="Breadcrumb_Click" Padding="6,2" MinHeight="24" Margin="0"/>
+                                                    <TextBlock Text=">" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="5,0"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <ComboBox x:Name="JumpBox" Grid.Column="2" IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True" KeyUp="JumpBox_KeyUp" SelectionChanged="JumpBox_SelectionChanged" ToolTip="Jump to folder">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid MinWidth="230">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0"/>
+                                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding FullPath}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock Grid.Row="1" x:Name="SelectedTitleText" Text="No scan loaded" FontWeight="SemiBold" FontSize="18" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" Margin="0,8,0,0"/>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
                                 <Button Content="Contents" Tag="Contents" Click="ViewMode_Click"/>
                                 <Button Content="Largest Files" Tag="LargestFiles" Click="ViewMode_Click"/>
                                 <Button Content="Largest Folders" Tag="LargestFolders" Click="ViewMode_Click"/>
                                 <Button Content="Extensions" Tag="Extensions" Click="ViewMode_Click"/>
                             </StackPanel>
-                            <TextBlock Grid.Row="1" Grid.ColumnSpan="2" x:Name="SelectedSubText" Text="Choose a path and scan." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" x:Name="SelectedSubText" Text="Choose a path and scan." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                         </Grid>
                     </Border>
 
@@ -274,7 +329,37 @@
 
                     <Grid Margin="8,8,8,0">
                         <Grid x:Name="PieHost" MinHeight="240">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="230"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
                             <controls:PieChartControl x:Name="PieChart" Slices="{Binding ChartSlices}" SliceSelected="PieChart_SliceSelected" SliceDoubleClicked="PieChart_SliceDoubleClicked"/>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="190" Margin="0,8,0,0">
+                                <ItemsControl ItemsSource="{Binding ChartSlices}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="4" Margin="0,1" BorderBrush="#e2e8f0" BorderThickness="0,0,0,1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="12"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="9" Height="9" Background="{Binding Color}" VerticalAlignment="Center"/>
+                                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2" Margin="8,0,0,0" HorizontalAlignment="Right">
+                                                        <TextBlock Text="{Binding FormattedSize}" FontSize="11" HorizontalAlignment="Right"/>
+                                                        <TextBlock Text="{Binding PercentText}" Foreground="{StaticResource MutedBrush}" FontSize="10" HorizontalAlignment="Right"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
                         </Grid>
 
                         <Grid x:Name="BarHost" Visibility="Collapsed">
