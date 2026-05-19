@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Custodian.App.Controls;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
@@ -16,7 +17,6 @@ using Custodian.Core.Scanning;
 using Custodian.Core.Storage;
 using WinForms = System.Windows.Forms;
 using WpfClipboard = System.Windows.Clipboard;
-using WpfDataGrid = System.Windows.Controls.DataGrid;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace Custodian.App;
@@ -29,12 +29,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ScanResult? _currentScan;
     private FileSystemEntry? _selectedEntry;
     private DetailViewMode _viewMode = DetailViewMode.Contents;
+    private ChartScope _chartScope = ChartScope.SelectedFolder;
+    private ChartDisplayMode _chartDisplayMode = ChartDisplayMode.Pie;
+    private string? _selectedChartSourceKey;
+    private bool _suppressChartSelection;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
     public ObservableCollection<FolderNode> FolderNodes { get; } = [];
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
-    public ObservableCollection<ChartRow> ChartRows { get; } = [];
+    public ObservableCollection<ChartSlice> ChartSlices { get; } = [];
     public ObservableCollection<SummaryMetric> SummaryMetrics { get; } = [];
 
     public MainWindow()
@@ -42,8 +46,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InitializeComponent();
         DataContext = this;
         PathBox.ItemsSource = RecentPaths;
+        ChartScopeBox.SelectedIndex = 0;
         LoadDriveRows();
         PathBox.Text = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        UpdateChartModeVisibility();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -232,6 +238,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         _viewMode = mode;
         RefreshDetails();
+    }
+
+    private void ChartScope_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ChartScopeBox.SelectedItem is not ComboBoxItem { Tag: string tag } || !Enum.TryParse(tag, out ChartScope scope))
+        {
+            return;
+        }
+
+        _chartScope = scope;
+        _selectedChartSourceKey = null;
+        RefreshChart();
+    }
+
+    private void ChartMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out ChartDisplayMode mode))
+        {
+            return;
+        }
+
+        _chartDisplayMode = mode;
+        UpdateChartModeVisibility();
+    }
+
+    private void PieChart_SliceSelected(object sender, ChartSliceEventArgs e)
+    {
+        SelectChartSlice(e.Slice, drillIntoFolders: false);
+    }
+
+    private void PieChart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
+    {
+        SelectChartSlice(e.Slice, drillIntoFolders: true);
+    }
+
+    private void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice)
+        {
+            return;
+        }
+
+        SelectChartSlice(slice, drillIntoFolders: false);
+    }
+
+    private void ChartBars_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ChartBars.SelectedItem is ChartSlice slice)
+        {
+            SelectChartSlice(slice, drillIntoFolders: true);
+        }
     }
 
     private void DetailsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -428,8 +485,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SelectedTitleText.Text = "No scan loaded";
             SelectedSubText.Text = "Choose a path and scan.";
             DetailRows.Clear();
-            ChartRows.Clear();
+            ChartSlices.Clear();
             SummaryMetrics.Clear();
+            RefreshChart();
             return;
         }
 
@@ -443,23 +501,148 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
 
         ReplaceCollection(DetailRows, rows);
-        ReplaceCollection(ChartRows, ScanViewProjector.TopChildChartRows(selected));
+        RefreshChart();
 
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
         SelectedSubText.Text = $"{ViewModeLabel(_viewMode)} | {selected.FullPath} | {SizeFormatter.Format(selected.LogicalSizeBytes)} logical | {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
+    }
+
+    private void RefreshChart()
+    {
+        var result = _currentScan;
+        if (result is null)
+        {
+            ChartSlices.Clear();
+            ChartTitleText.Text = "Disk Distribution";
+            ChartTotalText.Text = "Run a scan to render chart data.";
+            ChartSelectionText.Text = "Select a chart slice to locate it in the grid.";
+            PieChart.SelectedSlice = null;
+            PieChart.InvalidateVisual();
+            return;
+        }
+
+        var selected = _selectedEntry ?? result.Root;
+        var dataset = _chartScope switch
+        {
+            ChartScope.LargestFolders => ScanViewProjector.LargestFoldersChart(result),
+            ChartScope.LargestFiles => ScanViewProjector.LargestFilesChart(result),
+            ChartScope.Extensions => ScanViewProjector.ExtensionsChart(result),
+            _ => ScanViewProjector.SelectedFolderChart(selected)
+        };
+
+        ReplaceCollection(ChartSlices, dataset.Slices);
+        ChartTitleText.Text = dataset.Title;
+        ChartTotalText.Text = dataset.HasOther
+            ? $"{dataset.TotalSize} charted | top {Math.Min(12, dataset.Slices.Count)} plus other"
+            : $"{dataset.TotalSize} charted | {dataset.Slices.Count:n0} item(s)";
+
+        var selectedSlice = ChartSlices.FirstOrDefault(slice => string.Equals(slice.SourceKey, _selectedChartSourceKey, StringComparison.Ordinal));
+        _suppressChartSelection = true;
+        PieChart.SelectedSlice = selectedSlice;
+        ChartBars.SelectedItem = selectedSlice;
+        if (selectedSlice is not null)
+        {
+            ChartBars.ScrollIntoView(selectedSlice);
+            ChartSelectionText.Text = $"{selectedSlice.Label}: {selectedSlice.FormattedSize} ({selectedSlice.PercentText})";
+        }
+        else
+        {
+            ChartSelectionText.Text = "Select a chart slice to locate it in the grid.";
+        }
+
+        _suppressChartSelection = false;
+        PieChart.InvalidateVisual();
+    }
+
+    private void SelectChartSlice(ChartSlice slice, bool drillIntoFolders)
+    {
+        _selectedChartSourceKey = slice.SourceKey;
+        ChartSelectionText.Text = $"{slice.Label}: {slice.FormattedSize} ({slice.PercentText})";
+
+        _suppressChartSelection = true;
+        PieChart.SelectedSlice = slice;
+        ChartBars.SelectedItem = slice;
+        ChartBars.ScrollIntoView(slice);
+        _suppressChartSelection = false;
+        PieChart.InvalidateVisual();
+
+        if (slice.Kind == ChartSliceKind.Other)
+        {
+            return;
+        }
+
+        if (drillIntoFolders && slice.Entry is { IsDirectory: true } folder)
+        {
+            _selectedEntry = folder;
+            _viewMode = DetailViewMode.Contents;
+            _chartScope = ChartScope.SelectedFolder;
+            ChartScopeBox.SelectedIndex = 0;
+            RefreshDetails();
+            return;
+        }
+
+        SelectDetailRowForSlice(slice);
+    }
+
+    private void SelectDetailRowForSlice(ChartSlice slice)
+    {
+        if (slice.Kind == ChartSliceKind.Extension)
+        {
+            _viewMode = DetailViewMode.Extensions;
+            RefreshDetails();
+            SelectDetailRow(row => string.Equals(row.Extension, slice.SourceKey, StringComparison.OrdinalIgnoreCase));
+            return;
+        }
+
+        if (slice.Entry is null)
+        {
+            return;
+        }
+
+        var desiredView = _chartScope switch
+        {
+            ChartScope.LargestFiles => DetailViewMode.LargestFiles,
+            ChartScope.LargestFolders => DetailViewMode.LargestFolders,
+            _ => DetailViewMode.Contents
+        };
+
+        if (_viewMode != desiredView)
+        {
+            _viewMode = desiredView;
+            RefreshDetails();
+        }
+
+        SelectDetailRow(row => string.Equals(row.FullPath, slice.Entry.FullPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void SelectDetailRow(Func<DetailRow, bool> predicate)
+    {
+        var row = DetailRows.FirstOrDefault(predicate);
+        if (row is null)
+        {
+            return;
+        }
+
+        DetailsGrid.SelectedItem = row;
+        DetailsGrid.ScrollIntoView(row);
+        DetailsGrid.Focus();
     }
 
     private void ClearViews()
     {
         FolderNodes.Clear();
         DetailRows.Clear();
-        ChartRows.Clear();
+        ChartSlices.Clear();
         SummaryMetrics.Clear();
+        _selectedChartSourceKey = null;
         _selectedEntry = null;
         SelectedTitleText.Text = "Scanning...";
         SelectedSubText.Text = PathBox.Text;
         FooterText.Text = "Preparing scan...";
         EngineBadge.Text = "Scanning";
+        ChartTitleText.Text = "Disk Distribution";
+        ChartTotalText.Text = "Run a scan to render chart data.";
+        ChartSelectionText.Text = "Select a chart slice to locate it in the grid.";
     }
 
     private void LoadDriveRows()
@@ -530,6 +713,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StartButton.IsEnabled = !scanning;
         StopButton.IsEnabled = scanning;
         ProgressBar.IsIndeterminate = scanning;
+    }
+
+    private void UpdateChartModeVisibility()
+    {
+        PieHost.Visibility = _chartDisplayMode == ChartDisplayMode.Pie ? Visibility.Visible : Visibility.Collapsed;
+        BarHost.Visibility = _chartDisplayMode == ChartDisplayMode.Bars ? Visibility.Visible : Visibility.Collapsed;
+        PieChart.InvalidateVisual();
     }
 
     private static string BuildFooterText(ScanResult result)
@@ -662,4 +852,18 @@ internal enum DetailViewMode
     LargestFiles,
     LargestFolders,
     Extensions
+}
+
+internal enum ChartScope
+{
+    SelectedFolder,
+    LargestFolders,
+    LargestFiles,
+    Extensions
+}
+
+internal enum ChartDisplayMode
+{
+    Pie,
+    Bars
 }

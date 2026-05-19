@@ -55,6 +55,83 @@ public sealed class ScanViewProjectorTests
         Assert.Equal("1", metrics["Folders"].Value);
     }
 
+    [Fact]
+    public void SelectedFolderChartKeepsTopSlicesAndAggregatesOther()
+    {
+        var root = Directory(@"C:\", 150, 5, 0);
+        root.Children.Add(File(@"C:\a.bin", 50, ".bin"));
+        root.Children.Add(File(@"C:\b.bin", 40, ".bin"));
+        root.Children.Add(File(@"C:\c.log", 30, ".log"));
+        root.Children.Add(File(@"C:\d.tmp", 20, ".tmp"));
+        root.Children.Add(File(@"C:\e.tmp", 10, ".tmp"));
+
+        var dataset = ScanViewProjector.SelectedFolderChart(root, take: 3);
+
+        Assert.Equal(150, dataset.TotalBytes);
+        Assert.True(dataset.HasOther);
+        Assert.Equal(["a.bin", "b.bin", "c.log", "Other items"], dataset.Slices.Select(slice => slice.Label).ToList());
+        Assert.Equal(30, dataset.Slices[^1].RawBytes);
+        Assert.Equal(ChartSliceKind.Other, dataset.Slices[^1].Kind);
+    }
+
+    [Fact]
+    public void ChartProjectionHandlesZeroSizeData()
+    {
+        var root = Directory(@"C:\", 0, 1, 0);
+        root.Children.Add(File(@"C:\empty.txt", 0, ".txt"));
+
+        var dataset = ScanViewProjector.SelectedFolderChart(root);
+
+        Assert.Equal(0, dataset.TotalBytes);
+        Assert.Empty(dataset.Slices);
+        Assert.False(dataset.HasOther);
+    }
+
+    [Fact]
+    public void LargestFileChartMatchesLargestFileRowOrder()
+    {
+        var result = SampleResult();
+
+        var chartLabels = ScanViewProjector.LargestFilesChart(result, take: 2)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+        var rowLabels = ScanViewProjector.LargestFileRows(result, take: 2)
+            .Select(row => row.Name)
+            .ToList();
+
+        Assert.Equal(rowLabels, chartLabels);
+    }
+
+    [Fact]
+    public void ExtensionChartMatchesExtensionRowOrder()
+    {
+        var result = SampleResult();
+
+        var chartLabels = ScanViewProjector.ExtensionsChart(result)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+        var rowLabels = ScanViewProjector.ExtensionRows(result)
+            .Select(row => row.Name)
+            .ToList();
+
+        Assert.Equal(rowLabels, chartLabels);
+    }
+
+    [Fact]
+    public void ChartColorsAreDeterministic()
+    {
+        var result = SampleResult();
+
+        var first = ScanViewProjector.ExtensionsChart(result).Slices.Select(slice => slice.Color).ToList();
+        var second = ScanViewProjector.ExtensionsChart(result).Slices.Select(slice => slice.Color).ToList();
+
+        Assert.Equal(first, second);
+    }
+
     private static ScanResult SampleResult()
     {
         var root = Directory(@"C:\", 200, 3, 1);
