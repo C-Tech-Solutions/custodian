@@ -156,19 +156,30 @@ public static class ScanViewProjector
         return path.Select(entry => new BreadcrumbItem(DisplayName(entry), entry.FullPath, entry)).ToList();
     }
 
-    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(FileSystemEntry root, string query, int take = 50)
+    public static IReadOnlyList<FolderJumpRow> FolderJumpIndex(FileSystemEntry root)
     {
-        var trimmed = query.Trim();
         return root
             .Flatten()
             .Where(entry => entry.IsDirectory)
-            .Where(entry => string.IsNullOrWhiteSpace(trimmed)
-                || entry.Name.Contains(trimmed, StringComparison.OrdinalIgnoreCase)
-                || entry.FullPath.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
             .OrderBy(entry => entry.FullPath, StringComparer.OrdinalIgnoreCase)
-            .Take(take)
             .Select(FolderJumpRow.From)
             .ToList();
+    }
+
+    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(IReadOnlyList<FolderJumpRow> directoryIndex, string query, int take = 50)
+    {
+        var trimmed = query.Trim();
+        return directoryIndex
+            .Where(row => string.IsNullOrWhiteSpace(trimmed)
+                || row.Name.Contains(trimmed, StringComparison.OrdinalIgnoreCase)
+                || row.FullPath.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
+            .Take(take)
+            .ToList();
+    }
+
+    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(FileSystemEntry root, string query, int take = 50)
+    {
+        return FolderJumpRows(FolderJumpIndex(root), query, take);
     }
 
     public static double Percent(long value, long total)

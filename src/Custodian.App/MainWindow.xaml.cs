@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
@@ -56,15 +57,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private long _scanBytesSeen;
     private string _scanCurrentPath = string.Empty;
     private readonly DispatcherTimer _settingsSaveTimer;
+    private readonly DispatcherTimer _folderJumpDebounceTimer;
+    private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
-    public ObservableCollection<FolderNode> FolderNodes { get; } = [];
-    public ObservableCollection<DetailRow> DetailRows { get; } = [];
-    public ObservableCollection<ChartSlice> ChartSlices { get; } = [];
-    public ObservableCollection<SummaryMetric> SummaryMetrics { get; } = [];
-    public ObservableCollection<BreadcrumbItem> BreadcrumbItems { get; } = [];
-    public ObservableCollection<FolderJumpRow> FolderJumpRows { get; } = [];
+    public BulkObservableCollection<FolderNode> FolderNodes { get; } = [];
+    public BulkObservableCollection<DetailRow> DetailRows { get; } = [];
+    public BulkObservableCollection<ChartSlice> ChartSlices { get; } = [];
+    public BulkObservableCollection<SummaryMetric> SummaryMetrics { get; } = [];
+    public BulkObservableCollection<BreadcrumbItem> BreadcrumbItems { get; } = [];
+    public BulkObservableCollection<FolderJumpRow> FolderJumpRows { get; } = [];
 
     public ICollectionView DetailRowsView { get; }
 
@@ -89,6 +92,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Interval = TimeSpan.FromMilliseconds(500)
         };
         _settingsSaveTimer.Tick += (_, _) => { _settingsSaveTimer.Stop(); PersistSettings(); };
+        _folderJumpDebounceTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(175)
+        };
+        _folderJumpDebounceTimer.Tick += (_, _) =>
+        {
+            _folderJumpDebounceTimer.Stop();
+            RefreshFolderJumpRows(JumpBox.Text);
+        };
 
         LoadDriveRows();
         SeedPathFromSettings();
@@ -329,8 +341,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         if (dialog.ShowDialog(this) == true)
         {
-            await _store.SaveAsync(_currentScan, dialog.FileName);
-            ShowToast($"Saved {Path.GetFileName(dialog.FileName)}");
+            try
+            {
+                await _store.SaveAsync(_currentScan, dialog.FileName);
+                ShowToast($"Saved {Path.GetFileName(dialog.FileName)}");
+            }
+            catch (Exception ex)
+            {
+                ShowOperationError("Save failed", ex);
+            }
         }
     }
 
@@ -342,11 +361,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         if (dialog.ShowDialog(this) == true)
         {
-            _currentScan = await _store.LoadAsync(dialog.FileName);
-            PathBox.Text = _currentScan.RootPath;
-            AddRecentPath(_currentScan.RootPath);
-            LoadScanIntoUi(_currentScan);
-            ShowToast($"Opened {Path.GetFileName(dialog.FileName)}");
+            try
+            {
+                _currentScan = await _store.LoadAsync(dialog.FileName);
+                PathBox.Text = _currentScan.RootPath;
+                AddRecentPath(_currentScan.RootPath);
+                LoadScanIntoUi(_currentScan);
+                ShowToast($"Opened {Path.GetFileName(dialog.FileName)}");
+            }
+            catch (Exception ex)
+            {
+                ShowOperationError("Open failed", ex);
+            }
         }
     }
 
@@ -362,8 +388,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var dialog = new Microsoft.Win32.SaveFileDialog { Filter = filter, FileName = fileName };
         if (dialog.ShowDialog(this) == true)
         {
-            await exporter(_currentScan, dialog.FileName);
-            ShowToast($"Exported {Path.GetFileName(dialog.FileName)}");
+            try
+            {
+                await exporter(_currentScan, dialog.FileName);
+                ShowToast($"Exported {Path.GetFileName(dialog.FileName)}");
+            }
+            catch (Exception ex)
+            {
+                ShowOperationError("Export failed", ex);
+            }
         }
     }
 
@@ -431,14 +464,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (e.Key == Key.Enter)
         {
+            _folderJumpDebounceTimer.Stop();
+            RefreshFolderJumpRows(JumpBox.Text);
             if (JumpBox.SelectedItem is FolderJumpRow selected) { NavigateToFolder(selected.Entry); return; }
             if (FolderJumpRows.FirstOrDefault() is { } first) NavigateToFolder(first.Entry);
             return;
         }
         if (e.Key is Key.Up or Key.Down or Key.Escape or Key.Tab) return;
 
-        RefreshFolderJumpRows(JumpBox.Text);
-        if (FolderJumpRows.Count > 0) JumpBox.IsDropDownOpen = true;
+        ScheduleFolderJumpRefresh();
     }
 
     private void JumpBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -688,8 +722,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "CSV files (*.csv)|*.csv", FileName = "selection.csv" };
         if (dialog.ShowDialog(this) == true)
         {
-            await WriteDetailRowsCsvAsync(rows, dialog.FileName);
-            ShowToast($"Exported {rows.Count:n0} row(s).");
+            try
+            {
+                await WriteDetailRowsCsvAsync(rows, dialog.FileName);
+                ShowToast($"Exported {rows.Count:n0} row(s).");
+            }
+            catch (Exception ex)
+            {
+                ShowOperationError("Export failed", ex);
+            }
         }
     }
 
@@ -736,6 +777,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         FolderNodes.Clear();
         FolderNodes.Add(FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)));
         RebuildNavigationIndex(result.Root);
+        _folderJumpIndex = ScanViewProjector.FolderJumpIndex(result.Root);
         _backStack.Clear();
         _forwardStack.Clear();
 
@@ -960,27 +1002,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RefreshFolderJumpRows(string query)
     {
-        var result = _currentScan;
         _suppressJumpSelection = true;
-        FolderJumpRows.Clear();
-        if (result is not null)
-        {
-            foreach (var row in ScanViewProjector.FolderJumpRows(result.Root, query))
-            {
-                FolderJumpRows.Add(row);
-            }
-        }
+        ReplaceCollection(FolderJumpRows, ScanViewProjector.FolderJumpRows(_folderJumpIndex, query));
+        JumpBox.IsDropDownOpen = FolderJumpRows.Count > 0 && JumpBox.IsKeyboardFocusWithin;
         _suppressJumpSelection = false;
+    }
+
+    private void ScheduleFolderJumpRefresh()
+    {
+        _folderJumpDebounceTimer.Stop();
+        _folderJumpDebounceTimer.Start();
     }
 
     private void ClearViewsForNewScan(string path)
     {
+        _currentScan = null;
         FolderNodes.Clear();
         DetailRows.Clear();
         ChartSlices.Clear();
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
+        _folderJumpIndex = [];
         _parentByPath.Clear();
         _backStack.Clear();
         _forwardStack.Clear();
@@ -1157,6 +1200,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         sb.Begin();
     }
 
+    private void ShowOperationError(string title, Exception ex)
+    {
+        WpfMessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
     // ============================================================
     //  Static helpers
     // ============================================================
@@ -1198,10 +1246,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return value;
     }
 
-    private static void ReplaceCollection<T>(ObservableCollection<T> collection, IEnumerable<T> items)
+    private static void ReplaceCollection<T>(BulkObservableCollection<T> collection, IEnumerable<T> items)
     {
-        collection.Clear();
-        foreach (var item in items) collection.Add(item);
+        collection.ReplaceAll(items);
     }
 
     private static T? FindVisualParent<T>(DependencyObject? source) where T : DependencyObject
@@ -1216,6 +1263,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+public sealed class BulkObservableCollection<T> : ObservableCollection<T>
+{
+    private bool _suppressNotifications;
+
+    public void ReplaceAll(IEnumerable<T> items)
+    {
+        _suppressNotifications = true;
+        try
+        {
+            ClearItems();
+            foreach (var item in items)
+            {
+                Items.Add(item);
+            }
+        }
+        finally
+        {
+            _suppressNotifications = false;
+        }
+
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    protected override void OnCollectionChanged(NotifyCollectionChangedEventArgs e)
+    {
+        if (!_suppressNotifications)
+        {
+            base.OnCollectionChanged(e);
+        }
+    }
+
+    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+    {
+        if (!_suppressNotifications)
+        {
+            base.OnPropertyChanged(e);
+        }
+    }
 }
 
 public sealed record DriveRow(

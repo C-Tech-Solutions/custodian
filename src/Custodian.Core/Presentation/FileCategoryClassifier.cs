@@ -207,20 +207,20 @@ public static class FileCategoryClassifier
         // Segoe MDL2 Assets / Segoe Fluent Icons codepoints.
         return category switch
         {
-            FileCategory.Folder => "",
-            FileCategory.Video => "",
-            FileCategory.Image => "",
-            FileCategory.Audio => "",
-            FileCategory.Document => "",
-            FileCategory.Spreadsheet => "",
-            FileCategory.Presentation => "",
-            FileCategory.Code => "",
-            FileCategory.Archive => "",
-            FileCategory.Executable => "",
-            FileCategory.Database => "",
-            FileCategory.Font => "",
-            FileCategory.System => "",
-            _ => ""
+            FileCategory.Folder => "\uE8B7",
+            FileCategory.Video => "\uE714",
+            FileCategory.Image => "\uEB9F",
+            FileCategory.Audio => "\uE8D6",
+            FileCategory.Document => "\uE8A5",
+            FileCategory.Spreadsheet => "\uE9F9",
+            FileCategory.Presentation => "\uE8FE",
+            FileCategory.Code => "\uE943",
+            FileCategory.Archive => "\uE7B8",
+            FileCategory.Executable => "\uECAA",
+            FileCategory.Database => "\uEE94",
+            FileCategory.Font => "\uE8D2",
+            FileCategory.System => "\uE9CE",
+            _ => "\uE8A5"
         };
     }
 

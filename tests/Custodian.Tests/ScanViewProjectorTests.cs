@@ -104,6 +104,17 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void FolderJumpRowsFilterCachedIndexWithoutResorting()
+    {
+        var result = NestedResult();
+        var index = ScanViewProjector.FolderJumpIndex(result.Root);
+
+        var rows = ScanViewProjector.FolderJumpRows(index, "Alpha");
+
+        Assert.Equal([@"C:\Alpha", @"C:\Alpha\Deep"], rows.Select(row => row.FullPath).ToList());
+    }
+
+    [Fact]
     public void SelectedFolderChartKeepsTopSlicesAndAggregatesOther()
     {
         var root = Directory(@"C:\", 150, 5, 0);
