@@ -55,12 +55,187 @@ public sealed class ScanViewProjectorTests
         Assert.Equal("1", metrics["Folders"].Value);
     }
 
+    [Fact]
+    public void SelectedSummaryMetricsUseSelectedFolderTotals()
+    {
+        var result = NestedResult();
+        var selected = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var metrics = ScanViewProjector.SelectedSummaryMetrics(result, selected).ToDictionary(metric => metric.Label);
+
+        Assert.Equal("150 B", metrics["Logical"].Value);
+        Assert.Equal("2", metrics["Files"].Value);
+        Assert.Equal("1", metrics["Folders"].Value);
+        Assert.Equal("75.0%", metrics["Root Share"].Value);
+    }
+
+    [Fact]
+    public void RootSummaryReportsFullRootShare()
+    {
+        var result = NestedResult();
+
+        var metrics = ScanViewProjector.SelectedSummaryMetrics(result, result.Root).ToDictionary(metric => metric.Label);
+
+        Assert.Equal("100.0%", metrics["Root Share"].Value);
+    }
+
+    [Fact]
+    public void BreadcrumbReturnsRootToSelectedOrder()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+        var deep = alpha.Children.Single(child => child.Name == "Deep");
+
+        var breadcrumbs = ScanViewProjector.Breadcrumb(result.Root, deep);
+
+        Assert.Equal([@"C:\", "Alpha", "Deep"], breadcrumbs.Select(item => item.Name).ToList());
+    }
+
+    [Fact]
+    public void FolderJumpRowsMatchNameAndFullPath()
+    {
+        var result = NestedResult();
+
+        var byName = ScanViewProjector.FolderJumpRows(result.Root, "Deep").Single();
+        var byPath = ScanViewProjector.FolderJumpRows(result.Root, @"Alpha\Deep").Single();
+
+        Assert.Equal(@"C:\Alpha\Deep", byName.FullPath);
+        Assert.Equal(@"C:\Alpha\Deep", byPath.FullPath);
+    }
+
+    [Fact]
+    public void FolderJumpRowsFilterCachedIndexWithoutResorting()
+    {
+        var result = NestedResult();
+        var index = ScanViewProjector.FolderJumpIndex(result.Root);
+
+        var rows = ScanViewProjector.FolderJumpRows(index, "Alpha");
+
+        Assert.Equal([@"C:\Alpha", @"C:\Alpha\Deep"], rows.Select(row => row.FullPath).ToList());
+    }
+
+    [Fact]
+    public void SelectedFolderChartKeepsTopSlicesAndAggregatesOther()
+    {
+        var root = Directory(@"C:\", 150, 5, 0);
+        root.Children.Add(File(@"C:\a.bin", 50, ".bin"));
+        root.Children.Add(File(@"C:\b.bin", 40, ".bin"));
+        root.Children.Add(File(@"C:\c.log", 30, ".log"));
+        root.Children.Add(File(@"C:\d.tmp", 20, ".tmp"));
+        root.Children.Add(File(@"C:\e.tmp", 10, ".tmp"));
+
+        var dataset = ScanViewProjector.SelectedFolderChart(root, take: 3);
+
+        Assert.Equal(150, dataset.TotalBytes);
+        Assert.True(dataset.HasOther);
+        Assert.Equal(["a.bin", "b.bin", "c.log", "Other items"], dataset.Slices.Select(slice => slice.Label).ToList());
+        Assert.Equal(30, dataset.Slices[^1].RawBytes);
+        Assert.Equal(ChartSliceKind.Other, dataset.Slices[^1].Kind);
+    }
+
+    [Fact]
+    public void ChartProjectionHandlesZeroSizeData()
+    {
+        var root = Directory(@"C:\", 0, 1, 0);
+        root.Children.Add(File(@"C:\empty.txt", 0, ".txt"));
+
+        var dataset = ScanViewProjector.SelectedFolderChart(root);
+
+        Assert.Equal(0, dataset.TotalBytes);
+        Assert.Empty(dataset.Slices);
+        Assert.False(dataset.HasOther);
+    }
+
+    [Fact]
+    public void LargestFileChartMatchesLargestFileRowOrder()
+    {
+        var result = SampleResult();
+
+        var chartLabels = ScanViewProjector.LargestFilesChart(result, take: 2)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+        var rowLabels = ScanViewProjector.LargestFileRows(result, take: 2)
+            .Select(row => row.Name)
+            .ToList();
+
+        Assert.Equal(rowLabels, chartLabels);
+    }
+
+    [Fact]
+    public void ExtensionChartMatchesExtensionRowOrder()
+    {
+        var result = SampleResult();
+
+        var chartLabels = ScanViewProjector.ExtensionsChart(result)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+        var rowLabels = ScanViewProjector.ExtensionRows(result)
+            .Select(row => row.Name)
+            .ToList();
+
+        Assert.Equal(rowLabels, chartLabels);
+    }
+
+    [Fact]
+    public void ChartColorsAreDeterministic()
+    {
+        var result = SampleResult();
+
+        var first = ScanViewProjector.ExtensionsChart(result).Slices.Select(slice => slice.Color).ToList();
+        var second = ScanViewProjector.ExtensionsChart(result).Slices.Select(slice => slice.Color).ToList();
+
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void PieCalloutEligibilityIncludesLargeNonOtherSlicesOnly()
+    {
+        var root = Directory(@"C:\", 100, 4, 0);
+        root.Children.Add(File(@"C:\large.bin", 80, ".bin"));
+        root.Children.Add(File(@"C:\small.log", 5, ".log"));
+        root.Children.Add(File(@"C:\tiny.tmp", 5, ".tmp"));
+        root.Children.Add(File(@"C:\other.tmp", 10, ".tmp"));
+
+        var dataset = ScanViewProjector.SelectedFolderChart(root, take: 3);
+
+        Assert.True(dataset.Slices.Single(slice => slice.Label == "large.bin").ShowCallout);
+        Assert.False(dataset.Slices.Single(slice => slice.Label == "small.log").ShowCallout);
+        Assert.False(dataset.Slices.Single(slice => slice.Kind == ChartSliceKind.Other).ShowCallout);
+    }
+
     private static ScanResult SampleResult()
     {
         var root = Directory(@"C:\", 200, 3, 1);
         root.Children.Add(File(@"C:\a.bin", 100, ".bin"));
         root.Children.Add(File(@"C:\b.bin", 20, ".bin"));
         root.Children.Add(File(@"C:\c.log", 80, ".log"));
+
+        return new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test Engine",
+            StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
+            CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z")
+        };
+    }
+
+    private static ScanResult NestedResult()
+    {
+        var root = Directory(@"C:\", 200, 4, 3);
+        var alpha = Directory(@"C:\Alpha", 150, 2, 1);
+        var deep = Directory(@"C:\Alpha\Deep", 50, 1, 0);
+        deep.Children.Add(File(@"C:\Alpha\Deep\nested.txt", 50, ".txt"));
+        alpha.Children.Add(deep);
+        alpha.Children.Add(File(@"C:\Alpha\a.bin", 100, ".bin"));
+        var beta = Directory(@"C:\Beta", 50, 1, 0);
+        beta.Children.Add(File(@"C:\Beta\b.log", 50, ".log"));
+        root.Children.Add(alpha);
+        root.Children.Add(beta);
 
         return new ScanResult
         {
