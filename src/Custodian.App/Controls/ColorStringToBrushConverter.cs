@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows.Data;
 using WpfBrush = System.Windows.Media.Brush;
@@ -31,8 +32,9 @@ public sealed class ColorStringToBrushConverter : IValueConverter
                 brush.Freeze();
                 return brush;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine(ex);
                 return WpfBrushes.Transparent;
             }
         });

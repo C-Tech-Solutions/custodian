@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace Custodian.App.Services;
@@ -39,8 +40,9 @@ public static class UiSettingsStore
             var json = File.ReadAllText(FilePath);
             return JsonSerializer.Deserialize<UiSettings>(json) ?? new UiSettings();
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine(ex);
             return new UiSettings();
         }
     }
@@ -56,8 +58,9 @@ public static class UiSettingsStore
             }
             File.WriteAllText(FilePath, JsonSerializer.Serialize(settings, Options));
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine(ex);
             // Settings are best-effort; don't crash on disk full / permission errors.
         }
     }

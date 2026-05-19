@@ -128,7 +128,7 @@ public sealed class PieChartControl : FrameworkElement
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var startAngle = 0.0;
         var separatorPen = CreatePen((WpfBrush?)TryFindResource("Border") ?? System.Windows.Media.Brushes.White, 1);
-        var selectedPen = CreatePen(System.Windows.Media.Brushes.White, 3);
+        var selectedPen = CreatePen((WpfBrush?)TryFindResource("AccentBrush") ?? System.Windows.Media.Brushes.White, 3);
 
         foreach (var slice in _slices)
         {
@@ -144,7 +144,7 @@ public sealed class PieChartControl : FrameworkElement
             startAngle = endAngle;
         }
 
-        drawingContext.DrawEllipse(System.Windows.Media.Brushes.White, null, center, innerRadius - 2, innerRadius - 2);
+        drawingContext.DrawEllipse((WpfBrush?)TryFindResource("SurfaceRaised") ?? System.Windows.Media.Brushes.White, null, center, innerRadius - 2, innerRadius - 2);
         foreach (var rendered in _renderedSlices)
         {
             if (rendered.Slice.ShowCallout)

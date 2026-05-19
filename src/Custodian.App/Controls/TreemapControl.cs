@@ -144,7 +144,7 @@ public sealed class TreemapControl : FrameworkElement
         Squarify(_slices, bounds, _totalBytes);
 
         var separatorPen = CreatePen((WpfBrush?)TryFindResource("SurfaceRaised") ?? WpfBrushes.White, 1);
-        var selectionPen = CreatePen((WpfBrush?)TryFindResource("OnAccentBrush") ?? WpfBrushes.White, 2.5);
+        var selectionPen = CreatePen((WpfBrush?)TryFindResource("OnAccentBrush") ?? (WpfBrush?)TryFindResource("AccentBrush") ?? WpfBrushes.White, 2.5);
         foreach (var tile in _tiles)
         {
             DrawTile(drawingContext, tile, separatorPen, selectionPen);
