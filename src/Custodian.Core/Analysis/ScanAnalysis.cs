@@ -70,13 +70,13 @@ public static class ScanAnalysis
             }
         });
 
-        var results = new List<FileSystemEntry>(capacity: top.Count);
-        while (top.TryDequeue(out var entry, out _))
+        var count = top.Count;
+        var results = new FileSystemEntry[count];
+        for (var i = count - 1; i >= 0; i--)
         {
-            results.Add(entry);
+            results[i] = top.Dequeue();
         }
 
-        results.Sort((left, right) => -CompareForTop(left, right));
         return results;
     }
 
