@@ -36,6 +36,9 @@ public sealed class TreemapControl : FrameworkElement
         typeof(TreemapControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    private static readonly WpfFontFamily LabelFontFamily = new("Segoe UI Variable Text, Segoe UI");
+    private static readonly Typeface LabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static readonly Typeface SemiBoldLabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private readonly List<RenderedTile> _tiles = [];
 
     public IEnumerable? Slices
@@ -284,8 +287,7 @@ public sealed class TreemapControl : FrameworkElement
             slice.Label,
             CultureInfo.CurrentCulture,
             WpfFlowDirection.LeftToRight,
-            new Typeface(new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+            SemiBoldLabelTypeface,
             12.5, OnTileTextBrush(slice.Color),
             dpi)
         {
@@ -298,8 +300,7 @@ public sealed class TreemapControl : FrameworkElement
             $"{slice.FormattedSize} · {slice.PercentText}",
             CultureInfo.CurrentCulture,
             WpfFlowDirection.LeftToRight,
-            new Typeface(new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
+            LabelTypeface,
             10.5, OnTileTextBrush(slice.Color, secondary: true),
             dpi)
         {
@@ -326,8 +327,7 @@ public sealed class TreemapControl : FrameworkElement
             slice.ShortLabel,
             CultureInfo.CurrentCulture,
             WpfFlowDirection.LeftToRight,
-            new Typeface(new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+            SemiBoldLabelTypeface,
             10.5, OnTileTextBrush(slice.Color),
             dpi)
         {
@@ -346,8 +346,7 @@ public sealed class TreemapControl : FrameworkElement
             "No data to visualize",
             CultureInfo.CurrentCulture,
             WpfFlowDirection.LeftToRight,
-            new Typeface(new WpfFontFamily("Segoe UI Variable Text, Segoe UI"),
-                FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+            SemiBoldLabelTypeface,
             13, brush, dpi);
         dc.DrawText(text, new WpfPoint((width - text.Width) / 2, (height - text.Height) / 2));
     }

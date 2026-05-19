@@ -28,6 +28,8 @@ public sealed class PieChartControl : FrameworkElement
         typeof(PieChartControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    private static readonly Typeface NormalTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static readonly Typeface SemiBoldTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private readonly List<RenderedSlice> _renderedSlices = [];
 
     public IEnumerable? Slices
@@ -233,7 +235,7 @@ public sealed class PieChartControl : FrameworkElement
             text,
             System.Globalization.CultureInfo.CurrentCulture,
             System.Windows.FlowDirection.LeftToRight,
-            new Typeface(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
+            SemiBoldTypeface,
             10,
             brush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip)
@@ -254,7 +256,7 @@ public sealed class PieChartControl : FrameworkElement
             text,
             System.Globalization.CultureInfo.CurrentCulture,
             System.Windows.FlowDirection.LeftToRight,
-            new Typeface(new WpfFontFamily("Segoe UI"), FontStyles.Normal, weight, FontStretches.Normal),
+            weight == FontWeights.SemiBold ? SemiBoldTypeface : NormalTypeface,
             size,
             new SolidColorBrush(color),
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
