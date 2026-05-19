@@ -833,6 +833,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshNavigationState(selected, result.Root);
         RefreshChart();
 
+        PathBox.Text = selected.FullPath;
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
         SelectedSubText.Text = $"{ViewModeLabel(_viewMode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
     }

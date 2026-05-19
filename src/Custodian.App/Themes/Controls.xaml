@@ -137,6 +137,16 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
 
+    <Style x:Key="ExplorerNavButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="Padding" Value="9,4"/>
+        <Setter Property="Margin" Value="0,0,4,0"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
     <Style x:Key="BreadcrumbButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
         <Setter Property="Padding" Value="6,3"/>
         <Setter Property="MinHeight" Value="24"/>

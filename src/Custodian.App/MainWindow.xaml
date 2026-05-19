@@ -246,18 +246,18 @@
                                         <ColumnDefinition Width="240"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Orientation="Horizontal">
-                                        <Button x:Name="BackButton" Style="{StaticResource IconButton}"
-                                                Click="Back_Click" Content="&#xE72B;" IsEnabled="False"
-                                                ToolTip="Back (Alt+Left)"/>
-                                        <Button x:Name="ForwardButton" Style="{StaticResource IconButton}"
-                                                Click="Forward_Click" Content="&#xE72A;" IsEnabled="False"
-                                                ToolTip="Forward (Alt+Right)"/>
-                                        <Button x:Name="UpButton" Style="{StaticResource IconButton}"
-                                                Click="Up_Click" Content="&#xE74A;" IsEnabled="False"
-                                                ToolTip="Up (Alt+Up / Backspace)"/>
-                                        <Button x:Name="RefreshButton" Style="{StaticResource IconButton}"
-                                                Click="Refresh_Click" Content="&#xE72C;"
-                                                ToolTip="Refresh (F5)"/>
+                                        <Button x:Name="BackButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Back_Click" Content="Back" IsEnabled="False"
+                                                ToolTip="Go back to the previous folder (Alt+Left)"/>
+                                        <Button x:Name="ForwardButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Forward_Click" Content="Forward" IsEnabled="False"
+                                                ToolTip="Go forward to the next folder (Alt+Right)"/>
+                                        <Button x:Name="UpButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Up_Click" Content="Up" IsEnabled="False"
+                                                ToolTip="Go to the parent folder (Alt+Up / Backspace)"/>
+                                        <Button x:Name="RefreshButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Refresh_Click" Content="Rescan"
+                                                ToolTip="Scan the folder shown in the path box (F5)"/>
                                     </StackPanel>
                                     <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
                                                   VerticalScrollBarVisibility="Disabled" Margin="10,0">
