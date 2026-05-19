@@ -201,8 +201,6 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="170" MinHeight="88"/>
                         <RowDefinition Height="8"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*" MinHeight="120"/>
                     </Grid.RowDefinitions>
                     <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="14,12,14,4"/>
@@ -242,15 +240,22 @@
                                   Style="{StaticResource HorizontalSectionSplitter}"
                                   ToolTip="Drag to resize Targets and Folder Map"/>
 
-                    <TextBlock Grid.Row="3" Style="{StaticResource SectionHeader}" Text="FOLDER MAP" Margin="14,8,14,2"/>
-                    <TextBlock Grid.Row="4" Text="Click any scanned folder to jump there."
-                               Foreground="{DynamicResource MutedBrush}"
-                               FontSize="11" TextWrapping="Wrap"
-                               Margin="14,0,14,6"/>
-                    <TreeView x:Name="FolderTree" Grid.Row="5"
-                              ItemsSource="{Binding FolderNodes}"
-                              SelectedItemChanged="FolderTree_SelectedItemChanged"
-                              Margin="8,0,8,10"/>
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Style="{StaticResource SectionHeader}" Text="FOLDER MAP" Margin="14,8,14,2"/>
+                        <TextBlock Grid.Row="1" Text="Click any scanned folder to jump there."
+                                   Foreground="{DynamicResource MutedBrush}"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Margin="14,0,14,6"/>
+                        <TreeView x:Name="FolderTree" Grid.Row="2"
+                                  ItemsSource="{Binding FolderNodes}"
+                                  SelectedItemChanged="FolderTree_SelectedItemChanged"
+                                  Margin="8,0,8,10"/>
+                    </Grid>
                 </Grid>
             </Border>
 

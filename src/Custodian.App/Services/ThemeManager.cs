@@ -102,6 +102,11 @@ public static class ThemeManager
         }
 
         var definition = GetDefinition(theme);
+        if (theme == Current && IsPaletteLoaded(app, definition))
+        {
+            return;
+        }
+
         var newPalette = new ResourceDictionary { Source = new Uri(definition.PalettePath, UriKind.Relative) };
 
         // Remove existing palettes (anything that looks like Palette.*.xaml).
@@ -131,5 +136,12 @@ public static class ThemeManager
         return ThemeDefinitions.TryGetValue(theme, out var definition)
             ? definition
             : ThemeDefinitions[AppTheme.Dark];
+    }
+
+    private static bool IsPaletteLoaded(System.Windows.Application app, ThemeDefinition definition)
+    {
+        return app.Resources.MergedDictionaries.Any(dict =>
+            dict.Source is not null
+            && string.Equals(dict.Source.OriginalString, definition.PalettePath, StringComparison.OrdinalIgnoreCase));
     }
 }
