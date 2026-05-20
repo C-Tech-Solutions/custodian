@@ -100,6 +100,47 @@ public sealed class ScanAnalysisTests
     }
 
     [Fact]
+    public void GlobalIndexMatchesFullSortAndExcludesRootFolder()
+    {
+        var result = SampleResult();
+
+        var index = ScanGlobalIndexBuilder.Build(result.Root, take: 2);
+        var expectedFiles = result.Root
+            .Flatten()
+            .Where(e => !e.IsDirectory)
+            .OrderByDescending(e => e.LogicalSizeBytes)
+            .ThenBy(e => e.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .Select(e => e.FullPath)
+            .ToList();
+        var expectedFolders = result.Root
+            .Flatten()
+            .Where(e => e.IsDirectory && !ReferenceEquals(e, result.Root))
+            .OrderByDescending(e => e.LogicalSizeBytes)
+            .ThenBy(e => e.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .Select(e => e.FullPath)
+            .ToList();
+
+        Assert.Equal(expectedFiles, index.LargestFiles.Select(e => e.FullPath).ToList());
+        Assert.Equal(expectedFolders, index.LargestFolders.Select(e => e.FullPath).ToList());
+        Assert.DoesNotContain(index.LargestFolders, entry => ReferenceEquals(entry, result.Root));
+    }
+
+    [Fact]
+    public void GlobalIndexAggregatesExtensionSummaries()
+    {
+        var index = ScanGlobalIndexBuilder.Build(SampleResult().Root);
+
+        var bin = index.ExtensionSummaries.Single(summary => summary.Extension == ".bin");
+
+        Assert.Equal(2, bin.FileCount);
+        Assert.Equal(140, bin.LogicalSizeBytes);
+        Assert.Equal(195, index.TotalFileLogicalSizeBytes);
+        Assert.Equal(4, index.FileEntryCount);
+    }
+
+    [Fact]
     public void ExtensionSummaryAggregatesWithoutChangingResults()
     {
         var summaries = ScanAnalysis.ExtensionSummary(SampleResult());

@@ -66,7 +66,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _folderJumpDebounceTimer;
     private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
-    private readonly Dictionary<DetailViewMode, Task<IReadOnlyList<DetailRow>>> _globalDetailRowsCache = [];
+    private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
     private int _detailRefreshVersion;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
@@ -887,7 +887,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PersistSettings();
     }
 
-    private async Task RefreshDetailsAsync(bool refreshContext = true)
+    private Task RefreshDetailsAsync(bool refreshContext = true)
     {
         var requestVersion = ++_detailRefreshVersion;
         var result = _currentScan;
@@ -902,7 +902,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             BreadcrumbItems.Clear();
             RefreshChart();
             RefreshNavigationState(null, null);
-            return;
+            return Task.CompletedTask;
         }
 
         var selected = _selectedEntry ?? result.Root;
@@ -914,31 +914,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            var rowsTask = GetOrCreateGlobalDetailRowsTask(result, viewMode);
-            if (!rowsTask.IsCompleted)
-            {
-                BeginGlobalDetailLoading(viewMode, selected);
-            }
-
             try
             {
-                rows = await rowsTask;
+                rows = GetOrCreateGlobalDetailRows(result, viewMode);
             }
             catch (Exception ex)
             {
-                RemoveFaultedGlobalDetailRowsTask(viewMode, rowsTask);
                 if (IsCurrentDetailRequest(requestVersion, result, selected, viewMode))
                 {
                     DetailsGrid.IsEnabled = true;
                     ShowOperationError("View failed", ex);
                 }
-                return;
+                return Task.CompletedTask;
             }
         }
 
         if (!IsCurrentDetailRequest(requestVersion, result, selected, viewMode))
         {
-            return;
+            return Task.CompletedTask;
         }
 
         ReplaceCollection(DetailRows, rows);
@@ -954,35 +947,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
         SelectedSubText.Text = BuildSelectedSubText(viewMode, selected);
+        return Task.CompletedTask;
     }
 
-    private void BeginGlobalDetailLoading(DetailViewMode mode, FileSystemEntry selected)
+    private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(ScanResult result, DetailViewMode mode)
     {
-        DetailsGrid.IsEnabled = false;
-        DetailRows.Clear();
-        DetailRowsView.Refresh();
-        FilterCountText.Text = "Loading...";
-        SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
-        SelectedSubText.Text = $"{ViewModeLabel(mode)} · loading rows...";
-    }
-
-    private Task<IReadOnlyList<DetailRow>> GetOrCreateGlobalDetailRowsTask(ScanResult result, DetailViewMode mode)
-    {
-        if (!_globalDetailRowsCache.TryGetValue(mode, out var task))
+        if (!_globalDetailRowsCache.TryGetValue(mode, out var rows))
         {
-            task = Task.Run(() => ProjectGlobalDetailRows(result, mode));
-            _globalDetailRowsCache[mode] = task;
+            rows = ProjectGlobalDetailRows(result, mode);
+            _globalDetailRowsCache[mode] = rows;
         }
 
-        return task;
-    }
-
-    private void RemoveFaultedGlobalDetailRowsTask(DetailViewMode mode, Task<IReadOnlyList<DetailRow>> task)
-    {
-        if (_globalDetailRowsCache.TryGetValue(mode, out var cachedTask) && ReferenceEquals(cachedTask, task))
-        {
-            _globalDetailRowsCache.Remove(mode);
-        }
+        return rows;
     }
 
     private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)

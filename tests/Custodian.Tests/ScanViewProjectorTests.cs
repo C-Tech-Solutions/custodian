@@ -164,6 +164,36 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void GlobalRowsUsePreparedIndex()
+    {
+        var root = Directory(@"C:\", 100, 0, 0);
+        var indexed = File(@"C:\indexed.bin", 100, ".bin");
+        var result = new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test Engine",
+            StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
+            CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z"),
+            GlobalIndex = new ScanGlobalIndex(
+                ScanGlobalIndex.DefaultTopEntryCount,
+                [indexed],
+                [],
+                [new ExtensionSummary(".bin", 1, 100, 100)],
+                100,
+                1,
+                0,
+                0)
+        };
+
+        var rows = ScanViewProjector.LargestFileRows(result);
+        var chart = ScanViewProjector.LargestFilesChart(result);
+
+        Assert.Equal("indexed.bin", rows.Single().Name);
+        Assert.Equal("indexed.bin", chart.Slices.Single().Label);
+    }
+
+    [Fact]
     public void ExtensionChartMatchesExtensionRowOrder()
     {
         var result = SampleResult();

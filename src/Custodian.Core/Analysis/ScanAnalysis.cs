@@ -4,6 +4,11 @@ namespace Custodian.Core.Analysis;
 
 public static class ScanAnalysis
 {
+    public static ScanGlobalIndex EnsureGlobalIndex(ScanResult result)
+    {
+        return result.GlobalIndex ??= ScanGlobalIndexBuilder.Build(result.Root);
+    }
+
     public static IReadOnlyList<FileSystemEntry> LargestFiles(ScanResult result, int take = 200)
     {
         return TopEntries(result.Root, take, e => !e.IsDirectory);

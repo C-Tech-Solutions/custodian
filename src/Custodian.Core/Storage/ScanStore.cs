@@ -1,4 +1,5 @@
 using Custodian.Core.Model;
+using Custodian.Core.Analysis;
 using System.Data.Common;
 using Microsoft.Data.Sqlite;
 
@@ -67,6 +68,7 @@ public sealed class ScanStore
         var metadata = await LoadMetadataAsync(connection, cancellationToken).ConfigureAwait(false);
         var byId = new Dictionary<long, FileSystemEntry>();
         var parentById = new Dictionary<long, long?>();
+        var indexBuilder = new ScanGlobalIndexBuilder();
 
         await using (var command = connection.CreateCommand())
         {
@@ -91,6 +93,7 @@ public sealed class ScanStore
                 };
                 byId[id] = entry;
                 parentById[id] = parentId;
+                indexBuilder.Observe(entry);
             }
         }
 
@@ -102,13 +105,15 @@ public sealed class ScanStore
             }
         }
 
+        var root = byId[parentById.Single(p => p.Value is null).Key];
         var result = new ScanResult
         {
             RootPath = metadata["root_path"],
             Engine = metadata["engine"],
             StartedAt = DateTimeOffset.Parse(metadata["started_at"]),
             CompletedAt = DateTimeOffset.Parse(metadata["completed_at"]),
-            Root = byId[parentById.Single(p => p.Value is null).Key]
+            Root = root,
+            GlobalIndex = indexBuilder.Build(root)
         };
 
         await using (var command = connection.CreateCommand())

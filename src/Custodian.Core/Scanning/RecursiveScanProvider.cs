@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Custodian.Core.Analysis;
 using Custodian.Core.Model;
 
 namespace Custodian.Core.Scanning;
@@ -23,7 +24,9 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         var skipped = new List<SkippedEntry>();
         var counters = new ScanCounters();
         var progressThrottle = new ProgressThrottle(progress);
-        var root = ScanDirectory(new DirectoryInfo(options.RootPath), options, skipped, counters, progressThrottle, cancellationToken);
+        var indexBuilder = new ScanGlobalIndexBuilder();
+        var root = ScanDirectory(new DirectoryInfo(options.RootPath), options, skipped, counters, progressThrottle, indexBuilder, cancellationToken);
+        var globalIndex = indexBuilder.Build(root);
         scanWatch.Stop();
 
         return Task.FromResult(new ScanResult
@@ -33,6 +36,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             StartedAt = started,
             CompletedAt = DateTimeOffset.UtcNow,
             Root = root,
+            GlobalIndex = globalIndex,
             SkippedEntries = skipped,
             PhaseTimings =
             [
@@ -47,6 +51,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         List<SkippedEntry> skipped,
         ScanCounters counters,
         ProgressThrottle progress,
+        ScanGlobalIndexBuilder indexBuilder,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -75,7 +80,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
                     continue;
                 }
 
-                var childEntry = ScanDirectory(childDirectory, options, skipped, counters, progress, cancellationToken);
+                var childEntry = ScanDirectory(childDirectory, options, skipped, counters, progress, indexBuilder, cancellationToken);
                 entry.Children.Add(childEntry);
                 entry.LogicalSizeBytes += childEntry.LogicalSizeBytes;
                 entry.AllocatedSizeBytes += childEntry.AllocatedSizeBytes;
@@ -101,6 +106,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
                 }
 
                 entry.Children.Add(fileEntry);
+                indexBuilder.Observe(fileEntry);
                 entry.LogicalSizeBytes += fileEntry.LogicalSizeBytes;
                 entry.AllocatedSizeBytes += fileEntry.AllocatedSizeBytes;
                 entry.FileCount++;
@@ -114,6 +120,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             skipped.Add(new SkippedEntry(directory.FullName, ex.Message));
         }
 
+        indexBuilder.Observe(entry);
         return entry;
     }
 

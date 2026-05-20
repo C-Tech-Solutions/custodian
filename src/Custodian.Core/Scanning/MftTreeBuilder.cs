@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Custodian.Core.Analysis;
 using Custodian.Core.Model;
 
 namespace Custodian.Core.Scanning;
@@ -88,6 +89,7 @@ internal static class MftTreeBuilder
         var sizeWatch = Stopwatch.StartNew();
         var filesSeen = 0L;
         var bytesSeen = 0L;
+        var indexBuilder = new ScanGlobalIndexBuilder();
 
         foreach (var record in records.Values)
         {
@@ -130,7 +132,7 @@ internal static class MftTreeBuilder
                     ? ResolveSize(fullPath, record, options)
                     : sizeResolver(fullPath, record);
 
-                parent.Children.Add(new FileSystemEntry
+                var fileEntry = new FileSystemEntry
                 {
                     Name = record.FileName,
                     FullPath = fullPath,
@@ -140,7 +142,9 @@ internal static class MftTreeBuilder
                     FileCount = 1,
                     Extension = Path.GetExtension(record.FileName).ToLowerInvariant(),
                     Attributes = record.FileAttributes.ToString()
-                });
+                };
+                parent.Children.Add(fileEntry);
+                indexBuilder.Observe(fileEntry);
                 bytesSeen += logicalSize;
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
@@ -153,11 +157,12 @@ internal static class MftTreeBuilder
         progress.Report(scanRoot.FullPath, filesSeen, directoryNodes.Count, bytesSeen, "Building folder totals", force: true);
 
         var aggregateWatch = Stopwatch.StartNew();
-        Aggregate(scanRoot);
+        Aggregate(scanRoot, indexBuilder);
         aggregateWatch.Stop();
 
         return new MftTreeBuildResult(
             scanRoot,
+            indexBuilder.Build(scanRoot),
             filesSeen,
             bytesSeen,
             treeWatch.Elapsed,
@@ -240,7 +245,7 @@ internal static class MftTreeBuilder
         return (length, allocated);
     }
 
-    private static void Aggregate(FileSystemEntry entry)
+    private static void Aggregate(FileSystemEntry entry, ScanGlobalIndexBuilder indexBuilder)
     {
         if (!entry.IsDirectory)
         {
@@ -254,17 +259,20 @@ internal static class MftTreeBuilder
 
         foreach (var child in entry.Children)
         {
-            Aggregate(child);
+            Aggregate(child, indexBuilder);
             entry.LogicalSizeBytes += child.LogicalSizeBytes;
             entry.AllocatedSizeBytes += child.AllocatedSizeBytes;
             entry.FileCount += child.IsDirectory ? child.FileCount : 1;
             entry.DirectoryCount += child.IsDirectory ? child.DirectoryCount + 1 : 0;
         }
+
+        indexBuilder.Observe(entry);
     }
 }
 
 internal sealed record MftTreeBuildResult(
     FileSystemEntry Root,
+    ScanGlobalIndex GlobalIndex,
     long FilesSeen,
     long BytesSeen,
     TimeSpan TreeConstructionDuration,
