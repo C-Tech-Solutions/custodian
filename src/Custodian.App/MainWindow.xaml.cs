@@ -68,6 +68,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
     private readonly Dictionary<DetailViewMode, Task<IReadOnlyList<DetailRow>>> _globalDetailRowsCache = [];
     private int _detailRefreshVersion;
+    private IReadOnlyList<DetailRow>? _boundDetailRows;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
@@ -579,7 +580,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void DetailsGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        var row = FindVisualParent<DataGridRow>((DependencyObject)e.OriginalSource);
+        var row = FindVisualParent<System.Windows.Controls.ListViewItem>((DependencyObject)e.OriginalSource);
         if (row is null) return;
         row.IsSelected = true;
         row.Focus();
@@ -897,6 +898,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SelectedSubText.Text = "Choose a path and scan.";
             DetailsGrid.IsEnabled = true;
             DetailRows.Clear();
+            _boundDetailRows = null;
             ChartSlices.Clear();
             SummaryMetrics.Clear();
             BreadcrumbItems.Clear();
@@ -941,9 +943,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        ReplaceCollection(DetailRows, rows);
         DetailsGrid.IsEnabled = true;
-        DetailRowsView.Refresh();
+        if (!ReferenceEquals(rows, _boundDetailRows))
+        {
+            ReplaceCollection(DetailRows, rows);
+            _boundDetailRows = rows;
+            // ReplaceAll already raised a Reset, which refreshes the view. An
+            // explicit Refresh is only needed to re-run the filter predicate.
+            if (!string.IsNullOrEmpty(_filterText))
+            {
+                DetailRowsView.Refresh();
+            }
+        }
         UpdateFilterUiState();
         if (refreshContext)
         {
@@ -960,6 +971,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         DetailsGrid.IsEnabled = false;
         DetailRows.Clear();
+        _boundDetailRows = null;
         DetailRowsView.Refresh();
         FilterCountText.Text = "Loading...";
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
@@ -1221,6 +1233,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _currentScan = null;
         FolderNodes.Clear();
         DetailRows.Clear();
+        _boundDetailRows = null;
         ChartSlices.Clear();
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
@@ -1507,43 +1520,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {
-    private bool _suppressNotifications;
-
     public void ReplaceAll(IEnumerable<T> items)
     {
-        _suppressNotifications = true;
-        try
+        var newItems = items as IReadOnlyList<T> ?? items.ToList();
+        var oldCount = Count;
+
+        // Reconcile in place with granular Replace/Add/Remove notifications
+        // rather than Clear + refill + a single Reset. A Reset forces a
+        // virtualizing ListView to discard every realized container and run a
+        // full re-layout (~120 ms per view switch); granular changes let it
+        // recycle containers the same cheap way it does while scrolling.
+        var common = Math.Min(oldCount, newItems.Count);
+
+        for (var i = 0; i < common; i++)
         {
-            ClearItems();
-            foreach (var item in items)
-            {
-                Items.Add(item);
-            }
-        }
-        finally
-        {
-            _suppressNotifications = false;
+            var oldItem = Items[i];
+            Items[i] = newItems[i];
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(
+                NotifyCollectionChangedAction.Replace, newItems[i], oldItem, i));
         }
 
-        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        for (var i = oldCount; i < newItems.Count; i++)
+        {
+            Items.Add(newItems[i]);
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(
+                NotifyCollectionChangedAction.Add, newItems[i], i));
+        }
+
+        for (var i = oldCount - 1; i >= newItems.Count; i--)
+        {
+            var removed = Items[i];
+            Items.RemoveAt(i);
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(
+                NotifyCollectionChangedAction.Remove, removed, i));
+        }
+
+        if (Count != oldCount)
+        {
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        }
+
         OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
-    }
-
-    protected override void OnCollectionChanged(NotifyCollectionChangedEventArgs e)
-    {
-        if (!_suppressNotifications)
-        {
-            base.OnCollectionChanged(e);
-        }
-    }
-
-    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
-    {
-        if (!_suppressNotifications)
-        {
-            base.OnPropertyChanged(e);
-        }
     }
 }
 
