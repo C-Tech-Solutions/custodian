@@ -967,121 +967,43 @@
     </Style>
 
     <!-- ============================================================ -->
-    <!--  DataGrid + parts  -->
+    <!--  Results list (ListView)  -->
     <!-- ============================================================ -->
-    <Style TargetType="{x:Type DataGrid}">
-        <Setter Property="AutoGenerateColumns" Value="False"/>
-        <Setter Property="CanUserSortColumns" Value="True"/>
-        <Setter Property="IsReadOnly" Value="True"/>
-        <Setter Property="SelectionMode" Value="Extended"/>
-        <Setter Property="GridLinesVisibility" Value="None"/>
-        <Setter Property="HeadersVisibility" Value="Column"/>
-        <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource GridLineBrush}"/>
-        <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource GridLineBrush}"/>
-        <Setter Property="RowHeight" Value="30"/>
-        <Setter Property="ColumnHeaderHeight" Value="32"/>
+    <Style TargetType="{x:Type ListView}">
         <Setter Property="Background" Value="{DynamicResource SurfaceRaised}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="RowBackground" Value="Transparent"/>
-        <Setter Property="AlternatingRowBackground" Value="{DynamicResource RowAlternate}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="SelectionMode" Value="Extended"/>
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
     </Style>
 
-    <Style TargetType="{x:Type DataGridColumnHeader}">
-        <Setter Property="Background" Value="{DynamicResource SurfaceSubtle}"/>
-        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
-        <Setter Property="BorderThickness" Value="0,0,0,1"/>
-        <Setter Property="Padding" Value="10,6"/>
-        <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
-        <Setter Property="FontSize" Value="11.5"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="{x:Type DataGridColumnHeader}">
-                    <Grid>
-                        <Border x:Name="Bd"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                Padding="{TemplateBinding Padding}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                  VerticalAlignment="Center"/>
-                                <Path x:Name="SortArrow" Grid.Column="1" Margin="6,0,0,0"
-                                      Width="8" Height="6" Stretch="Fill"
-                                      Visibility="Collapsed"
-                                      Fill="{DynamicResource MutedStrong}"
-                                      Data="M 0 0 L 4 6 L 8 0 Z"/>
-                            </Grid>
-                        </Border>
-                        <Thumb x:Name="PART_RightHeaderGripper" HorizontalAlignment="Right"
-                               Width="6" Background="Transparent" Cursor="SizeWE">
-                            <Thumb.Template>
-                                <ControlTemplate TargetType="{x:Type Thumb}">
-                                    <Border Background="Transparent"/>
-                                </ControlTemplate>
-                            </Thumb.Template>
-                        </Thumb>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SurfaceMuted}"/>
-                        </Trigger>
-                        <Trigger Property="SortDirection" Value="Ascending">
-                            <Setter TargetName="SortArrow" Property="Visibility" Value="Visible"/>
-                            <Setter TargetName="SortArrow" Property="RenderTransform">
-                                <Setter.Value>
-                                    <RotateTransform Angle="180" CenterX="4" CenterY="3"/>
-                                </Setter.Value>
-                            </Setter>
-                        </Trigger>
-                        <Trigger Property="SortDirection" Value="Descending">
-                            <Setter TargetName="SortArrow" Property="Visibility" Value="Visible"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <Style TargetType="{x:Type DataGridRow}">
+    <Style TargetType="{x:Type ListViewItem}">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-        <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{DynamicResource RowHover}"/>
-            </Trigger>
-            <Trigger Property="IsSelected" Value="True">
-                <Setter Property="Background" Value="{DynamicResource SelectionFill}"/>
-                <Setter Property="Foreground" Value="{DynamicResource TextStrong}"/>
-            </Trigger>
-        </Style.Triggers>
-    </Style>
-
-    <Style TargetType="{x:Type DataGridCell}">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="10,0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Height" Value="30"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="{x:Type DataGridCell}">
-                    <Border Background="{TemplateBinding Background}"
-                            Padding="{TemplateBinding Padding}"
+                <ControlTemplate TargetType="{x:Type ListViewItem}">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
                             SnapsToDevicePixels="True">
                         <ContentPresenter VerticalAlignment="Center"/>
                     </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource RowHover}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionFill}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextStrong}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -1134,6 +1056,13 @@
 
     <Style x:Key="MutedText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+    </Style>
+
+    <Style x:Key="ColumnHeaderText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
     <!-- ============================================================ -->

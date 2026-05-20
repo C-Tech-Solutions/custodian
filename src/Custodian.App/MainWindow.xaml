@@ -424,70 +424,98 @@
                             </Grid>
                         </Border>
 
-                        <!-- Data grid -->
-                        <DataGrid x:Name="DetailsGrid"
-                                  ItemsSource="{Binding DetailRowsView}"
-                                  MouseDoubleClick="DetailsGrid_MouseDoubleClick"
-                                  PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown"
-                                  PreviewKeyDown="DetailsGrid_PreviewKeyDown">
-                            <DataGrid.ContextMenu>
-                                <ContextMenu>
-                                    <MenuItem Header="Open" Click="OpenSelected_Click"/>
-                                    <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
-                                    <Separator/>
-                                    <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
-                                    <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
-                                    <MenuItem Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
-                                    <Separator/>
-                                    <MenuItem Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
-                                </ContextMenu>
-                            </DataGrid.ContextMenu>
-                            <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="" Width="36" CanUserSort="False">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Icon}" FontFamily="{StaticResource IconFont}"
-                                                       FontSize="14" HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"
+                        <!-- Results list. A plain ListView with a flat
+                             ItemTemplate and a static header row above it,
+                             rather than a DataGrid. The per-view-switch stutter
+                             came from BulkObservableCollection.ReplaceAll
+                             raising a Reset, which makes a virtualizing list
+                             discard and rebuild every container; ReplaceAll now
+                             emits granular Replace/Add/Remove instead. Header
+                             and row column widths are fixed pixel values so
+                             they stay aligned. -->
+                        <DockPanel x:Name="ResultsHost">
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
+                                        Background="{DynamicResource SurfaceSubtle}"
+                                        Height="32">
+                                <Border Width="36"/>
+                                <TextBlock Width="300" Margin="4,0" Text="Name" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="64" Margin="4,0" Text="Type" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="92" Margin="4,0" Text="Size" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="130" Margin="4,0" Text="Share" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="92" Margin="4,0" Text="Allocated" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="68" Margin="4,0" Text="Files" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="72" Margin="4,0" Text="Folders" Style="{StaticResource ColumnHeaderText}"/>
+                                <TextBlock Width="320" Margin="4,0" Text="Path" Style="{StaticResource ColumnHeaderText}"/>
+                            </StackPanel>
+                            <ListView x:Name="DetailsGrid"
+                                      ItemsSource="{Binding DetailRowsView}"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      ScrollViewer.CanContentScroll="True"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      MouseDoubleClick="DetailsGrid_MouseDoubleClick"
+                                      PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown"
+                                      PreviewKeyDown="DetailsGrid_PreviewKeyDown">
+                                <ListView.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Open" Click="OpenSelected_Click"/>
+                                        <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                        <Separator/>
+                                        <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
+                                        <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
+                                        <MenuItem Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
+                                        <Separator/>
+                                        <MenuItem Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
+                                    </ContextMenu>
+                                </ListView.ContextMenu>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Height="30">
+                                            <TextBlock Width="36" Text="{Binding Icon}"
+                                                       FontFamily="{StaticResource IconFont}" FontSize="14"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
                                                        Foreground="{Binding CategoryColor, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="4*"
-                                                    SortMemberPath="Name"/>
-                                <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="64"
-                                                    SortMemberPath="Kind"/>
-                                <DataGridTextColumn Header="Size" Binding="{Binding LogicalSize}" Width="92"
-                                                    SortMemberPath="Entry.LogicalSizeBytes"/>
-                                <DataGridTemplateColumn Header="Share" Width="130" SortMemberPath="Percent">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <Grid VerticalAlignment="Center">
+                                            <TextBlock Width="300" Margin="4,0" Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                            <TextBlock Width="64" Margin="4,0" Text="{Binding Kind}"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Width="92" Margin="4,0" Text="{Binding LogicalSize}"
+                                                       VerticalAlignment="Center"/>
+                                            <Grid Width="130" Margin="4,0" VerticalAlignment="Center">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="46"/>
                                                 </Grid.ColumnDefinitions>
-                                                <ProgressBar Height="6" Maximum="100" Value="{Binding Percent}"
-                                                             Foreground="{Binding CategoryColor, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
-                                                             VerticalAlignment="Center"/>
+                                                <Border x:Name="ShareTrack" Height="6" CornerRadius="3"
+                                                        Background="{DynamicResource SurfaceSubtle}"
+                                                        VerticalAlignment="Center">
+                                                    <Border HorizontalAlignment="Left" CornerRadius="3"
+                                                            Background="{Binding CategoryColor, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}">
+                                                        <Border.Width>
+                                                            <MultiBinding Converter="{x:Static controls:PercentToWidthConverter.Instance}">
+                                                                <Binding Path="Percent"/>
+                                                                <Binding Path="ActualWidth" ElementName="ShareTrack"/>
+                                                            </MultiBinding>
+                                                        </Border.Width>
+                                                    </Border>
+                                                </Border>
                                                 <TextBlock Grid.Column="1" Text="{Binding PercentText}"
-                                                           HorizontalAlignment="Right"
-                                                           Foreground="{DynamicResource MutedBrush}"
-                                                           FontSize="11.5"/>
+                                                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource MutedBrush}" FontSize="11.5"/>
                                             </Grid>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="Allocated" Binding="{Binding AllocatedSize}" Width="92"
-                                                    SortMemberPath="Entry.AllocatedSizeBytes"/>
-                                <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="68"
-                                                    SortMemberPath="FileCount"/>
-                                <DataGridTextColumn Header="Folders" Binding="{Binding DirectoryCount}" Width="72"
-                                                    SortMemberPath="DirectoryCount"/>
-                                <DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*"
-                                                    SortMemberPath="FullPath"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
+                                            <TextBlock Width="92" Margin="4,0" Text="{Binding AllocatedSize}"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Width="68" Margin="4,0" Text="{Binding FileCount}"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Width="72" Margin="4,0" Text="{Binding DirectoryCount}"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Width="320" Margin="4,0" Text="{Binding FullPath}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </DockPanel>
                     </DockPanel>
 
                     <!-- Empty state -->
