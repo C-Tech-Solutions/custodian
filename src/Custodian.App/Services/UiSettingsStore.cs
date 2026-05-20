@@ -6,7 +6,7 @@ namespace Custodian.App.Services;
 
 public sealed class UiSettings
 {
-    public string Theme { get; set; } = "Light";
+    public string Theme { get; set; } = "Dark";
     public double WindowWidth { get; set; } = 1400;
     public double WindowHeight { get; set; } = 880;
     public double WindowLeft { get; set; } = double.NaN;

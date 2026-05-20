@@ -42,6 +42,64 @@ public sealed class ScanAnalysisTests
     }
 
     [Fact]
+    public void LargestFilesOrdersTiesByPath()
+    {
+        var root = Directory(@"C:\", 300, 3, 0);
+        root.Children.Add(File(@"C:\z.bin", 100, ".bin"));
+        root.Children.Add(File(@"C:\a.bin", 100, ".bin"));
+        root.Children.Add(File(@"C:\m.bin", 100, ".bin"));
+        var result = Result(root);
+
+        var rows = ScanAnalysis.LargestFiles(result, 3).Select(e => e.FullPath).ToList();
+
+        Assert.Equal([@"C:\a.bin", @"C:\m.bin", @"C:\z.bin"], rows);
+    }
+
+    [Fact]
+    public void LargestFoldersOrdersTiesByPath()
+    {
+        var root = Directory(@"C:\", 300, 0, 3);
+        root.Children.Add(Directory(@"C:\Zulu", 100, 0, 0));
+        root.Children.Add(Directory(@"C:\Alpha", 100, 0, 0));
+        root.Children.Add(Directory(@"C:\Middle", 100, 0, 0));
+        var result = Result(root);
+
+        var rows = ScanAnalysis.LargestFolders(result, 4).Select(e => e.FullPath).ToList();
+
+        Assert.Equal([@"C:\", @"C:\Alpha", @"C:\Middle", @"C:\Zulu"], rows);
+    }
+
+    [Fact]
+    public void LargestFilesCapsAndOrdersLargeTree()
+    {
+        var root = Directory(@"C:\", 0, 0, 0);
+        for (var i = 0; i < 50; i++)
+        {
+            var folder = Directory($@"C:\Folder{i:000}", 0, 0, 0);
+            for (var j = 0; j < 80; j++)
+            {
+                var size = i * 80 + j;
+                folder.Children.Add(File($@"C:\Folder{i:000}\File{j:000}.bin", size, ".bin"));
+            }
+            root.Children.Add(folder);
+        }
+        var result = Result(root);
+
+        var optimized = ScanAnalysis.LargestFiles(result, 200).Select(e => e.FullPath).ToList();
+        var expected = result.Root
+            .Flatten()
+            .Where(e => !e.IsDirectory)
+            .OrderByDescending(e => e.LogicalSizeBytes)
+            .ThenBy(e => e.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Take(200)
+            .Select(e => e.FullPath)
+            .ToList();
+
+        Assert.Equal(200, optimized.Count);
+        Assert.Equal(expected, optimized);
+    }
+
+    [Fact]
     public void ExtensionSummaryAggregatesWithoutChangingResults()
     {
         var summaries = ScanAnalysis.ExtensionSummary(SampleResult());
@@ -66,6 +124,11 @@ public sealed class ScanAnalysisTests
         root.Children.Add(alpha);
         root.Children.Add(beta);
 
+        return Result(root);
+    }
+
+    private static ScanResult Result(FileSystemEntry root)
+    {
         return new ScanResult
         {
             RootPath = root.FullPath,

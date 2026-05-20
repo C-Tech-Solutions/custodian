@@ -1,0 +1,57 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Surfaces -->
+    <SolidColorBrush x:Key="Surface" Color="#071214"/>
+    <SolidColorBrush x:Key="SurfaceRaised" Color="#0D1D20"/>
+    <SolidColorBrush x:Key="SurfaceSubtle" Color="#13282C"/>
+    <SolidColorBrush x:Key="SurfaceMuted" Color="#1A353A"/>
+    <SolidColorBrush x:Key="HeaderSurface" Color="#0A171A"/>
+    <SolidColorBrush x:Key="PanelBrush" Color="#0D1D20"/>
+    <SolidColorBrush x:Key="OverlayScrim" Color="#A0000000"/>
+
+    <!-- Borders -->
+    <SolidColorBrush x:Key="Border" Color="#1E3B40"/>
+    <SolidColorBrush x:Key="BorderStrong" Color="#2E5960"/>
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#1E3B40"/>
+    <SolidColorBrush x:Key="Divider" Color="#173036"/>
+    <SolidColorBrush x:Key="GridLineBrush" Color="#173036"/>
+
+    <!-- Text -->
+    <SolidColorBrush x:Key="TextBrush" Color="#DDF7F4"/>
+    <SolidColorBrush x:Key="TextStrong" Color="#F0FDFA"/>
+    <SolidColorBrush x:Key="MutedBrush" Color="#92B8B7"/>
+    <SolidColorBrush x:Key="MutedStrong" Color="#B8DAD7"/>
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#567273"/>
+    <SolidColorBrush x:Key="OnAccentBrush" Color="#FFFFFF"/>
+
+    <!-- Accent -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#0F766E"/>
+    <SolidColorBrush x:Key="AccentHover" Color="#0D9488"/>
+    <SolidColorBrush x:Key="AccentPressed" Color="#115E59"/>
+    <SolidColorBrush x:Key="AccentSubtle" Color="#123C3B"/>
+    <SolidColorBrush x:Key="AccentRing" Color="#2DD4BF"/>
+
+    <!-- States -->
+    <SolidColorBrush x:Key="HoverFill" Color="#153036"/>
+    <SolidColorBrush x:Key="PressedFill" Color="#1D3E45"/>
+    <SolidColorBrush x:Key="SelectionFill" Color="#155E75"/>
+    <SolidColorBrush x:Key="SelectionFillInactive" Color="#1F3D43"/>
+    <SolidColorBrush x:Key="RowHover" Color="#10282D"/>
+    <SolidColorBrush x:Key="RowAlternate" Color="#0B1A1D"/>
+
+    <!-- Status -->
+    <SolidColorBrush x:Key="SuccessBrush" Color="#22C55E"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#F87171"/>
+
+    <!-- Scrollbar -->
+    <SolidColorBrush x:Key="ScrollThumb" Color="#2E5960"/>
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#40777F"/>
+    <SolidColorBrush x:Key="ScrollTrack" Color="Transparent"/>
+
+    <!-- Chart neutrals -->
+    <SolidColorBrush x:Key="ChartGuide" Color="#1E3B40"/>
+    <SolidColorBrush x:Key="ChartOther" Color="#5F7F86"/>
+
+</ResourceDictionary>

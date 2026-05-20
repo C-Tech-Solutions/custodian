@@ -87,8 +87,8 @@ public sealed class PieChartControl : FrameworkElement
 
     private void RefreshThemeResources()
     {
-        _calloutBrush = (WpfBrush?)TryFindResource("MutedStrong") ?? CreateBrush(WpfColor.FromRgb(51, 65, 85));
-        _calloutPen = CreatePen(_calloutBrush, 1);
+        _calloutBrush = (WpfBrush?)TryFindResource("TextStrong") ?? CreateBrush(WpfColor.FromRgb(15, 23, 42));
+        _calloutPen = CreatePen((WpfBrush?)TryFindResource("MutedStrong") ?? _calloutBrush, 1.25);
         _emptyStateBrush = (WpfBrush?)TryFindResource("MutedBrush") ?? CreateBrush(WpfColor.FromRgb(100, 116, 139));
         _emptyStatePen = CreatePen((WpfBrush?)TryFindResource("Border") ?? CreateBrush(WpfColor.FromRgb(203, 213, 225)), 1);
         _centerBrush = (WpfBrush?)TryFindResource("SurfaceRaised") ?? System.Windows.Media.Brushes.White;
@@ -308,7 +308,7 @@ public sealed class PieChartControl : FrameworkElement
             System.Globalization.CultureInfo.CurrentCulture,
             System.Windows.FlowDirection.LeftToRight,
             SemiBoldTypeface,
-            10,
+            11.5,
             _calloutBrush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip)
         {

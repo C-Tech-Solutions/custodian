@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Collections.Specialized;
+using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
@@ -13,6 +14,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using System.Windows.Interop;
 using Custodian.App.Controls;
 using Custodian.App.Services;
 using Custodian.Core.Export;
@@ -36,6 +38,12 @@ namespace Custodian.App;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaCaptionColor = 35;
+    private const int DwmwaTextColor = 36;
+    private const double DefaultRightPanelWidth = 350;
+    private const double CollapsedRightPanelWidth = 36;
+
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
     private CancellationTokenSource? _scanCts;
@@ -58,6 +66,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _folderJumpDebounceTimer;
     private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
+    private readonly Dictionary<DetailViewMode, Task<IReadOnlyList<DetailRow>>> _globalDetailRowsCache = [];
+    private int _detailRefreshVersion;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
@@ -114,12 +124,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         LocationChanged += (_, _) => ScheduleSettingsSave();
         StateChanged += (_, _) => ScheduleSettingsSave();
         Closing += (_, _) => PersistSettings();
+        SourceInitialized += (_, _) => ApplyNativeTitleBarTheme();
 
         ThemeManager.ThemeChanged += (_, _) =>
         {
+            ApplyNativeTitleBarTheme();
+            RefreshThemeMenuChecks();
             Treemap?.InvalidateVisual();
             PieChart?.InvalidateVisual();
         };
+        RefreshThemeMenuChecks();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -131,9 +145,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         // Theme has to apply before InitializeComponent finishes laying out — but
         // since this runs in the ctor before any visuals matter, calling Apply here is fine.
-        ThemeManager.Apply(_settings.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase)
-            ? AppTheme.Dark
-            : AppTheme.Light);
+        ThemeManager.Apply(ThemeManager.ParseOrDefault(_settings.Theme));
 
         if (_settings.WindowWidth > 400) Width = _settings.WindowWidth;
         if (_settings.WindowHeight > 400) Height = _settings.WindowHeight;
@@ -148,10 +160,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             LeftCol.Width = new GridLength(_settings.LeftPanelWidth);
         }
-        if (_settings.RightPanelWidth > 0)
-        {
-            RightCol.Width = new GridLength(_settings.RightPanelWidth);
-        }
+        _savedRightWidth = _settings.RightPanelWidth > CollapsedRightPanelWidth
+            ? _settings.RightPanelWidth
+            : DefaultRightPanelWidth;
+        RightCol.Width = new GridLength(_savedRightWidth);
         if (_settings.RightPanelCollapsed)
         {
             CollapseRight();
@@ -199,9 +211,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _settings.WindowTop = Top;
         }
         _settings.LeftPanelWidth = LeftCol.Width.IsAbsolute ? LeftCol.Width.Value : 320;
-        _settings.RightPanelWidth = RightCol.Width.IsAbsolute && RightCol.Width.Value > 0
-            ? RightCol.Width.Value
-            : _settings.RightPanelWidth;
+        if (RightPanel.Visibility == Visibility.Visible
+            && RightCol.Width.IsAbsolute
+            && RightCol.Width.Value > 0)
+        {
+            _savedRightWidth = RightCol.Width.Value;
+        }
+        _settings.RightPanelWidth = _savedRightWidth;
         _settings.RightPanelCollapsed = RightPanel.Visibility != Visibility.Visible;
         _settings.ChartMode = _chartDisplayMode.ToString();
         _settings.LastPath = PathBox.Text ?? string.Empty;
@@ -352,6 +368,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void ApplyNativeTitleBarTheme()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var useDarkMode = ThemeManager.UsesDarkChrome ? 1 : 0;
+        SetDwmAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref useDarkMode, nameof(DwmwaUseImmersiveDarkMode));
+
+        var caption = ThemeManager.CaptionColor;
+        var captionColor = ColorRef(caption.R, caption.G, caption.B);
+        SetDwmAttribute(hwnd, DwmwaCaptionColor, ref captionColor, nameof(DwmwaCaptionColor));
+
+        var captionText = ThemeManager.CaptionTextColor;
+        var textColor = ColorRef(captionText.R, captionText.G, captionText.B);
+        SetDwmAttribute(hwnd, DwmwaTextColor, ref textColor, nameof(DwmwaTextColor));
+    }
+
     private async void OpenScan_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
@@ -482,9 +518,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ViewMode_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
-        _viewMode = mode;
-        RefreshDetails();
+        RunUiAction(async () =>
+        {
+            if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
+            _viewMode = mode;
+            await RefreshDetailsAsync(refreshContext: false);
+        }, "Failed to change view");
     }
 
     // ============================================================
@@ -506,18 +545,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
-    private void Chart_SliceSelected(object sender, ChartSliceEventArgs e) => SelectChartSlice(e.Slice, drillIntoFolders: false);
-    private void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e) => SelectChartSlice(e.Slice, drillIntoFolders: true);
+    private void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
+        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false), "Chart selection failed");
+
+    private void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
+        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true), "Chart selection failed");
 
     private void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice) return;
-        SelectChartSlice(slice, drillIntoFolders: false);
+        RunUiAction(async () =>
+        {
+            if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice) return;
+            await SelectChartSliceAsync(slice, drillIntoFolders: false);
+        }, "Chart selection failed");
     }
 
     private void ChartBars_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (ChartBars.SelectedItem is ChartSlice slice) SelectChartSlice(slice, drillIntoFolders: true);
+        RunUiAction(async () =>
+        {
+            if (ChartBars.SelectedItem is ChartSlice slice) await SelectChartSliceAsync(slice, drillIntoFolders: true);
+        }, "Chart selection failed");
     }
 
     // ============================================================
@@ -623,6 +671,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
+    private void ThemeMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.MenuItem { Tag: AppTheme theme })
+        {
+            ThemeManager.Apply(theme);
+            ScheduleSettingsSave();
+        }
+
+        RefreshThemeMenuChecks();
+    }
+
+    private void RefreshThemeMenuChecks()
+    {
+        if (ThemeSelectorMenu.Items.Count == 0
+            || ThemeSelectorMenu.Items[0] is not System.Windows.Controls.MenuItem themeMenuItem)
+        {
+            return;
+        }
+
+        foreach (var item in themeMenuItem.Items.OfType<System.Windows.Controls.MenuItem>())
+        {
+            if (item.Tag is AppTheme theme)
+            {
+                item.IsChecked = theme == ThemeManager.Current;
+            }
+        }
+    }
+
     private void ShowShortcuts_Click(object sender, RoutedEventArgs e) => ShowShortcuts();
     private void ShortcutClose_Click(object sender, RoutedEventArgs e) => ShortcutOverlay.Visibility = Visibility.Collapsed;
     private void ShortcutOverlay_MouseDown(object sender, MouseButtonEventArgs e)
@@ -632,22 +708,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     private void ShowShortcuts() => ShortcutOverlay.Visibility = Visibility.Visible;
 
-    private double _savedRightWidth = 350;
+    private double _savedRightWidth = DefaultRightPanelWidth;
     private void CollapseRight_Click(object sender, RoutedEventArgs e) => CollapseRight();
     private void ExpandRight_Click(object sender, RoutedEventArgs e) => ExpandRight();
     private void CollapseRight()
     {
-        if (RightCol.Width.IsAbsolute && RightCol.Width.Value > 0) _savedRightWidth = RightCol.Width.Value;
+        if (RightPanel.Visibility == Visibility.Visible
+            && RightCol.Width.IsAbsolute
+            && RightCol.Width.Value > 0)
+        {
+            _savedRightWidth = RightCol.Width.Value;
+        }
         RightPanel.Visibility = Visibility.Collapsed;
         RightPanelTab.Visibility = Visibility.Visible;
-        RightCol.Width = new GridLength(40);
+        RightCol.Width = new GridLength(CollapsedRightPanelWidth);
         ScheduleSettingsSave();
     }
     private void ExpandRight()
     {
         RightPanel.Visibility = Visibility.Visible;
         RightPanelTab.Visibility = Visibility.Collapsed;
-        RightCol.Width = new GridLength(_savedRightWidth);
+        var restoredWidth = _savedRightWidth > CollapsedRightPanelWidth
+            ? _savedRightWidth
+            : DefaultRightPanelWidth;
+        RightCol.Width = new GridLength(restoredWidth);
         ScheduleSettingsSave();
     }
 
@@ -771,6 +855,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private async Task LoadScanIntoUiAsync(ScanResult result)
     {
+        ClearGlobalDetailRowsCache();
+
         var analysisWatch = Stopwatch.StartNew();
         var prepared = await Task.Run(() => new ScanUiPreparation(
             FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)),
@@ -787,7 +873,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ViewContents.IsChecked = true;
         _selectedChartSourceKey = null;
         RefreshFolderJumpRows(string.Empty);
-        RefreshDetails();
+        await RefreshDetailsAsync();
 
         analysisWatch.Stop();
         result.PhaseTimings.RemoveAll(t => t.Name == "UI analysis preparation");
@@ -801,13 +887,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PersistSettings();
     }
 
-    private void RefreshDetails()
+    private async Task RefreshDetailsAsync(bool refreshContext = true)
     {
+        var requestVersion = ++_detailRefreshVersion;
         var result = _currentScan;
         if (result is null)
         {
             SelectedTitleText.Text = "No scan loaded";
             SelectedSubText.Text = "Choose a path and scan.";
+            DetailsGrid.IsEnabled = true;
             DetailRows.Clear();
             ChartSlices.Clear();
             SummaryMetrics.Clear();
@@ -818,23 +906,108 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var selected = _selectedEntry ?? result.Root;
-        var rows = _viewMode switch
+        var viewMode = _viewMode;
+        IReadOnlyList<DetailRow> rows;
+        if (viewMode == DetailViewMode.Contents)
+        {
+            rows = ScanViewProjector.ChildRows(selected);
+        }
+        else
+        {
+            var rowsTask = GetOrCreateGlobalDetailRowsTask(result, viewMode);
+            if (!rowsTask.IsCompleted)
+            {
+                BeginGlobalDetailLoading(viewMode, selected);
+            }
+
+            try
+            {
+                rows = await rowsTask;
+            }
+            catch (Exception ex)
+            {
+                RemoveFaultedGlobalDetailRowsTask(viewMode, rowsTask);
+                if (IsCurrentDetailRequest(requestVersion, result, selected, viewMode))
+                {
+                    DetailsGrid.IsEnabled = true;
+                    ShowOperationError("View failed", ex);
+                }
+                return;
+            }
+        }
+
+        if (!IsCurrentDetailRequest(requestVersion, result, selected, viewMode))
+        {
+            return;
+        }
+
+        ReplaceCollection(DetailRows, rows);
+        DetailsGrid.IsEnabled = true;
+        DetailRowsView.Refresh();
+        UpdateFilterUiState();
+        if (refreshContext)
+        {
+            ReplaceCollection(SummaryMetrics, ScanViewProjector.SelectedSummaryMetrics(result, selected));
+            RefreshNavigationState(selected, result.Root);
+            RefreshChart();
+            UpdatePathDisplay(selected.FullPath);
+        }
+        SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
+        SelectedSubText.Text = BuildSelectedSubText(viewMode, selected);
+    }
+
+    private void BeginGlobalDetailLoading(DetailViewMode mode, FileSystemEntry selected)
+    {
+        DetailsGrid.IsEnabled = false;
+        DetailRows.Clear();
+        DetailRowsView.Refresh();
+        FilterCountText.Text = "Loading...";
+        SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
+        SelectedSubText.Text = $"{ViewModeLabel(mode)} · loading rows...";
+    }
+
+    private Task<IReadOnlyList<DetailRow>> GetOrCreateGlobalDetailRowsTask(ScanResult result, DetailViewMode mode)
+    {
+        if (!_globalDetailRowsCache.TryGetValue(mode, out var task))
+        {
+            task = Task.Run(() => ProjectGlobalDetailRows(result, mode));
+            _globalDetailRowsCache[mode] = task;
+        }
+
+        return task;
+    }
+
+    private void RemoveFaultedGlobalDetailRowsTask(DetailViewMode mode, Task<IReadOnlyList<DetailRow>> task)
+    {
+        if (_globalDetailRowsCache.TryGetValue(mode, out var cachedTask) && ReferenceEquals(cachedTask, task))
+        {
+            _globalDetailRowsCache.Remove(mode);
+        }
+    }
+
+    private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)
+    {
+        return mode switch
         {
             DetailViewMode.LargestFiles => ScanViewProjector.LargestFileRows(result),
             DetailViewMode.LargestFolders => ScanViewProjector.LargestFolderRows(result),
             DetailViewMode.Extensions => ScanViewProjector.ExtensionRows(result),
-            _ => ScanViewProjector.ChildRows(selected)
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
+    }
 
-        ReplaceCollection(DetailRows, rows);
-        DetailRowsView.Refresh();
-        UpdateFilterUiState();
-        ReplaceCollection(SummaryMetrics, ScanViewProjector.SelectedSummaryMetrics(result, selected));
-        RefreshNavigationState(selected, result.Root);
-        RefreshChart();
+    private bool IsCurrentDetailRequest(int requestVersion, ScanResult result, FileSystemEntry selected, DetailViewMode mode)
+    {
+        return requestVersion == _detailRefreshVersion
+            && ReferenceEquals(_currentScan, result)
+            && ReferenceEquals(_selectedEntry ?? result.Root, selected)
+            && _viewMode == mode;
+    }
 
-        SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
-        SelectedSubText.Text = $"{ViewModeLabel(_viewMode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
+    private void ClearGlobalDetailRowsCache()
+    {
+        _globalDetailRowsCache.Clear();
+        _detailRefreshVersion++;
     }
 
     private void RefreshChart()
@@ -887,7 +1060,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Treemap.InvalidateVisual();
     }
 
-    private void SelectChartSlice(ChartSlice slice, bool drillIntoFolders)
+    private async Task SelectChartSliceAsync(ChartSlice slice, bool drillIntoFolders)
     {
         _selectedChartSourceKey = slice.SourceKey;
         ChartSelectionText.Text = $"{slice.Label}: {slice.FormattedSize} ({slice.PercentText})";
@@ -907,20 +1080,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _chartScope = ChartScope.SelectedFolder;
             ChartScopeBox.SelectedIndex = 0;
-            NavigateToFolder(folder);
+            await NavigateToFolderAsync(folder);
             return;
         }
 
-        SelectDetailRowForSlice(slice);
+        await SelectDetailRowForSliceAsync(slice);
     }
 
-    private void SelectDetailRowForSlice(ChartSlice slice)
+    private async Task SelectDetailRowForSliceAsync(ChartSlice slice)
     {
         if (slice.Kind == ChartSliceKind.Extension)
         {
             _viewMode = DetailViewMode.Extensions;
             ViewExtensions.IsChecked = true;
-            RefreshDetails();
+            await RefreshDetailsAsync(refreshContext: false);
             SelectDetailRow(row => string.Equals(row.Extension, slice.SourceKey, StringComparison.OrdinalIgnoreCase));
             return;
         }
@@ -941,7 +1114,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 case DetailViewMode.LargestFolders: ViewLargestFolders.IsChecked = true; break;
                 default: ViewContents.IsChecked = true; break;
             }
-            RefreshDetails();
+            await RefreshDetailsAsync(refreshContext: false);
         }
         SelectDetailRow(row => string.Equals(row.FullPath, slice.Entry.FullPath, StringComparison.OrdinalIgnoreCase));
     }
@@ -956,6 +1129,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
+        => RunUiAction(() => NavigateToFolderAsync(entry, addHistory, clearForward), "Navigation failed");
+
+    private async Task NavigateToFolderAsync(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
     {
         if (_selectedEntry is not null && string.Equals(_selectedEntry.FullPath, entry.FullPath, StringComparison.OrdinalIgnoreCase)) return;
         if (addHistory && _selectedEntry is not null) _backStack.Push(_selectedEntry);
@@ -965,7 +1141,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _viewMode = DetailViewMode.Contents;
         ViewContents.IsChecked = true;
         _selectedChartSourceKey = null;
-        RefreshDetails();
+        await RefreshDetailsAsync();
         AnimateGridFadeIn();
     }
 
@@ -979,7 +1155,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (selected is not null && root is not null)
         {
             ReplaceCollection(BreadcrumbItems, ScanViewProjector.Breadcrumb(root, selected));
+            ScrollBreadcrumbsToEnd();
         }
+    }
+
+    private void UpdatePathDisplay(string path)
+    {
+        PathBox.Text = path;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) is WpfTextBox textBox)
+            {
+                textBox.CaretIndex = textBox.Text.Length;
+                textBox.ScrollToEnd();
+            }
+        }), DispatcherPriority.ContextIdle);
+    }
+
+    private void ScrollBreadcrumbsToEnd()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            BreadcrumbScrollViewer.UpdateLayout();
+            BreadcrumbScrollViewer.ScrollToRightEnd();
+        }), DispatcherPriority.ContextIdle);
     }
 
     private bool TryGetParent(FileSystemEntry entry, out FileSystemEntry parent)
@@ -1018,6 +1217,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ClearViewsForNewScan(string path)
     {
+        ClearGlobalDetailRowsCache();
         _currentScan = null;
         FolderNodes.Clear();
         DetailRows.Clear();
@@ -1207,6 +1407,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         WpfMessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
+    private void RunUiAction(Func<Task> action, string title)
+    {
+        _ = RunUiActionAsync(action, title);
+    }
+
+    private async Task RunUiActionAsync(Func<Task> action, string title)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError(title, ex);
+        }
+    }
+
     // ============================================================
     //  Static helpers
     // ============================================================
@@ -1218,6 +1435,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ => "Contents"
     };
 
+    private static string BuildSelectedSubText(DetailViewMode mode, FileSystemEntry selected)
+    {
+        return $"{ViewModeLabel(mode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
+    }
+
     private static void RevealPath(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
@@ -1227,6 +1449,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static bool IsExistingFileSystemPath(string path)
         => Path.IsPathFullyQualified(path) && (File.Exists(path) || Directory.Exists(path));
+
+    private static int ColorRef(byte red, byte green, byte blue)
+        => red | (green << 8) | (blue << 16);
+
+    private static void SetDwmAttribute(IntPtr hwnd, int attribute, ref int value, string attributeName)
+    {
+        var result = DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int));
+        if (result != 0)
+        {
+            Debug.WriteLine($"DwmSetWindowAttribute {attributeName} failed with HRESULT 0x{result:X8}.");
+        }
+    }
 
     private static async Task WriteDetailRowsCsvAsync(IEnumerable<DetailRow> rows, string path)
     {
@@ -1266,6 +1500,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int pvAttribute, int cbAttribute);
 }
 
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>

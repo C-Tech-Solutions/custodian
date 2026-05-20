@@ -137,6 +137,16 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
 
+    <Style x:Key="ExplorerNavButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="Padding" Value="9,4"/>
+        <Setter Property="Margin" Value="0,0,4,0"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
     <Style x:Key="BreadcrumbButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
         <Setter Property="Padding" Value="6,3"/>
         <Setter Property="MinHeight" Value="24"/>
@@ -149,6 +159,36 @@
     <Style x:Key="HeaderIconButton" TargetType="{x:Type Button}" BasedOn="{StaticResource IconButton}">
         <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
         <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
+    <Style x:Key="ThemeToggleButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="Padding" Value="10,4"/>
+        <Setter Property="Margin" Value="6,0,0,0"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
+    <Style x:Key="SidebarToggleButton" TargetType="{x:Type Button}" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="Width" Value="30"/>
+        <Setter Property="MinHeight" Value="26"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
+    <Style x:Key="SidebarRevealButton" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarToggleButton}">
+        <Setter Property="Width" Value="28"/>
+        <Setter Property="MinHeight" Value="28"/>
     </Style>
 
     <!-- ============================================================ -->
@@ -601,9 +641,126 @@
         </Setter>
     </Style>
 
+    <Style x:Key="HorizontalSectionSplitter" TargetType="{x:Type GridSplitter}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="SizeNS"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type GridSplitter}">
+                    <Border x:Name="Bd" Background="Transparent">
+                        <Border x:Name="Handle" Height="2" Background="{DynamicResource Divider}"
+                                VerticalAlignment="Center" Margin="6,0"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Handle" Property="Background" Value="{DynamicResource AccentRing}"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Handle" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ============================================================ -->
     <!--  Menu  -->
     <!-- ============================================================ -->
+    <ControlTemplate x:Key="TopLevelMenuItemTemplate" TargetType="{x:Type MenuItem}">
+        <Grid SnapsToDevicePixels="True">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{StaticResource ControlCorner}"
+                    Padding="{TemplateBinding Padding}">
+                <ContentPresenter ContentSource="Header"
+                                  RecognizesAccessKey="True"
+                                  VerticalAlignment="Center"/>
+            </Border>
+            <Popup x:Name="PART_Popup"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                   Placement="Bottom"
+                   PopupAnimation="Fade">
+                <Border Background="{DynamicResource SurfaceRaised}"
+                        BorderBrush="{DynamicResource Border}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource ControlCorner}"
+                        Padding="4"
+                        MinWidth="220"
+                        SnapsToDevicePixels="True">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.18"/>
+                    </Border.Effect>
+                    <ScrollViewer CanContentScroll="True">
+                        <ItemsPresenter/>
+                    </ScrollViewer>
+                </Border>
+            </Popup>
+        </Grid>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverFill}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+            </Trigger>
+            <Trigger Property="IsSubmenuOpen" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressedFill}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/>
+                <Setter TargetName="Bd" Property="Opacity" Value="0.65"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <ControlTemplate x:Key="SubmenuItemTemplate" TargetType="{x:Type MenuItem}">
+        <Border x:Name="Bd"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="4"
+                Padding="{TemplateBinding Padding}"
+                SnapsToDevicePixels="True">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="18"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="CheckIndicator"
+                         Width="6" Height="6"
+                         Fill="{DynamicResource AccentBrush}"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         Visibility="Collapsed"/>
+                <ContentPresenter Grid.Column="1"
+                                  ContentSource="Header"
+                                  RecognizesAccessKey="True"
+                                  VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="CheckIndicator" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverFill}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressedFill}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/>
+                <Setter TargetName="Bd" Property="Opacity" Value="0.68"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
     <Style TargetType="{x:Type Menu}">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
@@ -614,10 +771,37 @@
 
     <Style TargetType="{x:Type MenuItem}">
         <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="Padding" Value="12,7"/>
         <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template" Value="{StaticResource SubmenuItemTemplate}"/>
+        <Style.Triggers>
+            <Trigger Property="Role" Value="TopLevelHeader">
+                <Setter Property="Padding" Value="10,5"/>
+                <Setter Property="Template" Value="{StaticResource TopLevelMenuItemTemplate}"/>
+            </Trigger>
+            <Trigger Property="Role" Value="TopLevelItem">
+                <Setter Property="Padding" Value="10,5"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="{x:Type Separator}">
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Margin" Value="4,4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Separator}">
+                    <Border Height="1"
+                            Background="{DynamicResource Divider}"
+                            SnapsToDevicePixels="True"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="{x:Type ContextMenu}">

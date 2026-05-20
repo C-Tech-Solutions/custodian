@@ -2,8 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Custodian.App.Controls"
+        xmlns:services="clr-namespace:Custodian.App.Services"
         xmlns:presentation="clr-namespace:Custodian.Core.Presentation;assembly=Custodian.Core"
         Title="Custodian Disk Analyzer"
+        Icon="Assets/Custodian.ico"
         Height="880" Width="1400" MinHeight="720" MinWidth="1120"
         Background="{DynamicResource Surface}"
         Foreground="{DynamicResource TextBrush}"
@@ -18,7 +20,7 @@
 
     <Window.Resources>
         <HierarchicalDataTemplate DataType="{x:Type presentation:FolderNode}" ItemsSource="{Binding Children}">
-            <Grid MinWidth="240" Margin="0,1">
+            <Grid MinWidth="240" Margin="0,1" ToolTip="{Binding FullPath}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -27,9 +29,16 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"/>
+                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
                 <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="8,0,0,0"/>
-                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="3" Maximum="100" Value="{Binding Percent}" Margin="0,3,0,2"/>
+                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,3,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ProgressBar Height="3" Maximum="100" Value="{Binding Percent}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="8,0,0,0"/>
+                </Grid>
             </Grid>
         </HierarchicalDataTemplate>
     </Window.Resources>
@@ -57,13 +66,10 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
-                    <Border Width="26" Height="26" CornerRadius="6"
-                            Background="{DynamicResource AccentBrush}"
-                            VerticalAlignment="Center">
-                        <TextBlock Text="C" Foreground="{DynamicResource OnAccentBrush}"
-                                   FontWeight="Bold" FontSize="14"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <Image Width="28" Height="28"
+                           Source="Assets/CustodianIcon.png"
+                           Stretch="Uniform"
+                           VerticalAlignment="Center"/>
                     <TextBlock Text="Custodian"
                                FontFamily="{StaticResource UiFontDisplay}"
                                FontWeight="SemiBold" FontSize="15"
@@ -111,9 +117,26 @@
                     </MenuItem>
                 </Menu>
 
-                <Button Grid.Column="8" Style="{StaticResource HeaderIconButton}"
-                        Content="&#xE793;" Click="ToggleTheme_Click"
-                        ToolTip="Toggle light/dark theme (Ctrl+T)"/>
+                <Menu x:Name="ThemeSelectorMenu" Grid.Column="8" VerticalAlignment="Center" Margin="6,0,0,0">
+                    <MenuItem Header="Theme" Padding="10,5" ToolTip="Select app color scheme">
+                        <MenuItem x:Name="DarkThemeItem" Header="Dark"
+                                  Tag="{x:Static services:AppTheme.Dark}"
+                                  IsCheckable="True" Click="ThemeMenu_Click"/>
+                        <MenuItem x:Name="LightThemeItem" Header="Light"
+                                  Tag="{x:Static services:AppTheme.Light}"
+                                  IsCheckable="True" Click="ThemeMenu_Click"/>
+                        <Separator/>
+                        <MenuItem x:Name="OceanThemeItem" Header="Ocean"
+                                  Tag="{x:Static services:AppTheme.Ocean}"
+                                  IsCheckable="True" Click="ThemeMenu_Click"/>
+                        <MenuItem x:Name="ForestThemeItem" Header="Forest"
+                                  Tag="{x:Static services:AppTheme.Forest}"
+                                  IsCheckable="True" Click="ThemeMenu_Click"/>
+                        <MenuItem x:Name="EmberThemeItem" Header="Ember"
+                                  Tag="{x:Static services:AppTheme.Ember}"
+                                  IsCheckable="True" Click="ThemeMenu_Click"/>
+                    </MenuItem>
+                </Menu>
 
                 <Border Grid.Column="9" Style="{StaticResource StatusChip}"
                         Margin="8,0,0,0" VerticalAlignment="Center">
@@ -176,9 +199,9 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="170"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="170" MinHeight="88"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="*" MinHeight="120"/>
                     </Grid.RowDefinitions>
                     <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="14,12,14,4"/>
                     <ListBox x:Name="DriveList" Grid.Row="1"
@@ -208,11 +231,31 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <TextBlock Grid.Row="2" Style="{StaticResource SectionHeader}" Text="FOLDERS" Margin="14,8,14,4"/>
-                    <TreeView x:Name="FolderTree" Grid.Row="3"
-                              ItemsSource="{Binding FolderNodes}"
-                              SelectedItemChanged="FolderTree_SelectedItemChanged"
-                              Margin="8,0,8,10"/>
+                    <GridSplitter Grid.Row="2"
+                                  Height="8"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Center"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  Style="{StaticResource HorizontalSectionSplitter}"
+                                  ToolTip="Drag to resize Targets and Folder Map"/>
+
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Style="{StaticResource SectionHeader}" Text="FOLDER MAP" Margin="14,8,14,2"/>
+                        <TextBlock Grid.Row="1" Text="Click any scanned folder to jump there."
+                                   Foreground="{DynamicResource MutedBrush}"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Margin="14,0,14,6"/>
+                        <TreeView x:Name="FolderTree" Grid.Row="2"
+                                  ItemsSource="{Binding FolderNodes}"
+                                  SelectedItemChanged="FolderTree_SelectedItemChanged"
+                                  Margin="8,0,8,10"/>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -246,20 +289,20 @@
                                         <ColumnDefinition Width="240"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Orientation="Horizontal">
-                                        <Button x:Name="BackButton" Style="{StaticResource IconButton}"
-                                                Click="Back_Click" Content="&#xE72B;" IsEnabled="False"
-                                                ToolTip="Back (Alt+Left)"/>
-                                        <Button x:Name="ForwardButton" Style="{StaticResource IconButton}"
-                                                Click="Forward_Click" Content="&#xE72A;" IsEnabled="False"
-                                                ToolTip="Forward (Alt+Right)"/>
-                                        <Button x:Name="UpButton" Style="{StaticResource IconButton}"
-                                                Click="Up_Click" Content="&#xE74A;" IsEnabled="False"
-                                                ToolTip="Up (Alt+Up / Backspace)"/>
-                                        <Button x:Name="RefreshButton" Style="{StaticResource IconButton}"
-                                                Click="Refresh_Click" Content="&#xE72C;"
-                                                ToolTip="Refresh (F5)"/>
+                                        <Button x:Name="BackButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Back_Click" Content="Back" IsEnabled="False"
+                                                ToolTip="Go back to the previous folder (Alt+Left)"/>
+                                        <Button x:Name="ForwardButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Forward_Click" Content="Forward" IsEnabled="False"
+                                                ToolTip="Go forward to the next folder (Alt+Right)"/>
+                                        <Button x:Name="UpButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Up_Click" Content="Up" IsEnabled="False"
+                                                ToolTip="Go to the parent folder (Alt+Up / Backspace)"/>
+                                        <Button x:Name="RefreshButton" Style="{StaticResource ExplorerNavButton}"
+                                                Click="Refresh_Click" Content="Rescan"
+                                                ToolTip="Scan the folder shown in the path box (F5)"/>
                                     </StackPanel>
-                                    <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
+                                    <ScrollViewer x:Name="BreadcrumbScrollViewer" Grid.Column="1" HorizontalScrollBarVisibility="Auto"
                                                   VerticalScrollBarVisibility="Disabled" Margin="10,0">
                                         <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
                                             <ItemsControl.ItemsPanel>
@@ -594,8 +637,8 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Style="{StaticResource SectionHeader}" Text="SUMMARY" VerticalAlignment="Center"/>
-                        <Button Grid.Column="1" Style="{StaticResource IconButton}"
-                                Content="&#xE89F;" Width="24"
+                        <Button Grid.Column="1" Style="{StaticResource SidebarToggleButton}"
+                                Content=">>"
                                 Click="CollapseRight_Click" ToolTip="Collapse panel"/>
                     </Grid>
                     <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding SummaryMetrics}" Margin="11,4,11,8">
@@ -768,11 +811,12 @@
             <Border x:Name="RightPanelTab" Grid.Column="4"
                     Background="{DynamicResource SurfaceRaised}"
                     BorderBrush="{DynamicResource Border}" BorderThickness="1"
-                    CornerRadius="8" Width="32"
+                    CornerRadius="8" Width="36"
                     HorizontalAlignment="Right"
                     Visibility="Collapsed">
-                <Button Style="{StaticResource IconButton}" Content="&#xE89E;"
-                        Click="ExpandRight_Click" VerticalAlignment="Top" Margin="0,8,0,0"
+                <Button Style="{StaticResource SidebarRevealButton}" Content="&lt;&lt;"
+                        Click="ExpandRight_Click" HorizontalAlignment="Center"
+                        VerticalAlignment="Top" Margin="0,8,0,0"
                         ToolTip="Show summary panel"/>
             </Border>
         </Grid>
