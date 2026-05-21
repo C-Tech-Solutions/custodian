@@ -5,6 +5,7 @@ param(
     [string]$Runtime = "win-x64",
     [string]$OutputRoot = "artifacts\velopack",
     [string]$PackId = "Custodian.DiskAnalyzer",
+    [string]$Channel = "win",
     [switch]$PreserveExistingReleases
 )
 
@@ -57,7 +58,7 @@ dotnet vpk pack `
     --packTitle "Custodian Disk Analyzer" `
     --packAuthors "Custodian" `
     --runtime $Runtime `
-    --channel "win" `
+    --channel $Channel `
     --shortcuts "Desktop,StartMenuRoot" `
     --outputDir $output
 

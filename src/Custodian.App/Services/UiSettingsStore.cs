@@ -17,6 +17,7 @@ public sealed class UiSettings
     public bool RightPanelCollapsed { get; set; }
     public string ChartMode { get; set; } = "Treemap";
     public string LastPath { get; set; } = string.Empty;
+    public DateTime LastAutomaticUpdateCheckUtc { get; set; } = DateTime.MinValue;
     public List<string> RecentPaths { get; set; } = [];
 }
 
@@ -56,7 +57,23 @@ public static class UiSettingsStore
             {
                 Directory.CreateDirectory(dir);
             }
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(settings, Options));
+
+            var tempPath = Path.Combine(
+                dir ?? AppContext.BaseDirectory,
+                $"{Path.GetFileName(FilePath)}.{Guid.NewGuid():N}.tmp");
+
+            try
+            {
+                File.WriteAllText(tempPath, JsonSerializer.Serialize(settings, Options));
+                File.Move(tempPath, FilePath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
         }
         catch (Exception ex)
         {

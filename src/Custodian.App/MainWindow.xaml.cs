@@ -44,6 +44,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int DwmwaTextColor = 36;
     private const double DefaultRightPanelWidth = 350;
     private const double CollapsedRightPanelWidth = 36;
+    private static readonly TimeSpan AutomaticUpdateCheckInterval = TimeSpan.FromHours(12);
 
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
@@ -146,7 +147,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
-        await CheckForUpdatesAsync(isAutomatic: true);
+        if (ShouldRunAutomaticUpdateCheck())
+        {
+            await CheckForUpdatesAsync(isAutomatic: true);
+        }
     }
 
     // ============================================================
@@ -332,10 +336,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
+            if (isAutomatic)
+            {
+                _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
+                ScheduleSettingsSave();
+            }
             _updateCts.Dispose();
             _updateCts = null;
             CheckUpdatesMenuItem.IsEnabled = true;
         }
+    }
+
+    private bool ShouldRunAutomaticUpdateCheck()
+    {
+        var now = DateTime.UtcNow;
+        var lastCheck = _settings.LastAutomaticUpdateCheckUtc;
+        return lastCheck == DateTime.MinValue
+            || lastCheck > now
+            || now - lastCheck >= AutomaticUpdateCheckInterval;
     }
 
     private async Task PromptDownloadAndInstallAsync(AppUpdateCheckResult result, CancellationToken cancellationToken)
@@ -1080,8 +1098,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             ReplaceCollection(DetailRows, rows);
             _boundDetailRows = rows;
-            // ReplaceAll already raised a Reset, which refreshes the view. An
-            // explicit Refresh is only needed to re-run the filter predicate.
+            // Granular collection notifications refresh the view. An explicit
+            // Refresh is only needed to re-run the filter predicate.
             if (!string.IsNullOrEmpty(_filterText))
             {
                 DetailRowsView.Refresh();
@@ -1638,6 +1656,7 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
     {
         var newItems = items as IReadOnlyList<T> ?? items.ToList();
         var oldCount = Count;
+        var changed = false;
 
         // Reconcile in place with granular Replace/Add/Remove notifications
         // rather than Clear + refill + a single Reset. A Reset forces a
@@ -1649,14 +1668,22 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         for (var i = 0; i < common; i++)
         {
             var oldItem = Items[i];
-            Items[i] = newItems[i];
+            var newItem = newItems[i];
+            if (EqualityComparer<T>.Default.Equals(oldItem, newItem))
+            {
+                continue;
+            }
+
+            Items[i] = newItem;
+            changed = true;
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(
-                NotifyCollectionChangedAction.Replace, newItems[i], oldItem, i));
+                NotifyCollectionChangedAction.Replace, newItem, oldItem, i));
         }
 
         for (var i = oldCount; i < newItems.Count; i++)
         {
             Items.Add(newItems[i]);
+            changed = true;
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(
                 NotifyCollectionChangedAction.Add, newItems[i], i));
         }
@@ -1665,6 +1692,7 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         {
             var removed = Items[i];
             Items.RemoveAt(i);
+            changed = true;
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(
                 NotifyCollectionChangedAction.Remove, removed, i));
         }
@@ -1674,7 +1702,10 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
             OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         }
 
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        if (changed)
+        {
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        }
     }
 }
 

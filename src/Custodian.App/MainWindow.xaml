@@ -431,9 +431,9 @@
                              ItemTemplate and a static header row above it,
                              rather than a DataGrid. The per-view-switch stutter
                              came from BulkObservableCollection.ReplaceAll
-                             raising a Reset, which makes a virtualizing list
-                             discard and rebuild every container; ReplaceAll now
-                             emits granular Replace/Add/Remove instead. Header
+                             emitting notifications for every realized row;
+                             ReplaceAll now reconciles unchanged items and emits
+                             granular Replace/Add/Remove only as needed. Header
                              and row column widths are fixed pixel values so
                              they stay aligned. -->
                         <DockPanel x:Name="ResultsHost">

@@ -2,6 +2,7 @@ param(
     [string]$OutputRoot = "artifacts\velopack",
     [string]$RepositoryUrl = "https://github.com/ctech1313/custodian",
     [string]$Token = $env:GITHUB_TOKEN,
+    [string]$Channel = "win",
     [switch]$Publish
 )
 
@@ -16,7 +17,7 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
 $vpkArgs = @(
     "vpk", "upload", "github",
     "--outputDir", $output,
-    "--channel", "win",
+    "--channel", $Channel,
     "--repoUrl", $RepositoryUrl,
     "--token", $Token
 )

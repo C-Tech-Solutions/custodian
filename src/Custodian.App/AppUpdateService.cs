@@ -9,6 +9,8 @@ internal sealed class AppUpdateService
 {
     private const string RepositoryUrl = "https://github.com/ctech1313/custodian";
     private const string UpdateSourceOverrideVariable = "CUSTODIAN_UPDATE_SOURCE";
+    private const string UpdateChannelOverrideVariable = "CUSTODIAN_UPDATE_CHANNEL";
+    private const string GitHubAccessTokenVariable = "CUSTODIAN_GITHUB_TOKEN";
     private readonly UpdateManager _manager;
 
     public AppUpdateService()
@@ -77,20 +79,29 @@ internal sealed class AppUpdateService
 
     private static UpdateManager CreateUpdateManager()
     {
-        var options = new UpdateOptions
+        var options = new UpdateOptions();
+        var channelOverride = ReadEnvironmentValue(UpdateChannelOverrideVariable);
+        if (channelOverride is not null)
         {
-            ExplicitChannel = "win"
-        };
+            options.ExplicitChannel = channelOverride;
+        }
 
-        var sourceOverride = Environment.GetEnvironmentVariable(UpdateSourceOverrideVariable);
-        if (!string.IsNullOrWhiteSpace(sourceOverride))
+        var sourceOverride = ReadEnvironmentValue(UpdateSourceOverrideVariable);
+        if (sourceOverride is not null)
         {
             return new UpdateManager(sourceOverride, options, logger: null!, locator: null!);
         }
 
-        var source = new GithubSource(RepositoryUrl, accessToken: null!, prerelease: false, downloader: null!);
+        var accessToken = ReadEnvironmentValue(GitHubAccessTokenVariable) ?? string.Empty;
+        var source = new GithubSource(RepositoryUrl, accessToken, prerelease: false, downloader: null!);
 
         return new UpdateManager(source, options, logger: null!, locator: null!);
+    }
+
+    private static string? ReadEnvironmentValue(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private string? CurrentVersionText() =>
