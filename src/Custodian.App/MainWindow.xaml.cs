@@ -294,10 +294,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _updateCts = new CancellationTokenSource();
         CheckUpdatesMenuItem.IsEnabled = false;
         ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
+        var updateCheckCompleted = false;
 
         try
         {
             var result = await _updates.CheckForUpdatesAsync();
+            updateCheckCompleted = true;
             ApplyUpdateStatus(result.Status);
 
             switch (result.Status.Kind)
@@ -337,7 +339,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            if (isAutomatic)
+            if (isAutomatic && updateCheckCompleted)
             {
                 _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
                 ScheduleSettingsSave();

@@ -36,6 +36,7 @@ public sealed class PieChartControl : FrameworkElement
     private readonly List<RenderedSlice> _renderedSlices = [];
     private readonly List<ChartSlice> _slices = [];
     private INotifyCollectionChanged? _sliceNotifications;
+    private bool _isControlLoaded;
     private long _totalBytes;
     private WpfBrush _calloutBrush = CreateBrush(WpfColor.FromRgb(51, 65, 85));
     private WpfPen _calloutPen = CreatePen(CreateBrush(WpfColor.FromRgb(51, 65, 85)), 1);
@@ -70,12 +71,16 @@ public sealed class PieChartControl : FrameworkElement
 
     private void PieChartControl_Loaded(object sender, RoutedEventArgs e)
     {
+        _isControlLoaded = true;
         ThemeManager.ThemeChanged += ThemeManager_ThemeChanged;
+        AttachSliceNotifications(Slices as INotifyCollectionChanged);
         RefreshThemeResources();
     }
 
     private void PieChartControl_Unloaded(object sender, RoutedEventArgs e)
     {
+        _isControlLoaded = false;
+        DetachSliceNotifications();
         ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
     }
 
@@ -105,18 +110,37 @@ public sealed class PieChartControl : FrameworkElement
 
     private void SetSliceSource(IEnumerable? slices)
     {
-        if (_sliceNotifications is not null)
+        DetachSliceNotifications();
+        if (_isControlLoaded)
         {
-            _sliceNotifications.CollectionChanged -= Slices_CollectionChanged;
+            AttachSliceNotifications(slices as INotifyCollectionChanged);
         }
 
-        _sliceNotifications = slices as INotifyCollectionChanged;
+        RefreshSliceCache(slices);
+    }
+
+    private void AttachSliceNotifications(INotifyCollectionChanged? notifications)
+    {
+        if (ReferenceEquals(_sliceNotifications, notifications))
+        {
+            return;
+        }
+
+        DetachSliceNotifications();
+        _sliceNotifications = notifications;
         if (_sliceNotifications is not null)
         {
             _sliceNotifications.CollectionChanged += Slices_CollectionChanged;
         }
+    }
 
-        RefreshSliceCache(slices);
+    private void DetachSliceNotifications()
+    {
+        if (_sliceNotifications is not null)
+        {
+            _sliceNotifications.CollectionChanged -= Slices_CollectionChanged;
+            _sliceNotifications = null;
+        }
     }
 
     private void Slices_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
