@@ -23,6 +23,7 @@ using Custodian.Core.Model;
 using Custodian.Core.Presentation;
 using Custodian.Core.Scanning;
 using Custodian.Core.Storage;
+using Custodian.Core.Updates;
 using WinForms = System.Windows.Forms;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
@@ -46,7 +47,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
+    private readonly AppUpdateService _updates = new();
     private CancellationTokenSource? _scanCts;
+    private CancellationTokenSource? _updateCts;
     private ScanResult? _currentScan;
     private FileSystemEntry? _selectedEntry;
     private DetailViewMode _viewMode = DetailViewMode.Contents;
@@ -135,9 +138,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             PieChart?.InvalidateVisual();
         };
         RefreshThemeMenuChecks();
+        Loaded += MainWindow_Loaded;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= MainWindow_Loaded;
+        await CheckForUpdatesAsync(isAutomatic: true);
+    }
 
     // ============================================================
     //  Settings
@@ -263,6 +273,135 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await StartScanAsync();
 
     private void StopScan() => _scanCts?.Cancel();
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        await CheckForUpdatesAsync(isAutomatic: false);
+    }
+
+    private async Task CheckForUpdatesAsync(bool isAutomatic)
+    {
+        if (_updateCts is not null)
+        {
+            return;
+        }
+
+        _updateCts = new CancellationTokenSource();
+        CheckUpdatesMenuItem.IsEnabled = false;
+        ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
+
+        try
+        {
+            var result = await _updates.CheckForUpdatesAsync();
+            ApplyUpdateStatus(result.Status);
+
+            switch (result.Status.Kind)
+            {
+                case AppUpdateStatusKind.NotInstalled:
+                    if (!isAutomatic)
+                    {
+                        UpdateDialog.ShowInformation(this, "Updates unavailable", result.Status.Message, UpdateDialogTone.Warning);
+                    }
+                    break;
+                case AppUpdateStatusKind.UpToDate:
+                    if (!isAutomatic)
+                    {
+                        UpdateDialog.ShowInformation(this, "Custodian is up to date", result.Status.Message, UpdateDialogTone.Success);
+                    }
+                    break;
+                case AppUpdateStatusKind.Available:
+                    await PromptDownloadAndInstallAsync(result, _updateCts.Token);
+                    break;
+                case AppUpdateStatusKind.ReadyToRestart:
+                    PromptRestartForInstall(result);
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateFooterStatus("Updates", "Update check cancelled.");
+        }
+        catch (Exception ex)
+        {
+            var status = AppUpdateStatusFactory.Failed(ex.Message);
+            ApplyUpdateStatus(status);
+            if (!isAutomatic)
+            {
+                UpdateDialog.ShowInformation(this, "Update failed", status.Message, UpdateDialogTone.Error);
+            }
+        }
+        finally
+        {
+            _updateCts.Dispose();
+            _updateCts = null;
+            CheckUpdatesMenuItem.IsEnabled = true;
+        }
+    }
+
+    private async Task PromptDownloadAndInstallAsync(AppUpdateCheckResult result, CancellationToken cancellationToken)
+    {
+        var availableVersion = result.Status.AvailableVersion ?? "the latest version";
+        var shouldDownload = UpdateDialog.ShowConfirmation(
+            this,
+            "Update available",
+            $"{result.Status.Message}\n\nDownload it now? Custodian will ask before restarting to install it.",
+            "Download",
+            "Not now");
+
+        if (!shouldDownload)
+        {
+            UpdateFooterStatus("Updates", $"Update available: Custodian {availableVersion}.");
+            return;
+        }
+
+        var progress = new Progress<AppUpdateStatus>(ApplyUpdateStatus);
+        await _updates.DownloadUpdatesAsync(result, progress, cancellationToken);
+
+        var readyStatus = AppUpdateStatusFactory.ReadyToRestart(availableVersion);
+        ApplyUpdateStatus(readyStatus);
+
+        var shouldRestart = UpdateDialog.ShowConfirmation(
+            this,
+            "Install update",
+            $"{readyStatus.Message}\n\nRestart Custodian now to install it?",
+            "Restart now",
+            "Later");
+
+        if (shouldRestart)
+        {
+            ApplyUpdateAndShutdown(result);
+        }
+
+        UpdateFooterStatus("Updates", "Update downloaded. Use Help > Check for Updates when you are ready to restart and install.");
+    }
+
+    private void PromptRestartForInstall(AppUpdateCheckResult result)
+    {
+        var shouldRestart = UpdateDialog.ShowConfirmation(
+            this,
+            "Install update",
+            $"{result.Status.Message}\n\nRestart Custodian now to install it?",
+            "Restart now",
+            "Later");
+
+        if (shouldRestart)
+        {
+            ApplyUpdateAndShutdown(result);
+        }
+    }
+
+    private void ApplyUpdateStatus(AppUpdateStatus status)
+    {
+        UpdateFooterStatus("Updates", status.Message);
+    }
+
+    private void ApplyUpdateAndShutdown(AppUpdateCheckResult result)
+    {
+        PersistSettings();
+        UpdateFooterStatus("Updates", "Installing update...");
+        _updates.ApplyUpdatesAndRestart(result);
+        System.Windows.Application.Current.Shutdown();
+    }
 
     private async Task StartScanAsync()
     {

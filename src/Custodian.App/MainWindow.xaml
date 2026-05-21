@@ -115,6 +115,9 @@
                         <MenuItem Header="Toggle Theme                Ctrl+T" Click="ToggleTheme_Click"/>
                         <MenuItem Header="Keyboard Shortcuts          Ctrl+/" Click="ShowShortcuts_Click"/>
                     </MenuItem>
+                    <MenuItem Header="Help">
+                        <MenuItem x:Name="CheckUpdatesMenuItem" Header="Check for Updates" Click="CheckUpdates_Click"/>
+                    </MenuItem>
                 </Menu>
 
                 <Menu x:Name="ThemeSelectorMenu" Grid.Column="8" VerticalAlignment="Center" Margin="6,0,0,0">
