@@ -1,5 +1,6 @@
 using System.Reflection;
 using Custodian.Core.Updates;
+using Microsoft.Extensions.Logging.Abstractions;
 using Velopack;
 using Velopack.Locators;
 using Velopack.Sources;
@@ -81,7 +82,8 @@ internal sealed class AppUpdateService
 
     private static UpdateManager CreateUpdateManager()
     {
-        var locator = VelopackLocator.GetDefault(logger: null!);
+        var logger = NullLogger.Instance;
+        var locator = VelopackLocator.GetDefault(logger);
         var options = new UpdateOptions();
         var channelOverride = ReadEnvironmentValue(UpdateChannelOverrideVariable);
         if (channelOverride is not null)
@@ -92,7 +94,7 @@ internal sealed class AppUpdateService
         var sourceOverride = ReadEnvironmentValue(UpdateSourceOverrideVariable);
         if (sourceOverride is not null)
         {
-            return new UpdateManager(sourceOverride, options, logger: null!, locator);
+            return new UpdateManager(sourceOverride, options, logger, locator);
         }
 
         var channel = channelOverride ?? locator.Channel;
@@ -100,7 +102,7 @@ internal sealed class AppUpdateService
         var includePrereleases = ReadEnvironmentFlag(GitHubPrereleaseVariable) ?? IsPrereleaseChannel(channel);
         var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases, downloader: null!);
 
-        return new UpdateManager(source, options, logger: null!, locator);
+        return new UpdateManager(source, options, logger, locator);
     }
 
     private static string? ReadEnvironmentValue(string name)

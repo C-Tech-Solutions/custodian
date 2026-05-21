@@ -531,6 +531,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyNativeTitleBarTheme()
     {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
+        {
+            return;
+        }
+
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero)
         {
@@ -539,6 +544,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var useDarkMode = ThemeManager.UsesDarkChrome ? 1 : 0;
         SetDwmAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref useDarkMode, nameof(DwmwaUseImmersiveDarkMode));
+
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            return;
+        }
 
         var caption = ThemeManager.CaptionColor;
         var captionColor = ColorRef(caption.R, caption.G, caption.B);
@@ -1687,18 +1697,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {
+    private const int ResetNotificationThreshold = 512;
+
     public void ReplaceAll(IEnumerable<T> items)
     {
         var newItems = items as IReadOnlyList<T> ?? items.ToList();
         var oldCount = Count;
-        var changed = false;
 
-        // Reconcile in place with granular Replace/Add/Remove notifications
-        // rather than Clear + refill + a single Reset. A Reset forces a
-        // virtualizing ListView to discard every realized container and run a
-        // full re-layout (~120 ms per view switch); granular changes let it
-        // recycle containers the same cheap way it does while scrolling.
+        // Reconcile small changes with granular notifications so virtualized
+        // rows can be reused. Very large changes fall back to one Reset below
+        // to cap notification fan-out.
         var common = Math.Min(oldCount, newItems.Count);
+        var replacedIndexes = new List<int>();
 
         for (var i = 0; i < common; i++)
         {
@@ -1709,8 +1719,27 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
                 continue;
             }
 
+            replacedIndexes.Add(i);
+        }
+
+        var countDelta = Math.Abs(newItems.Count - oldCount);
+        var changedCount = replacedIndexes.Count + countDelta;
+        if (changedCount == 0)
+        {
+            return;
+        }
+
+        if (changedCount > ResetNotificationThreshold)
+        {
+            ReplaceWithReset(newItems, oldCount);
+            return;
+        }
+
+        foreach (var i in replacedIndexes)
+        {
+            var oldItem = Items[i];
+            var newItem = newItems[i];
             Items[i] = newItem;
-            changed = true;
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(
                 NotifyCollectionChangedAction.Replace, newItem, oldItem, i));
         }
@@ -1718,7 +1747,6 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         for (var i = oldCount; i < newItems.Count; i++)
         {
             Items.Add(newItems[i]);
-            changed = true;
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(
                 NotifyCollectionChangedAction.Add, newItems[i], i));
         }
@@ -1727,7 +1755,6 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         {
             var removed = Items[i];
             Items.RemoveAt(i);
-            changed = true;
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(
                 NotifyCollectionChangedAction.Remove, removed, i));
         }
@@ -1737,10 +1764,24 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
             OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         }
 
-        if (changed)
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+    }
+
+    private void ReplaceWithReset(IReadOnlyList<T> newItems, int oldCount)
+    {
+        Items.Clear();
+        foreach (var item in newItems)
         {
-            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            Items.Add(item);
         }
+
+        if (Count != oldCount)
+        {
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        }
+
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 }
 
