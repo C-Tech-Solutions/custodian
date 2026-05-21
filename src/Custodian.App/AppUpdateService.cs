@@ -1,6 +1,7 @@
 using System.Reflection;
 using Custodian.Core.Updates;
 using Velopack;
+using Velopack.Locators;
 using Velopack.Sources;
 
 namespace Custodian.App;
@@ -11,6 +12,7 @@ internal sealed class AppUpdateService
     private const string UpdateSourceOverrideVariable = "CUSTODIAN_UPDATE_SOURCE";
     private const string UpdateChannelOverrideVariable = "CUSTODIAN_UPDATE_CHANNEL";
     private const string GitHubAccessTokenVariable = "CUSTODIAN_GITHUB_TOKEN";
+    private const string GitHubPrereleaseVariable = "CUSTODIAN_UPDATE_PRERELEASES";
     private readonly UpdateManager _manager;
 
     public AppUpdateService()
@@ -79,6 +81,7 @@ internal sealed class AppUpdateService
 
     private static UpdateManager CreateUpdateManager()
     {
+        var locator = VelopackLocator.GetDefault(logger: null!);
         var options = new UpdateOptions();
         var channelOverride = ReadEnvironmentValue(UpdateChannelOverrideVariable);
         if (channelOverride is not null)
@@ -89,19 +92,49 @@ internal sealed class AppUpdateService
         var sourceOverride = ReadEnvironmentValue(UpdateSourceOverrideVariable);
         if (sourceOverride is not null)
         {
-            return new UpdateManager(sourceOverride, options, logger: null!, locator: null!);
+            return new UpdateManager(sourceOverride, options, logger: null!, locator);
         }
 
+        var channel = channelOverride ?? locator.Channel;
         var accessToken = ReadEnvironmentValue(GitHubAccessTokenVariable) ?? string.Empty;
-        var source = new GithubSource(RepositoryUrl, accessToken, prerelease: false, downloader: null!);
+        var includePrereleases = ReadEnvironmentFlag(GitHubPrereleaseVariable) ?? IsPrereleaseChannel(channel);
+        var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases, downloader: null!);
 
-        return new UpdateManager(source, options, logger: null!, locator: null!);
+        return new UpdateManager(source, options, logger: null!, locator);
     }
 
     private static string? ReadEnvironmentValue(string name)
     {
         var value = Environment.GetEnvironmentVariable(name);
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static bool? ReadEnvironmentFlag(string name)
+    {
+        var value = ReadEnvironmentValue(name);
+        if (value is null)
+        {
+            return null;
+        }
+
+        return value.Equals("1", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPrereleaseChannel(string? channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+        {
+            return false;
+        }
+
+        return !channel.Equals("win", StringComparison.OrdinalIgnoreCase)
+            && !channel.Equals("stable", StringComparison.OrdinalIgnoreCase)
+            && !channel.Equals("release", StringComparison.OrdinalIgnoreCase)
+            && !channel.Equals("prod", StringComparison.OrdinalIgnoreCase)
+            && !channel.Equals("production", StringComparison.OrdinalIgnoreCase);
     }
 
     private string? CurrentVersionText() =>

@@ -116,7 +116,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             RefreshFolderJumpRows(JumpBox.Text);
         };
 
-        LoadDriveRows();
         SeedPathFromSettings();
         InstallKeyBindings();
         ApplySettingsLate();
@@ -147,10 +146,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
+        var driveRowsTask = LoadDriveRowsAsync();
         if (ShouldRunAutomaticUpdateCheck())
         {
             await CheckForUpdatesAsync(isAutomatic: true);
         }
+        await driveRowsTask;
     }
 
     // ============================================================
@@ -811,7 +812,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (hasText)
         {
             var total = DetailRows.Count;
-            var visible = DetailRowsView.Cast<object>().Count();
+            var visible = DetailRowsView is System.Collections.ICollection collection
+                ? collection.Count
+                : DetailRowsView.Cast<object>().Count();
             FilterCountText.Text = $"{visible:n0} of {total:n0}";
         }
         else
@@ -1387,10 +1390,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateEmptyStateVisibility();
     }
 
-    private void LoadDriveRows()
+    private async Task LoadDriveRowsAsync()
     {
-        DriveRows.Clear();
-        foreach (var drive in DriveInfo.GetDrives())
+        try
+        {
+            var rows = await Task.Run(BuildDriveRows);
+            DriveRows.Clear();
+            foreach (var row in rows)
+            {
+                DriveRows.Add(row);
+                AddRecentPath(row.RootPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
+    }
+
+    private static IReadOnlyList<DriveRow> BuildDriveRows()
+    {
+        var rows = new List<DriveRow>();
+        DriveInfo[] drives;
+        try
+        {
+            drives = DriveInfo.GetDrives();
+        }
+        catch (IOException ex)
+        {
+            Debug.WriteLine(ex);
+            return rows;
+        }
+
+        foreach (var drive in drives)
         {
             try
             {
@@ -1402,16 +1434,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     ? $"{drive.Name} {drive.VolumeLabel}"
                     : drive.Name;
 
-                DriveRows.Add(new DriveRow(
+                rows.Add(new DriveRow(
                     label, drive.Name,
                     total <= 0 ? "Not ready" : $"{SizeFormatter.Format(used)} used",
                     total <= 0 ? string.Empty : $"{SizeFormatter.Format(free)} free",
                     percent));
-                AddRecentPath(drive.Name);
             }
-            catch (IOException) { DriveRows.Add(new DriveRow(drive.Name, drive.Name, "Not ready", "", 0)); }
-            catch (UnauthorizedAccessException) { DriveRows.Add(new DriveRow(drive.Name, drive.Name, "Access denied", "", 0)); }
+            catch (IOException) { rows.Add(new DriveRow(drive.Name, drive.Name, "Not ready", "", 0)); }
+            catch (UnauthorizedAccessException) { rows.Add(new DriveRow(drive.Name, drive.Name, "Access denied", "", 0)); }
         }
+
+        return rows;
     }
 
     private void AddRecentPath(string path)

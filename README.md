@@ -47,7 +47,7 @@ $env:GITHUB_TOKEN = "<token with release access>"
 
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET 9 runtime that is not installed in the current development environment.
 The app follows the update channel embedded in the installed Velopack package. The scripts default to the `win` channel; pass `-Channel <name>` when producing or uploading another channel, or set `CUSTODIAN_UPDATE_CHANNEL` only for deliberate local/managed overrides.
-Automatic startup checks are throttled. Managed deployments that need authenticated GitHub release checks can set `CUSTODIAN_GITHUB_TOKEN` in the user or machine environment instead of embedding a token in the app.
+Automatic startup checks are throttled. Managed deployments that need authenticated GitHub release checks can set `CUSTODIAN_GITHUB_TOKEN` in the user or machine environment instead of embedding a token in the app. Non-stable update channels include GitHub prereleases by default; set `CUSTODIAN_UPDATE_PRERELEASES` to `0` or `1` to override that behavior.
 The packaging script cleans `artifacts\velopack` by default for repeatable local builds; pass `-PreserveExistingReleases` when retaining previous release assets for delta generation.
 For local update validation without GitHub Releases, run `scripts\prepare-local-update-test.ps1`, install the preserved baseline setup, then set `CUSTODIAN_UPDATE_SOURCE` to the generated local release folder before launching the installed test build.
 
