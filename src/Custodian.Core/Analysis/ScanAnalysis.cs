@@ -4,21 +4,41 @@ namespace Custodian.Core.Analysis;
 
 public static class ScanAnalysis
 {
+    public static ScanGlobalIndex EnsureGlobalIndex(ScanResult result)
+    {
+        return result.GlobalIndex ??= ScanGlobalIndexBuilder.Build(result.Root);
+    }
+
     public static IReadOnlyList<FileSystemEntry> LargestFiles(ScanResult result, int take = 200)
     {
-        return TopEntries(result.Root, take, e => !e.IsDirectory);
+        return LargestFiles(result.Root, take);
+    }
+
+    public static IReadOnlyList<FileSystemEntry> LargestFiles(FileSystemEntry root, int take = 200)
+    {
+        return TopEntries(root, take, e => !e.IsDirectory);
     }
 
     public static IReadOnlyList<FileSystemEntry> LargestFolders(ScanResult result, int take = 200)
     {
-        return TopEntries(result.Root, take, e => e.IsDirectory);
+        return LargestFolders(result.Root, take);
+    }
+
+    public static IReadOnlyList<FileSystemEntry> LargestFolders(FileSystemEntry root, int take = 200)
+    {
+        return TopEntries(root, take, e => e.IsDirectory);
     }
 
     public static IReadOnlyList<ExtensionSummary> ExtensionSummary(ScanResult result)
     {
+        return ExtensionSummary(result.Root);
+    }
+
+    public static IReadOnlyList<ExtensionSummary> ExtensionSummary(FileSystemEntry root)
+    {
         var summaries = new Dictionary<string, ExtensionAccumulator>(StringComparer.OrdinalIgnoreCase);
 
-        Traverse(result.Root, entry =>
+        Traverse(root, entry =>
         {
             if (entry.IsDirectory)
             {
@@ -47,7 +67,8 @@ public static class ScanAnalysis
             return [];
         }
 
-        var top = new List<FileSystemEntry>(capacity: take);
+        var top = new PriorityQueue<FileSystemEntry, FileSystemEntry>(
+            Comparer<FileSystemEntry>.Create(CompareForTop));
 
         Traverse(root, entry =>
         {
@@ -58,27 +79,25 @@ public static class ScanAnalysis
 
             if (top.Count < take)
             {
-                top.Add(entry);
+                top.Enqueue(entry, entry);
                 return;
             }
 
-            var smallestIndex = 0;
-            for (var i = 1; i < top.Count; i++)
+            if (CompareForTop(entry, top.Peek()) > 0)
             {
-                if (CompareForTop(top[i], top[smallestIndex]) < 0)
-                {
-                    smallestIndex = i;
-                }
-            }
-
-            if (CompareForTop(entry, top[smallestIndex]) > 0)
-            {
-                top[smallestIndex] = entry;
+                top.Dequeue();
+                top.Enqueue(entry, entry);
             }
         });
 
-        top.Sort((left, right) => -CompareForTop(left, right));
-        return top;
+        var count = top.Count;
+        var results = new FileSystemEntry[count];
+        for (var i = count - 1; i >= 0; i--)
+        {
+            results[i] = top.Dequeue();
+        }
+
+        return results;
     }
 
     private static int CompareForTop(FileSystemEntry left, FileSystemEntry right)

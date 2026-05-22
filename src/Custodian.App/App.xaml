@@ -1,9 +1,13 @@
-﻿<Application x:Class="Custodian.App.App"
+<Application x:Class="Custodian.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Custodian.App"
-             StartupUri="MainWindow.xaml">
+             xmlns:local="clr-namespace:Custodian.App">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Custodian.App;component/Themes/Palette.Dark.xaml"/>
+                <ResourceDictionary Source="/Custodian.App;component/Themes/Controls.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

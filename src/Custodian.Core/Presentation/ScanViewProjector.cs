@@ -34,24 +34,44 @@ public static class ScanViewProjector
 
     public static IReadOnlyList<DetailRow> LargestFileRows(ScanResult result, int take = 200)
     {
-        return ScanAnalysis.LargestFiles(result, take)
+        return LargestFilesForTake(result, take)
             .Select(entry => DetailRow.From(entry, Math.Max(1, result.Root.LogicalSizeBytes)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<DetailRow> LargestFileRows(FileSystemEntry scope, int take = 200)
+    {
+        return ScanAnalysis.LargestFiles(scope, take)
+            .Select(entry => DetailRow.From(entry, Math.Max(1, scope.LogicalSizeBytes)))
             .ToList();
     }
 
     public static IReadOnlyList<DetailRow> LargestFolderRows(ScanResult result, int take = 200)
     {
-        return ScanAnalysis.LargestFolders(result, take + 1)
-            .Where(entry => !ReferenceEquals(entry, result.Root))
-            .Take(take)
+        return LargestFoldersForTake(result, take)
             .Select(entry => DetailRow.From(entry, Math.Max(1, result.Root.LogicalSizeBytes)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<DetailRow> LargestFolderRows(FileSystemEntry scope, int take = 200)
+    {
+        return LargestFoldersForScope(scope, take)
+            .Select(entry => DetailRow.From(entry, Math.Max(1, scope.LogicalSizeBytes)))
             .ToList();
     }
 
     public static IReadOnlyList<DetailRow> ExtensionRows(ScanResult result)
     {
-        return ScanAnalysis.ExtensionSummary(result)
+        return ScanAnalysis.EnsureGlobalIndex(result)
+            .ExtensionSummaries
             .Select(summary => ExtensionDetailRow.From(summary, Math.Max(1, result.Root.LogicalSizeBytes)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<DetailRow> ExtensionRows(FileSystemEntry scope)
+    {
+        return ScanAnalysis.ExtensionSummary(scope)
+            .Select(summary => ExtensionDetailRow.From(summary, Math.Max(1, scope.LogicalSizeBytes)))
             .ToList();
     }
 
@@ -73,19 +93,39 @@ public static class ScanViewProjector
 
     public static ChartDataset LargestFoldersChart(ScanResult result, int take = 12)
     {
-        var entries = result.Root.Flatten().Where(entry => entry.IsDirectory && !ReferenceEquals(entry, result.Root));
-        return EntryChart("Largest folders", entries, take);
+        var index = ScanAnalysis.EnsureGlobalIndex(result);
+        return IndexedEntryChart("Largest folders", LargestFoldersForTake(result, take), index.TotalFolderLogicalSizeBytes, index.FolderEntryCount, take);
+    }
+
+    public static ChartDataset LargestFoldersChart(FileSystemEntry scope, int take = 12)
+    {
+        return EntryChart($"Largest folders in {DisplayName(scope)}", DescendantFolders(scope), take);
     }
 
     public static ChartDataset LargestFilesChart(ScanResult result, int take = 12)
     {
-        var entries = result.Root.Flatten().Where(entry => !entry.IsDirectory);
-        return EntryChart("Largest files", entries, take);
+        var index = ScanAnalysis.EnsureGlobalIndex(result);
+        return IndexedEntryChart("Largest files", LargestFilesForTake(result, take), index.TotalFileLogicalSizeBytes, index.FileEntryCount, take);
+    }
+
+    public static ChartDataset LargestFilesChart(FileSystemEntry scope, int take = 12)
+    {
+        return EntryChart($"Largest files in {DisplayName(scope)}", DescendantFiles(scope), take);
     }
 
     public static ChartDataset ExtensionsChart(ScanResult result, int take = 12)
     {
-        var summaries = ScanAnalysis.ExtensionSummary(result);
+        var summaries = ScanAnalysis.EnsureGlobalIndex(result).ExtensionSummaries;
+        return ExtensionsChart("Extensions", summaries, take);
+    }
+
+    public static ChartDataset ExtensionsChart(FileSystemEntry scope, int take = 12)
+    {
+        return ExtensionsChart($"Extensions in {DisplayName(scope)}", ScanAnalysis.ExtensionSummary(scope), take);
+    }
+
+    private static ChartDataset ExtensionsChart(string title, IReadOnlyList<ExtensionSummary> summaries, int take)
+    {
         var top = new List<ExtensionSummary>(capacity: Math.Max(0, take));
         long totalBytes = 0;
 
@@ -114,7 +154,7 @@ public static class ScanViewProjector
             slices.Add(OtherSlice(otherBytes, totalBytes, "Other extensions"));
         }
 
-        return new ChartDataset("Extensions", totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
+        return new ChartDataset(title, totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
     }
 
     public static IReadOnlyList<SummaryMetric> SummaryMetrics(ScanResult result)
@@ -147,8 +187,7 @@ public static class ScanViewProjector
 
     public static IReadOnlyList<BreadcrumbItem> Breadcrumb(FileSystemEntry root, FileSystemEntry selected)
     {
-        var path = new List<FileSystemEntry>();
-        if (!FindPath(root, selected, path))
+        if (!TryBuildPathBySegments(root, selected.FullPath, out var path))
         {
             return [];
         }
@@ -156,19 +195,42 @@ public static class ScanViewProjector
         return path.Select(entry => new BreadcrumbItem(DisplayName(entry), entry.FullPath, entry)).ToList();
     }
 
-    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(FileSystemEntry root, string query, int take = 50)
+    public static bool TryFindDirectoryByPath(FileSystemEntry root, string fullPath, out FileSystemEntry entry)
     {
-        var trimmed = query.Trim();
+        if (TryBuildPathBySegments(root, fullPath, out var path) && path.Count > 0)
+        {
+            entry = path[^1];
+            return true;
+        }
+
+        entry = null!;
+        return false;
+    }
+
+    public static IReadOnlyList<FolderJumpRow> FolderJumpIndex(FileSystemEntry root)
+    {
         return root
             .Flatten()
             .Where(entry => entry.IsDirectory)
-            .Where(entry => string.IsNullOrWhiteSpace(trimmed)
-                || entry.Name.Contains(trimmed, StringComparison.OrdinalIgnoreCase)
-                || entry.FullPath.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
             .OrderBy(entry => entry.FullPath, StringComparer.OrdinalIgnoreCase)
-            .Take(take)
             .Select(FolderJumpRow.From)
             .ToList();
+    }
+
+    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(IReadOnlyList<FolderJumpRow> directoryIndex, string query, int take = 50)
+    {
+        var trimmed = query.Trim();
+        return directoryIndex
+            .Where(row => string.IsNullOrWhiteSpace(trimmed)
+                || row.Name.Contains(trimmed, StringComparison.OrdinalIgnoreCase)
+                || row.FullPath.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
+            .Take(take)
+            .ToList();
+    }
+
+    public static IReadOnlyList<FolderJumpRow> FolderJumpRows(FileSystemEntry root, string query, int take = 50)
+    {
+        return FolderJumpRows(FolderJumpIndex(root), query, take);
     }
 
     public static double Percent(long value, long total)
@@ -259,6 +321,79 @@ public static class ScanViewProjector
         return new ChartDataset(title, totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
     }
 
+    private static ChartDataset IndexedEntryChart(
+        string title,
+        IEnumerable<FileSystemEntry> entries,
+        long totalBytes,
+        long entryCount,
+        int take)
+    {
+        var top = entries
+            .Where(entry => entry.LogicalSizeBytes > 0)
+            .Take(Math.Max(0, take))
+            .ToList();
+        var topBytes = top.Sum(entry => entry.LogicalSizeBytes);
+        var otherBytes = Math.Max(0, totalBytes - topBytes);
+        var slices = top
+            .Select((entry, index) => EntrySlice(entry, totalBytes, index))
+            .ToList();
+
+        if (entryCount > take && otherBytes > 0)
+        {
+            slices.Add(OtherSlice(otherBytes, totalBytes, "Other items"));
+        }
+
+        return new ChartDataset(title, totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
+    }
+
+    private static IReadOnlyList<FileSystemEntry> LargestFilesForTake(ScanResult result, int take)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        var index = ScanAnalysis.EnsureGlobalIndex(result);
+        return take <= index.TopEntryCount
+            ? index.LargestFiles.Take(take).ToList()
+            : ScanAnalysis.LargestFiles(result, take);
+    }
+
+    private static IReadOnlyList<FileSystemEntry> LargestFoldersForTake(ScanResult result, int take)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        var index = ScanAnalysis.EnsureGlobalIndex(result);
+        return take <= index.TopEntryCount
+            ? index.LargestFolders.Take(take).ToList()
+            : ScanAnalysis.LargestFolders(result, take + 1)
+                .Where(entry => !ReferenceEquals(entry, result.Root))
+                .Take(take)
+                .ToList();
+    }
+
+    private static IReadOnlyList<FileSystemEntry> LargestFoldersForScope(FileSystemEntry scope, int take)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        return ScanAnalysis.LargestFolders(scope, take + 1)
+            .Where(entry => !ReferenceEquals(entry, scope))
+            .Take(take)
+            .ToList();
+    }
+
+    private static IEnumerable<FileSystemEntry> DescendantFiles(FileSystemEntry scope)
+        => scope.Flatten().Where(entry => !entry.IsDirectory);
+
+    private static IEnumerable<FileSystemEntry> DescendantFolders(FileSystemEntry scope)
+        => scope.Flatten().Where(entry => entry.IsDirectory && !ReferenceEquals(entry, scope));
+
     private static ChartSlice EntrySlice(FileSystemEntry entry, long totalBytes, int index)
     {
         var percent = Percent(entry.LogicalSizeBytes, totalBytes);
@@ -266,6 +401,7 @@ public static class ScanViewProjector
         var detail = entry.IsDirectory
             ? $"{entry.FileCount:n0} files, {entry.DirectoryCount:n0} folders"
             : string.IsNullOrWhiteSpace(entry.Extension) ? "No extension" : entry.Extension;
+        var category = FileCategoryClassifier.Classify(entry);
 
         return new ChartSlice(
             label,
@@ -274,17 +410,20 @@ public static class ScanViewProjector
             entry.LogicalSizeBytes,
             percent,
             percent.ToString("0.0") + "%",
-            ColorAt(index),
+            // Folders get rotating palette colors (no inherent category); files get category color.
+            entry.IsDirectory ? ColorAt(index) : FileCategoryClassifier.DefaultColor(category),
             ChartSliceKind.Entry,
             entry.FullPath,
             entry,
             ShortLabel(label),
-            ShouldShowCallout(ChartSliceKind.Entry, percent));
+            ShouldShowCallout(ChartSliceKind.Entry, percent),
+            category);
     }
 
     private static ChartSlice ExtensionSlice(ExtensionSummary summary, long totalBytes, int index)
     {
         var percent = Percent(summary.LogicalSizeBytes, totalBytes);
+        var category = FileCategoryClassifier.ClassifyExtension(summary.Extension);
         return new ChartSlice(
             summary.Extension,
             $"{summary.FileCount:n0} files",
@@ -292,12 +431,13 @@ public static class ScanViewProjector
             summary.LogicalSizeBytes,
             percent,
             percent.ToString("0.0") + "%",
-            ColorAt(index),
+            FileCategoryClassifier.DefaultColor(category),
             ChartSliceKind.Extension,
             summary.Extension,
             null,
             ShortLabel(summary.Extension),
-            ShouldShowCallout(ChartSliceKind.Extension, percent));
+            ShouldShowCallout(ChartSliceKind.Extension, percent),
+            category);
     }
 
     private static ChartSlice OtherSlice(long bytes, long totalBytes, string label)
@@ -315,7 +455,8 @@ public static class ScanViewProjector
             "other",
             null,
             ShortLabel(label),
-            false);
+            false,
+            FileCategory.Other);
     }
 
     private static string ColorAt(int index)
@@ -334,24 +475,51 @@ public static class ScanViewProjector
         return -StringComparer.OrdinalIgnoreCase.Compare(left.FullPath, right.FullPath);
     }
 
-    private static bool FindPath(FileSystemEntry current, FileSystemEntry selected, List<FileSystemEntry> path)
+    private static bool TryBuildPathBySegments(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
     {
-        path.Add(current);
-        if (ReferenceEquals(current, selected) || string.Equals(current.FullPath, selected.FullPath, StringComparison.OrdinalIgnoreCase))
+        path = [];
+        if (!root.IsDirectory)
+        {
+            return false;
+        }
+
+        path.Add(root);
+        if (string.Equals(root.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        foreach (var child in current.Children.Where(child => child.IsDirectory))
+        var relativePath = Path.GetRelativePath(root.FullPath, fullPath);
+        if (relativePath == "." || Path.IsPathRooted(relativePath) || IsParentRelativePath(relativePath))
         {
-            if (FindPath(child, selected, path))
-            {
-                return true;
-            }
+            path.Clear();
+            return false;
         }
 
-        path.RemoveAt(path.Count - 1);
-        return false;
+        var current = root;
+        foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var next = current.Children.FirstOrDefault(child =>
+                child.IsDirectory &&
+                string.Equals(child.Name, segment, StringComparison.OrdinalIgnoreCase));
+            if (next is null)
+            {
+                path.Clear();
+                return false;
+            }
+
+            current = next;
+            path.Add(current);
+        }
+
+        return string.Equals(current.FullPath, fullPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsParentRelativePath(string relativePath)
+    {
+        return relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     private static string DisplayName(FileSystemEntry entry)

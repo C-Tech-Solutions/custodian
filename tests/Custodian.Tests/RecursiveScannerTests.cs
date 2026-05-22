@@ -30,6 +30,9 @@ public sealed class RecursiveScannerTests : IDisposable
         Assert.Equal(2, result.Root.FileCount);
         Assert.Equal(1, result.Root.DirectoryCount);
         Assert.Empty(result.SkippedEntries);
+        Assert.NotNull(result.GlobalIndex);
+        Assert.Equal("child.log", result.GlobalIndex.LargestFiles[0].Name);
+        Assert.Single(result.GlobalIndex.LargestFolders);
     }
 
     [Fact]
@@ -81,6 +84,8 @@ public sealed class RecursiveScannerTests : IDisposable
         Assert.Equal(result.RootPath, loaded.RootPath);
         Assert.Equal(result.Root.LogicalSizeBytes, loaded.Root.LogicalSizeBytes);
         Assert.Equal(result.Root.FileCount, loaded.Root.FileCount);
+        Assert.NotNull(loaded.GlobalIndex);
+        Assert.Equal("note.txt", loaded.GlobalIndex.LargestFiles.Single().Name);
         Assert.Equal("custodian-scan", Path.GetExtension(scanPath).TrimStart('.'));
     }
 

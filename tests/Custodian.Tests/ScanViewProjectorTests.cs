@@ -1,3 +1,4 @@
+using Custodian.Core.Analysis;
 using Custodian.Core.Model;
 using Custodian.Core.Presentation;
 
@@ -104,6 +105,17 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void FolderJumpRowsFilterCachedIndexWithoutResorting()
+    {
+        var result = NestedResult();
+        var index = ScanViewProjector.FolderJumpIndex(result.Root);
+
+        var rows = ScanViewProjector.FolderJumpRows(index, "Alpha");
+
+        Assert.Equal([@"C:\Alpha", @"C:\Alpha\Deep"], rows.Select(row => row.FullPath).ToList());
+    }
+
+    [Fact]
     public void SelectedFolderChartKeepsTopSlicesAndAggregatesOther()
     {
         var root = Directory(@"C:\", 150, 5, 0);
@@ -149,6 +161,124 @@ public sealed class ScanViewProjectorTests
             .Select(row => row.Name)
             .ToList();
 
+        Assert.Equal(rowLabels, chartLabels);
+    }
+
+    [Fact]
+    public void GlobalRowsUsePreparedIndex()
+    {
+        var root = Directory(@"C:\", 100, 0, 0);
+        var indexed = File(@"C:\indexed.bin", 100, ".bin");
+        var result = new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test Engine",
+            StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
+            CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z"),
+            GlobalIndex = new ScanGlobalIndex(
+                ScanGlobalIndex.DefaultTopEntryCount,
+                [indexed],
+                [],
+                [new ExtensionSummary(".bin", 1, 100, 100)],
+                100,
+                1,
+                0,
+                0)
+        };
+
+        var rows = ScanViewProjector.LargestFileRows(result);
+        var chart = ScanViewProjector.LargestFilesChart(result);
+
+        Assert.Equal("indexed.bin", rows.Single().Name);
+        Assert.Equal("indexed.bin", chart.Slices.Single().Label);
+    }
+
+    [Fact]
+    public void ScopedLargestRowsUseSelectedFolderOnly()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var fileRows = ScanViewProjector.LargestFileRows(alpha).Select(row => row.FullPath).ToList();
+        var folderRows = ScanViewProjector.LargestFolderRows(alpha).Select(row => row.FullPath).ToList();
+
+        Assert.Equal([@"C:\Alpha\a.bin", @"C:\Alpha\Deep\nested.txt"], fileRows);
+        Assert.Equal([@"C:\Alpha\Deep"], folderRows);
+        Assert.DoesNotContain(fileRows, path => path.StartsWith(@"C:\Beta", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ScopedExtensionsUseSelectedFolderOnly()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var rows = ScanViewProjector.ExtensionRows(alpha).ToList();
+        var chartLabels = ScanViewProjector.ExtensionsChart(alpha)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+
+        Assert.Equal([".bin", ".txt"], rows.Select(row => row.Name).ToList());
+        Assert.Equal(rows.Select(row => row.Name), chartLabels);
+        Assert.Equal("66.7%", rows[0].PercentText);
+    }
+
+    [Fact]
+    public void ScopedLargestChartsUseSelectedFolderOnly()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var fileLabels = ScanViewProjector.LargestFilesChart(alpha)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.SourceKey)
+            .ToList();
+        var folderLabels = ScanViewProjector.LargestFoldersChart(alpha)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.SourceKey)
+            .ToList();
+
+        Assert.Equal([@"C:\Alpha\a.bin", @"C:\Alpha\Deep\nested.txt"], fileLabels);
+        Assert.Equal([@"C:\Alpha\Deep"], folderLabels);
+    }
+
+    [Fact]
+    public void LargestFileProjectionHonorsTakeBeyondPreparedIndex()
+    {
+        var root = Directory(@"C:\", 0, 0, 0);
+        long total = 0;
+        for (var i = 1; i <= 205; i++)
+        {
+            total += i;
+            root.Children.Add(File($@"C:\file{i:000}.bin", i, ".bin"));
+        }
+        root.LogicalSizeBytes = total;
+        root.FileCount = root.Children.Count;
+        var result = new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test Engine",
+            StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
+            CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z"),
+            GlobalIndex = ScanGlobalIndexBuilder.Build(root, take: 2)
+        };
+
+        var rowLabels = ScanViewProjector.LargestFileRows(result, take: 5)
+            .Select(row => row.Name)
+            .ToList();
+        var chartLabels = ScanViewProjector.LargestFilesChart(result, take: 5)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+
+        Assert.Equal(["file205.bin", "file204.bin", "file203.bin", "file202.bin", "file201.bin"], rowLabels);
         Assert.Equal(rowLabels, chartLabels);
     }
 

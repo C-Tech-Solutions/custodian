@@ -14,4 +14,5 @@ public sealed record ChartSlice(
     string SourceKey,
     FileSystemEntry? Entry,
     string ShortLabel,
-    bool ShowCallout);
+    bool ShowCallout,
+    FileCategory Category);

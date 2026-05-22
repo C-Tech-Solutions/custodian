@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Custodian.Core.Model;
 
 public sealed class ScanResult
@@ -10,5 +12,7 @@ public sealed class ScanResult
     public List<SkippedEntry> SkippedEntries { get; set; } = [];
     public List<ScanPhaseTiming> PhaseTimings { get; set; } = [];
     public List<string> Diagnostics { get; set; } = [];
+    [JsonIgnore]
+    public ScanGlobalIndex? GlobalIndex { get; set; }
     public TimeSpan Duration => CompletedAt - StartedAt;
 }

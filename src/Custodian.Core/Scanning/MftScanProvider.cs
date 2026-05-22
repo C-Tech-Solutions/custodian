@@ -106,6 +106,7 @@ public sealed class MftScanProvider : IDiskScanProvider
             StartedAt = started,
             CompletedAt = DateTimeOffset.UtcNow,
             Root = build.Root,
+            GlobalIndex = build.GlobalIndex,
             SkippedEntries = skipped,
             PhaseTimings =
             [

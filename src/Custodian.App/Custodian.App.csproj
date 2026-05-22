@@ -4,6 +4,10 @@
     <ProjectReference Include="..\Custodian.Core\Custodian.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="0.0.626" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -11,6 +15,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>Assets\Custodian.ico</ApplicationIcon>
+    <StartupObject>Custodian.App.Program</StartupObject>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <Product>Custodian Disk Analyzer</Product>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Custodian.ico" />
+    <Resource Include="Assets\CustodianIcon.png" />
+  </ItemGroup>
 
 </Project>

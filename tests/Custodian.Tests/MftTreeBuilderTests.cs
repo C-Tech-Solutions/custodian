@@ -24,6 +24,8 @@ public sealed class MftTreeBuilderTests
         Assert.Equal(2, result.Root.FileCount);
         Assert.Equal(2, result.Root.DirectoryCount);
         Assert.Equal(125, result.Root.LogicalSizeBytes);
+        Assert.Equal("big.bin", result.GlobalIndex.LargestFiles[0].Name);
+        Assert.DoesNotContain(result.GlobalIndex.LargestFolders, entry => ReferenceEquals(entry, result.Root));
         Assert.Contains(result.Root.Flatten(), e => e.FullPath == @"C:\Users\Strife\big.bin" && e.LogicalSizeBytes == 100);
         Assert.Empty(skipped);
     }
