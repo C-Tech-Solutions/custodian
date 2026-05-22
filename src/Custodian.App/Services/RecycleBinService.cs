@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -26,6 +27,7 @@ internal static class RecycleBinService
     private const int HresultCancelled = unchecked((int)0x800704C7);
     private const string RestoreCanonicalVerb = "undelete";
     private const string DeleteCanonicalVerb = "delete";
+    private const string SystemSizeShellProperty = "System.Size";
     private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
 
     public static RecycleBinMoveResult MoveToRecycleBin(string path, IntPtr ownerHandle)
@@ -126,24 +128,37 @@ internal static class RecycleBinService
             items = folder.Items();
 
             var entries = new List<RecycleBinEntry>();
-            int count = items.Count;
-            for (var index = 0; index < count; index++)
+            IEnumerator? enumerator = null;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                dynamic? item = TryGetShellCollectionItem(items, index);
-                try
+                enumerator = ((IEnumerable)items).GetEnumerator();
+                while (enumerator.MoveNext())
                 {
-                    if (item is null)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var item = enumerator.Current;
+                    try
                     {
-                        continue;
-                    }
+                        if (item is null)
+                        {
+                            continue;
+                        }
 
-                    entries.Add(CreateEntry(folder, item));
+                        entries.Add(CreateEntry(folder, item));
+                    }
+                    finally
+                    {
+                        ReleaseComObject(item);
+                    }
                 }
-                finally
+            }
+            finally
+            {
+                if (enumerator is IDisposable disposable)
                 {
-                    ReleaseComObject(item);
+                    disposable.Dispose();
                 }
+
+                ReleaseComObject(enumerator);
             }
 
             return entries;
@@ -237,35 +252,48 @@ internal static class RecycleBinService
         try
         {
             items = folder.Items();
-            int count = items.Count;
-            for (var index = 0; index < count; index++)
+            IEnumerator? enumerator = null;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                dynamic? item = TryGetShellCollectionItem(items, index);
-                var keepItem = false;
-                try
+                enumerator = ((IEnumerable)items).GetEnumerator();
+                while (enumerator.MoveNext())
                 {
-                    if (item is null)
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var item = enumerator.Current;
+                    var keepItem = false;
+                    try
                     {
-                        continue;
-                    }
+                        if (item is null)
+                        {
+                            continue;
+                        }
 
-                    var itemKey = GetRequestedEntryKey(folder, item, requestedRecyclePaths, requestedStableKeys);
-                    if (itemKey is null || !matchedKeys.Add(itemKey))
+                        var itemKey = GetRequestedEntryKey(folder, item, requestedRecyclePaths, requestedStableKeys);
+                        if (itemKey is null || !matchedKeys.Add(itemKey))
+                        {
+                            continue;
+                        }
+
+                        matchedItems.Add(item);
+                        keepItem = true;
+                    }
+                    finally
                     {
-                        continue;
+                        if (!keepItem)
+                        {
+                            ReleaseComObject(item);
+                        }
                     }
-
-                    matchedItems.Add(item);
-                    keepItem = true;
                 }
-                finally
+            }
+            finally
+            {
+                if (enumerator is IDisposable disposable)
                 {
-                    if (!keepItem)
-                    {
-                        ReleaseComObject(item);
-                    }
+                    disposable.Dispose();
                 }
+
+                ReleaseComObject(enumerator);
             }
         }
         finally
@@ -373,28 +401,75 @@ internal static class RecycleBinService
             ?? throw new InvalidOperationException("Windows Shell application service could not be created.");
     }
 
-    private static dynamic? TryGetShellCollectionItem(dynamic items, int index)
-    {
-        try
-        {
-            return items.Item(index);
-        }
-        catch (COMException)
-        {
-            return null;
-        }
-    }
-
     private static long GetShellItemSize(dynamic item)
     {
         try
         {
-            return Math.Max(0, Convert.ToInt64(item.Size, CultureInfo.InvariantCulture));
+            var systemSize = ConvertShellSize(item.ExtendedProperty(SystemSizeShellProperty));
+            if (systemSize > 0)
+            {
+                return systemSize;
+            }
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or COMException)
+        {
+        }
+
+        try
+        {
+            return ConvertShellSize(item.Size);
         }
         catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or COMException)
         {
             return 0;
         }
+    }
+
+    private static long ConvertShellSize(object? value)
+    {
+        return value switch
+        {
+            null => 0,
+            long longValue => Math.Max(0, longValue),
+            int intValue => Math.Max(0, intValue),
+            short shortValue => Math.Max(0, (int)shortValue),
+            ulong ulongValue => ulongValue > long.MaxValue ? long.MaxValue : (long)ulongValue,
+            uint uintValue => uintValue,
+            ushort ushortValue => ushortValue,
+            double doubleValue => ConvertFloatingShellSize(doubleValue),
+            float floatValue => ConvertFloatingShellSize(floatValue),
+            decimal decimalValue => ConvertDecimalShellSize(decimalValue),
+            string text => ParseShellSizeText(text),
+            _ => Math.Max(0, Convert.ToInt64(value, CultureInfo.InvariantCulture))
+        };
+    }
+
+    private static long ConvertFloatingShellSize(double value)
+    {
+        if (double.IsNaN(value) || value <= 0)
+        {
+            return 0;
+        }
+
+        return value >= long.MaxValue ? long.MaxValue : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private static long ConvertDecimalShellSize(decimal value)
+    {
+        if (value <= 0)
+        {
+            return 0;
+        }
+
+        return value >= long.MaxValue ? long.MaxValue : decimal.ToInt64(value);
+    }
+
+    private static long ParseShellSizeText(string text)
+    {
+        return long.TryParse(text, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out var currentValue)
+            || long.TryParse(text, NumberStyles.Integer | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out currentValue)
+            ? Math.Max(0, currentValue)
+            : 0;
     }
 
     private static bool GetShellItemIsFolder(dynamic item, string itemType)
