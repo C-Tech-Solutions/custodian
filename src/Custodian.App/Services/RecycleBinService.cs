@@ -16,11 +16,16 @@ internal enum RecycleBinMoveResult
 internal static class RecycleBinService
 {
     private const int RecycleBinShellNamespace = 10;
+    private const int RecycleBinColumnOriginalLocation = 1;
+    private const int RecycleBinColumnDateDeleted = 2;
+    private const int RecycleBinColumnItemType = 4;
     private const uint FofAllowUndo = 0x0040;
     private const uint FofWantNukeWarning = 0x4000;
     private const uint FofxRecycleOnDelete = 0x00080000;
     private const uint SherbNoConfirmation = 0x00000001;
     private const int HresultCancelled = unchecked((int)0x800704C7);
+    private const string RestoreCanonicalVerb = "undelete";
+    private const string DeleteCanonicalVerb = "delete";
     private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
 
     public static RecycleBinMoveResult MoveToRecycleBin(string path, IntPtr ownerHandle)
@@ -71,10 +76,10 @@ internal static class RecycleBinService
         => RunOnShellStaThreadAsync(EnumerateItems, cancellationToken);
 
     public static Task RestoreAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
-        => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, "restore", cancellationToken), cancellationToken);
+        => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, RestoreCanonicalVerb, cancellationToken), cancellationToken);
 
     public static Task DeletePermanentlyAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
-        => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, "delete", cancellationToken), cancellationToken);
+        => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, DeleteCanonicalVerb, cancellationToken), cancellationToken);
 
     public static Task EmptyAsync(IntPtr ownerHandle, CancellationToken cancellationToken = default)
     {
@@ -105,14 +110,11 @@ internal static class RecycleBinService
                 ?? throw new InvalidOperationException("Windows Recycle Bin namespace is unavailable.");
             items = folder.Items();
 
-            var count = Convert.ToInt32(items.Count, CultureInfo.InvariantCulture);
-            var entries = new List<RecycleBinEntry>(count);
-            for (var index = 0; index < count; index++)
+            var entries = new List<RecycleBinEntry>();
+            foreach (dynamic item in items)
             {
-                dynamic? item = null;
                 try
                 {
-                    item = items.Item(index);
                     if (item is null)
                     {
                         continue;
@@ -139,10 +141,10 @@ internal static class RecycleBinService
     private static RecycleBinEntry CreateEntry(dynamic folder, dynamic item)
     {
         var name = CleanShellText(item.Name);
-        var originalLocation = CleanShellText(folder.GetDetailsOf(item, 1));
-        var dateDeletedText = CleanShellText(folder.GetDetailsOf(item, 2));
-        var itemType = CleanShellText(folder.GetDetailsOf(item, 4));
-        var recyclePath = CleanShellText(item.Path);
+        var originalLocation = CleanShellText(folder.GetDetailsOf(item, RecycleBinColumnOriginalLocation));
+        var dateDeletedText = CleanShellText(folder.GetDetailsOf(item, RecycleBinColumnDateDeleted));
+        var itemType = CleanShellText(folder.GetDetailsOf(item, RecycleBinColumnItemType));
+        var recyclePath = CleanShellText((object?)item.Path);
         var sizeBytes = GetShellItemSize(item);
         var isFolder = GetShellItemIsFolder(item, itemType);
         name = RestoreHiddenExtension(name, recyclePath, isFolder);
@@ -176,16 +178,18 @@ internal static class RecycleBinService
             folder = shell.NameSpace(RecycleBinShellNamespace)
                 ?? throw new InvalidOperationException("Windows Recycle Bin namespace is unavailable.");
 
-            foreach (var entry in entries)
+            var matchedItems = FindRecycleBinItems(folder, entries, cancellationToken);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                dynamic? item = null;
-                try
+                foreach (var item in matchedItems)
                 {
-                    item = FindRecycleBinItem(folder, entry);
+                    cancellationToken.ThrowIfCancellationRequested();
                     InvokeShellVerb(item, verbName);
                 }
-                finally
+            }
+            finally
+            {
+                foreach (var item in matchedItems)
                 {
                     ReleaseComObject(item);
                 }
@@ -198,34 +202,49 @@ internal static class RecycleBinService
         }
     }
 
-    private static dynamic FindRecycleBinItem(dynamic folder, RecycleBinEntry entry)
+    private static IReadOnlyList<object> FindRecycleBinItems(
+        dynamic folder,
+        IReadOnlyCollection<RecycleBinEntry> entries,
+        CancellationToken cancellationToken)
     {
+        var requestedRecyclePaths = entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.RecyclePath))
+            .ToDictionary(entry => entry.RecyclePath, StringComparer.OrdinalIgnoreCase);
+        var requestedStableKeys = entries
+            .ToDictionary(entry => entry.StableKey, StringComparer.OrdinalIgnoreCase);
+        var matchedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var matchedItems = new List<object>();
+
         dynamic? items = null;
         try
         {
             items = folder.Items();
-            var count = Convert.ToInt32(items.Count, CultureInfo.InvariantCulture);
-            for (var index = 0; index < count; index++)
+            foreach (dynamic item in items)
             {
-                dynamic? item = null;
+                cancellationToken.ThrowIfCancellationRequested();
+                var keepItem = false;
                 try
                 {
-                    item = items.Item(index);
                     if (item is null)
                     {
                         continue;
                     }
 
-                    if (MatchesEntry(folder, item, entry))
+                    var itemKey = GetRequestedEntryKey(folder, item, requestedRecyclePaths, requestedStableKeys);
+                    if (itemKey is null || !matchedKeys.Add(itemKey))
                     {
-                        var match = item;
-                        item = null;
-                        return match;
+                        continue;
                     }
+
+                    matchedItems.Add(item);
+                    keepItem = true;
                 }
                 finally
                 {
-                    ReleaseComObject(item);
+                    if (!keepItem)
+                    {
+                        ReleaseComObject(item);
+                    }
                 }
             }
         }
@@ -234,61 +253,59 @@ internal static class RecycleBinService
             ReleaseComObject(items);
         }
 
-        throw new FileNotFoundException("The selected Recycle Bin item is no longer available.", entry.Name);
-    }
-
-    private static bool MatchesEntry(dynamic folder, dynamic item, RecycleBinEntry entry)
-    {
-        var recyclePath = CleanShellText(item.Path);
-        if (!string.IsNullOrWhiteSpace(recyclePath)
-            && string.Equals(recyclePath, entry.RecyclePath, StringComparison.OrdinalIgnoreCase))
+        if (matchedItems.Count != entries.Count)
         {
-            return true;
+            foreach (var item in matchedItems)
+            {
+                ReleaseComObject(item);
+            }
+
+            throw new FileNotFoundException("One or more selected Recycle Bin items are no longer available.");
         }
 
-        var originalLocation = CleanShellText(folder.GetDetailsOf(item, 1));
-        var dateDeletedText = CleanShellText(folder.GetDetailsOf(item, 2));
-        var itemType = CleanShellText(folder.GetDetailsOf(item, 4));
+        return matchedItems;
+    }
+
+    private static string? GetRequestedEntryKey(
+        dynamic folder,
+        dynamic item,
+        IReadOnlyDictionary<string, RecycleBinEntry> requestedRecyclePaths,
+        IReadOnlyDictionary<string, RecycleBinEntry> requestedStableKeys)
+    {
+        var recyclePath = CleanShellText(item.Path);
+        if (!string.IsNullOrWhiteSpace(recyclePath))
+        {
+            RecycleBinEntry recyclePathEntry = null!;
+            if (requestedRecyclePaths.TryGetValue(recyclePath, out recyclePathEntry))
+            {
+                return recyclePathEntry.StableKey;
+            }
+        }
+
+        var originalLocation = CleanShellText((object?)folder.GetDetailsOf(item, RecycleBinColumnOriginalLocation));
+        var dateDeletedText = CleanShellText((object?)folder.GetDetailsOf(item, RecycleBinColumnDateDeleted));
+        var itemType = CleanShellText((object?)folder.GetDetailsOf(item, RecycleBinColumnItemType));
         var name = RestoreHiddenExtension(
-            CleanShellText(item.Name),
+            CleanShellText((object?)item.Name),
             recyclePath,
             GetShellItemIsFolder(item, itemType));
         var stableKey = BuildStableKey(recyclePath, originalLocation, name, dateDeletedText);
-        return string.Equals(stableKey, entry.StableKey, StringComparison.OrdinalIgnoreCase);
+        RecycleBinEntry stableKeyEntry = null!;
+        return requestedStableKeys.TryGetValue(stableKey, out stableKeyEntry)
+            ? stableKeyEntry.StableKey
+            : null;
     }
 
     private static void InvokeShellVerb(dynamic item, string verbName)
     {
-        dynamic? verbs = null;
         try
         {
-            verbs = item.Verbs();
-            var count = Convert.ToInt32(verbs.Count, CultureInfo.InvariantCulture);
-            for (var index = 0; index < count; index++)
-            {
-                dynamic? verb = null;
-                try
-                {
-                    verb = verbs.Item(index);
-                    var normalized = NormalizeVerbName(CleanShellText(verb.Name));
-                    if (string.Equals(normalized, verbName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        verb.DoIt();
-                        return;
-                    }
-                }
-                finally
-                {
-                    ReleaseComObject(verb);
-                }
-            }
+            item.InvokeVerbEx(verbName);
         }
-        finally
+        catch (COMException ex)
         {
-            ReleaseComObject(verbs);
+            throw new InvalidOperationException($"Windows did not expose the {verbName} action for the selected Recycle Bin item.", ex);
         }
-
-        throw new InvalidOperationException($"Windows did not expose a {verbName} action for the selected Recycle Bin item.");
     }
 
     private static Task<T> RunOnShellStaThreadAsync<T>(Func<T> action, CancellationToken cancellationToken)
@@ -300,11 +317,15 @@ internal static class RecycleBinService
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                completion.SetResult(action());
+                completion.TrySetResult(action());
+            }
+            catch (OperationCanceledException)
+            {
+                completion.TrySetCanceled(cancellationToken);
             }
             catch (Exception ex)
             {
-                completion.SetException(ex);
+                completion.TrySetException(ex);
             }
         })
         {
@@ -397,15 +418,6 @@ internal static class RecycleBinService
         string name,
         string dateDeletedText)
         => string.Join("|", recyclePath, originalLocation, name, dateDeletedText);
-
-    private static string NormalizeVerbName(string value)
-    {
-        return value
-            .Replace("&", string.Empty, StringComparison.Ordinal)
-            .Replace("...", string.Empty, StringComparison.Ordinal)
-            .Trim()
-            .ToLowerInvariant();
-    }
 
     private static string CleanShellText(object? value)
     {
