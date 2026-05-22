@@ -32,6 +32,7 @@ public static class UiSettingsStore
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
+    private static readonly object LogGate = new();
 
     public static UiSettings Load()
     {
@@ -108,8 +109,11 @@ public static class UiSettingsStore
         {
             try
             {
-                Directory.CreateDirectory(AppDataDir);
-                File.AppendAllText(LogFilePath, message);
+                lock (LogGate)
+                {
+                    Directory.CreateDirectory(AppDataDir);
+                    File.AppendAllText(LogFilePath, message);
+                }
             }
             catch (Exception logEx)
             {

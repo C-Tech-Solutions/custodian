@@ -77,7 +77,11 @@ internal sealed class AppUpdateService
             throw new InvalidOperationException("No downloaded update is ready to install.");
         }
 
-        _manager.WaitExitThenApplyUpdates(asset, silent: true, restart: true, Array.Empty<string>());
+        _manager.WaitExitThenApplyUpdates(
+            asset,
+            silent: true,
+            restart: true,
+            Environment.GetCommandLineArgs().Skip(1).ToArray());
     }
 
     private static UpdateManager CreateUpdateManager()

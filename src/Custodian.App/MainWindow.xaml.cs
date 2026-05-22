@@ -61,6 +61,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _suppressJumpSelection;
     private readonly Stack<FileSystemEntry> _backStack = new();
     private readonly Stack<FileSystemEntry> _forwardStack = new();
+    private readonly SemaphoreSlim _navigationGate = new(1, 1);
     private readonly UiSettings _settings;
     private DispatcherTimer? _scanProgressTimer;
     private DateTime _scanStarted;
@@ -687,17 +688,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void Up_Click(object sender, RoutedEventArgs e) => GoUp();
 
     private void GoBack()
+        => RunUiAction(GoBackAsync, "Navigation failed");
+
+    private async Task GoBackAsync()
     {
-        if (_backStack.Count == 0 || _selectedEntry is null) return;
-        _forwardStack.Push(_selectedEntry);
-        NavigateToFolder(_backStack.Pop(), addHistory: false, clearForward: false);
+        await _navigationGate.WaitAsync();
+        try
+        {
+            if (_backStack.Count == 0 || _selectedEntry is null) return;
+            _forwardStack.Push(_selectedEntry);
+            await NavigateToFolderCoreAsync(_backStack.Pop(), addHistory: false, clearForward: false);
+        }
+        finally
+        {
+            _navigationGate.Release();
+        }
     }
 
     private void GoForward()
+        => RunUiAction(GoForwardAsync, "Navigation failed");
+
+    private async Task GoForwardAsync()
     {
-        if (_forwardStack.Count == 0 || _selectedEntry is null) return;
-        _backStack.Push(_selectedEntry);
-        NavigateToFolder(_forwardStack.Pop(), addHistory: false, clearForward: false);
+        await _navigationGate.WaitAsync();
+        try
+        {
+            if (_forwardStack.Count == 0 || _selectedEntry is null) return;
+            _backStack.Push(_selectedEntry);
+            await NavigateToFolderCoreAsync(_forwardStack.Pop(), addHistory: false, clearForward: false);
+        }
+        finally
+        {
+            _navigationGate.Release();
+        }
     }
 
     private void GoUp()
@@ -1341,6 +1364,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         => RunUiAction(() => NavigateToFolderAsync(entry, addHistory, clearForward), "Navigation failed");
 
     private async Task NavigateToFolderAsync(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
+    {
+        await _navigationGate.WaitAsync();
+        try
+        {
+            await NavigateToFolderCoreAsync(entry, addHistory, clearForward);
+        }
+        finally
+        {
+            _navigationGate.Release();
+        }
+    }
+
+    private async Task NavigateToFolderCoreAsync(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
     {
         if (_selectedEntry is not null && string.Equals(_selectedEntry.FullPath, entry.FullPath, StringComparison.OrdinalIgnoreCase)) return;
         if (addHistory && _selectedEntry is not null) _backStack.Push(_selectedEntry);
