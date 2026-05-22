@@ -41,6 +41,11 @@
                 </Grid>
             </Grid>
         </HierarchicalDataTemplate>
+
+        <Style x:Key="SortableColumnHeaderText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource ColumnHeaderText}">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTip" Value="Sort rows by this column"/>
+        </Style>
     </Window.Resources>
 
     <DockPanel LastChildFill="True">
@@ -441,14 +446,30 @@
                                         Background="{DynamicResource SurfaceSubtle}"
                                         Height="32">
                                 <Border Width="36"/>
-                                <TextBlock Width="300" Margin="4,0" Text="Name" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="64" Margin="4,0" Text="Type" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="92" Margin="4,0" Text="Size" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="130" Margin="4,0" Text="Share" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="92" Margin="4,0" Text="Allocated" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="68" Margin="4,0" Text="Files" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="72" Margin="4,0" Text="Folders" Style="{StaticResource ColumnHeaderText}"/>
-                                <TextBlock Width="320" Margin="4,0" Text="Path" Style="{StaticResource ColumnHeaderText}"/>
+                                <Border Width="300" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="Name" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="NameColumnHeader" Text="Name" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="64" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="Kind" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="KindColumnHeader" Text="Type" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="92" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="LogicalSize" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="LogicalSizeColumnHeader" Text="Size" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="130" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="Percent" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="PercentColumnHeader" Text="Share" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="92" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="AllocatedSize" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="AllocatedSizeColumnHeader" Text="Allocated" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="68" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="FileCount" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="FileCountColumnHeader" Text="Files" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="72" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="DirectoryCount" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="DirectoryCountColumnHeader" Text="Folders" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
+                                <Border Width="320" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="FullPath" MouseLeftButtonUp="DetailsColumnHeader_Click">
+                                    <TextBlock x:Name="FullPathColumnHeader" Text="Path" Style="{StaticResource SortableColumnHeaderText}"/>
+                                </Border>
                             </StackPanel>
                             <ListView x:Name="DetailsGrid"
                                       ItemsSource="{Binding DetailRowsView}"

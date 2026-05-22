@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -74,6 +75,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
     private int _detailRefreshVersion;
     private IReadOnlyList<DetailRow>? _boundDetailRows;
+    private DetailSortColumn? _detailSortColumn;
+    private ListSortDirection _detailSortDirection = ListSortDirection.Ascending;
     private bool _settingsPersistedForClose;
     private bool _isClosing;
 
@@ -126,6 +129,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateChartModeVisibility();
         UpdateEmptyStateVisibility();
         UpdateFilterUiState();
+        RefreshDetailSortHeaders();
 
         SizeChanged += (_, _) => ScheduleSettingsSave();
         LocationChanged += (_, _) => ScheduleSettingsSave();
@@ -908,6 +912,84 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void DetailsColumnHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string tag }
+            || !Enum.TryParse(tag, out DetailSortColumn column))
+        {
+            return;
+        }
+
+        if (_detailSortColumn == column)
+        {
+            _detailSortDirection = _detailSortDirection == ListSortDirection.Ascending
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending;
+        }
+        else
+        {
+            _detailSortColumn = column;
+            _detailSortDirection = DefaultSortDirection(column);
+        }
+
+        ApplyDetailSort();
+        e.Handled = true;
+    }
+
+    private void ApplyDetailSort()
+    {
+        if (DetailRowsView is ListCollectionView listView)
+        {
+            listView.CustomSort = _detailSortColumn is { } column
+                ? new DetailRowComparer(column, _detailSortDirection)
+                : null;
+        }
+        else
+        {
+            DetailRowsView.Refresh();
+        }
+
+        RefreshDetailSortHeaders();
+        UpdateFilterUiState();
+    }
+
+    private void RefreshDetailSortHeaders()
+    {
+        SetDetailSortHeader(NameColumnHeader, "Name", DetailSortColumn.Name);
+        SetDetailSortHeader(KindColumnHeader, "Type", DetailSortColumn.Kind);
+        SetDetailSortHeader(LogicalSizeColumnHeader, "Size", DetailSortColumn.LogicalSize);
+        SetDetailSortHeader(PercentColumnHeader, "Share", DetailSortColumn.Percent);
+        SetDetailSortHeader(AllocatedSizeColumnHeader, "Allocated", DetailSortColumn.AllocatedSize);
+        SetDetailSortHeader(FileCountColumnHeader, "Files", DetailSortColumn.FileCount);
+        SetDetailSortHeader(DirectoryCountColumnHeader, "Folders", DetailSortColumn.DirectoryCount);
+        SetDetailSortHeader(FullPathColumnHeader, "Path", DetailSortColumn.FullPath);
+    }
+
+    private void SetDetailSortHeader(TextBlock header, string label, DetailSortColumn column)
+    {
+        if (_detailSortColumn == column)
+        {
+            header.Text = $"{label} {(_detailSortDirection == ListSortDirection.Ascending ? "^" : "v")}";
+            header.Foreground = (WpfBrush?)TryFindResource("AccentBrush") ?? header.Foreground;
+        }
+        else
+        {
+            header.Text = label;
+            header.ClearValue(TextBlock.ForegroundProperty);
+        }
+    }
+
+    private static ListSortDirection DefaultSortDirection(DetailSortColumn column)
+    {
+        return column is DetailSortColumn.LogicalSize
+            or DetailSortColumn.Percent
+            or DetailSortColumn.AllocatedSize
+            or DetailSortColumn.FileCount
+            or DetailSortColumn.DirectoryCount
+            ? ListSortDirection.Descending
+            : ListSortDirection.Ascending;
+    }
+
     // ============================================================
     //  Theme / shortcuts / right-panel collapse
     // ============================================================
@@ -1197,8 +1279,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ReplaceCollection(DetailRows, rows);
             _boundDetailRows = rows;
             // Granular collection notifications refresh the view. An explicit
-            // Refresh is only needed to re-run the filter predicate.
-            if (!string.IsNullOrEmpty(_filterText))
+            // Refresh is only needed to re-run filter/sort view logic.
+            if (!string.IsNullOrEmpty(_filterText) || _detailSortColumn is not null)
             {
                 DetailRowsView.Refresh();
             }
@@ -1787,6 +1869,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
+    private sealed class DetailRowComparer(DetailSortColumn column, ListSortDirection direction) : IComparer
+    {
+        public int Compare(object? x, object? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is not DetailRow left) return direction == ListSortDirection.Ascending ? -1 : 1;
+            if (y is not DetailRow right) return direction == ListSortDirection.Ascending ? 1 : -1;
+
+            var result = column switch
+            {
+                DetailSortColumn.Name => StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name),
+                DetailSortColumn.Kind => StringComparer.CurrentCultureIgnoreCase.Compare(left.Kind, right.Kind),
+                DetailSortColumn.LogicalSize => left.Entry.LogicalSizeBytes.CompareTo(right.Entry.LogicalSizeBytes),
+                DetailSortColumn.Percent => left.Percent.CompareTo(right.Percent),
+                DetailSortColumn.AllocatedSize => left.Entry.AllocatedSizeBytes.CompareTo(right.Entry.AllocatedSizeBytes),
+                DetailSortColumn.FileCount => left.FileCount.CompareTo(right.FileCount),
+                DetailSortColumn.DirectoryCount => left.DirectoryCount.CompareTo(right.DirectoryCount),
+                DetailSortColumn.FullPath => StringComparer.CurrentCultureIgnoreCase.Compare(left.FullPath, right.FullPath),
+                _ => 0
+            };
+
+            if (result == 0 && column != DetailSortColumn.FullPath)
+            {
+                result = StringComparer.CurrentCultureIgnoreCase.Compare(left.FullPath, right.FullPath);
+            }
+
+            return direction == ListSortDirection.Ascending ? Math.Sign(result) : -Math.Sign(result);
+        }
+    }
+
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int pvAttribute, int cbAttribute);
 }
@@ -1905,3 +2017,4 @@ public sealed record DriveRow(
 internal enum DetailViewMode { Contents, LargestFiles, LargestFolders, Extensions }
 internal enum ChartScope { SelectedFolder, LargestFolders, LargestFiles, Extensions }
 internal enum ChartDisplayMode { Treemap, Pie, Bars }
+internal enum DetailSortColumn { Name, Kind, LogicalSize, Percent, AllocatedSize, FileCount, DirectoryCount, FullPath }
