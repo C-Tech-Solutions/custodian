@@ -128,15 +128,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         LocationChanged += (_, _) => ScheduleSettingsSave();
         StateChanged += (_, _) => ScheduleSettingsSave();
         Closing += (_, _) => PersistSettings();
+        Closed += MainWindow_Closed;
         SourceInitialized += (_, _) => ApplyNativeTitleBarTheme();
 
-        ThemeManager.ThemeChanged += (_, _) =>
-        {
-            ApplyNativeTitleBarTheme();
-            RefreshThemeMenuChecks();
-            Treemap?.InvalidateVisual();
-            PieChart?.InvalidateVisual();
-        };
+        ThemeManager.ThemeChanged += ThemeManager_ThemeChanged;
         RefreshThemeMenuChecks();
         Loaded += MainWindow_Loaded;
     }
@@ -152,6 +147,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await CheckForUpdatesAsync(isAutomatic: true);
         }
         await driveRowsTask;
+    }
+
+    private void ThemeManager_ThemeChanged(object? sender, AppTheme theme)
+    {
+        ApplyNativeTitleBarTheme();
+        RefreshThemeMenuChecks();
+        Treemap?.InvalidateVisual();
+        PieChart?.InvalidateVisual();
+    }
+
+    private void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
+        Closed -= MainWindow_Closed;
     }
 
     // ============================================================
@@ -294,12 +303,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _updateCts = new CancellationTokenSource();
         CheckUpdatesMenuItem.IsEnabled = false;
         ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
-        var updateCheckCompleted = false;
 
         try
         {
             var result = await _updates.CheckForUpdatesAsync();
-            updateCheckCompleted = true;
+            MarkUpdateCheckCompleted();
             ApplyUpdateStatus(result.Status);
 
             switch (result.Status.Kind)
@@ -339,15 +347,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            if (updateCheckCompleted)
-            {
-                _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
-                ScheduleSettingsSave();
-            }
             _updateCts.Dispose();
             _updateCts = null;
             CheckUpdatesMenuItem.IsEnabled = true;
         }
+    }
+
+    private void MarkUpdateCheckCompleted()
+    {
+        _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
+        ScheduleSettingsSave();
     }
 
     private bool ShouldRunAutomaticUpdateCheck()

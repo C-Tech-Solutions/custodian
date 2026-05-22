@@ -43,6 +43,7 @@ public sealed class TreemapControl : FrameworkElement
     private static readonly Typeface SemiBoldLabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private static readonly LinearGradientBrush TileHighlightBrush = CreateTileHighlightBrush();
     private static readonly ConcurrentDictionary<string, WpfBrush> TileTextBrushCache = new(StringComparer.OrdinalIgnoreCase);
+    private const double LayoutEpsilon = 1e-6;
     private readonly List<RenderedTile> _tiles = [];
     private readonly List<ChartSlice> _slices = [];
     private INotifyCollectionChanged? _sliceNotifications;
@@ -312,14 +313,14 @@ public sealed class TreemapControl : FrameworkElement
 
     private static double Worst(double sum, double min, double max, double shortSide)
     {
-        if (shortSide <= double.Epsilon) return double.PositiveInfinity;
-        if (sum <= double.Epsilon || min <= double.Epsilon)
+        if (shortSide <= LayoutEpsilon) return double.PositiveInfinity;
+        if (sum <= LayoutEpsilon || min <= LayoutEpsilon)
         {
             return double.PositiveInfinity;
         }
 
         var s2 = shortSide * shortSide;
-        if (s2 <= double.Epsilon)
+        if (s2 <= LayoutEpsilon)
         {
             return double.PositiveInfinity;
         }
