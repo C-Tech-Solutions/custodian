@@ -339,7 +339,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            if (isAutomatic && updateCheckCompleted)
+            if (updateCheckCompleted)
             {
                 _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
                 ScheduleSettingsSave();

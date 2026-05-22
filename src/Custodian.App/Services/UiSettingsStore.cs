@@ -23,10 +23,12 @@ public sealed class UiSettings
 
 public static class UiSettingsStore
 {
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string AppDataDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Custodian",
-        "ui.json");
+        "Custodian");
+
+    private static readonly string FilePath = Path.Combine(AppDataDir, "ui.json");
+    private static readonly string LogFilePath = Path.Combine(AppDataDir, "settings-errors.log");
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
@@ -43,7 +45,7 @@ public static class UiSettingsStore
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            LogFailure("Load UI settings", ex);
             return new UiSettings();
         }
     }
@@ -77,8 +79,24 @@ public static class UiSettingsStore
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            LogFailure("Save UI settings", ex);
             // Settings are best-effort; don't crash on disk full / permission errors.
+        }
+    }
+
+    private static void LogFailure(string operation, Exception ex)
+    {
+        Debug.WriteLine(ex);
+        try
+        {
+            Directory.CreateDirectory(AppDataDir);
+            File.AppendAllText(
+                LogFilePath,
+                $"{DateTimeOffset.UtcNow:O} {operation} failed{Environment.NewLine}{ex}{Environment.NewLine}");
+        }
+        catch (Exception logEx)
+        {
+            Debug.WriteLine(logEx);
         }
     }
 }

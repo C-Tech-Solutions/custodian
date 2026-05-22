@@ -14,6 +14,8 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
     throw "Set GITHUB_TOKEN or pass -Token before uploading Velopack release assets."
 }
 
+dotnet tool restore --tool-manifest (Join-Path $repo "dotnet-tools.json")
+
 $vpkArgs = @(
     "vpk", "upload", "github",
     "--outputDir", $output,

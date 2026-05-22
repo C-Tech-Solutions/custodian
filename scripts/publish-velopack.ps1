@@ -26,7 +26,7 @@ if (!$PreserveExistingReleases -and (Test-Path $output)) {
 New-Item -ItemType Directory -Force -Path $appOut | Out-Null
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
-dotnet tool restore
+dotnet tool restore --tool-manifest (Join-Path $repo "dotnet-tools.json")
 
 dotnet publish (Join-Path $repo "src\Custodian.App\Custodian.App.csproj") `
     -c $Configuration `
