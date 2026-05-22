@@ -73,7 +73,22 @@ internal static class RecycleBinService
     }
 
     public static Task<IReadOnlyList<RecycleBinEntry>> GetItemsAsync(CancellationToken cancellationToken = default)
-        => RunOnShellStaThreadAsync(EnumerateItems, cancellationToken);
+        => RunOnShellStaThreadAsync(() => EnumerateItems(cancellationToken), cancellationToken);
+
+    public static Task<(long SizeBytes, long ItemCount)> GetUsageAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var info = new ShQueryRecycleBinInfo
+            {
+                CbSize = Marshal.SizeOf<ShQueryRecycleBinInfo>()
+            };
+
+            ThrowIfFailed(SHQueryRecycleBin(null, ref info));
+            return (Math.Max(0, info.SizeBytes), Math.Max(0, info.ItemCount));
+        }, cancellationToken);
+    }
 
     public static Task RestoreAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
         => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, RestoreCanonicalVerb, cancellationToken), cancellationToken);
@@ -98,7 +113,7 @@ internal static class RecycleBinService
         });
     }
 
-    private static IReadOnlyList<RecycleBinEntry> EnumerateItems()
+    private static IReadOnlyList<RecycleBinEntry> EnumerateItems(CancellationToken cancellationToken)
     {
         dynamic? shell = null;
         dynamic? folder = null;
@@ -111,8 +126,11 @@ internal static class RecycleBinService
             items = folder.Items();
 
             var entries = new List<RecycleBinEntry>();
-            foreach (dynamic item in items)
+            int count = items.Count;
+            for (var index = 0; index < count; index++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                dynamic? item = TryGetShellCollectionItem(items, index);
                 try
                 {
                     if (item is null)
@@ -145,8 +163,8 @@ internal static class RecycleBinService
         var dateDeletedText = CleanShellText(folder.GetDetailsOf(item, RecycleBinColumnDateDeleted));
         var itemType = CleanShellText(folder.GetDetailsOf(item, RecycleBinColumnItemType));
         var recyclePath = CleanShellText((object?)item.Path);
-        var sizeBytes = GetShellItemSize(item);
         var isFolder = GetShellItemIsFolder(item, itemType);
+        var sizeBytes = isFolder ? 0 : GetShellItemSize(item);
         name = RestoreHiddenExtension(name, recyclePath, isFolder);
 
         return new RecycleBinEntry(
@@ -219,9 +237,11 @@ internal static class RecycleBinService
         try
         {
             items = folder.Items();
-            foreach (dynamic item in items)
+            int count = items.Count;
+            for (var index = 0; index < count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                dynamic? item = TryGetShellCollectionItem(items, index);
                 var keepItem = false;
                 try
                 {
@@ -353,6 +373,18 @@ internal static class RecycleBinService
             ?? throw new InvalidOperationException("Windows Shell application service could not be created.");
     }
 
+    private static dynamic? TryGetShellCollectionItem(dynamic items, int index)
+    {
+        try
+        {
+            return items.Item(index);
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+
     private static long GetShellItemSize(dynamic item)
     {
         try
@@ -474,6 +506,11 @@ internal static class RecycleBinService
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHQueryRecycleBin(
+        [MarshalAs(UnmanagedType.LPWStr)] string? pszRootPath,
+        ref ShQueryRecycleBinInfo pSHQueryRbInfo);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHEmptyRecycleBin(
         IntPtr hwnd,
         [MarshalAs(UnmanagedType.LPWStr)] string? pszRootPath,
@@ -485,6 +522,14 @@ internal static class RecycleBinService
         IntPtr pbc,
         ref Guid riid,
         out IShellItem ppv);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShQueryRecycleBinInfo
+    {
+        public int CbSize;
+        public long SizeBytes;
+        public long ItemCount;
+    }
 
     [ComImport]
     [Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8")]

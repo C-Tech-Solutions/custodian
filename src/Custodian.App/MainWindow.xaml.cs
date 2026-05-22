@@ -1156,13 +1156,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SetRecycleBinBusy(true, "Loading Recycle Bin items...");
         try
         {
-            var entries = await RecycleBinService.GetItemsAsync(cts.Token);
+            var entriesTask = RecycleBinService.GetItemsAsync(cts.Token);
+            var usageTask = RecycleBinService.GetUsageAsync(cts.Token);
+            await Task.WhenAll(entriesTask, usageTask);
+
+            var entries = await entriesTask;
+            var usage = await usageTask;
             ReplaceCollection(RecycleBinRows, RecycleBinViewProjector.Rows(entries));
             ApplyRecycleBinSort();
             UpdateRecycleBinFilterUiState();
-            UpdateRecycleBinTargetUsage(entries);
+            UpdateRecycleBinTargetUsage(usage.SizeBytes, usage.ItemCount);
             var countText = RecycleBinItemCountText(RecycleBinRows.Count);
-            var totalSize = SizeFormatter.Format(entries.Sum(entry => entry.SizeBytes));
+            var totalSize = SizeFormatter.Format(usage.SizeBytes);
             RecycleBinStatusText.Text = RecycleBinRows.Count == 0
                 ? "The Recycle Bin is empty."
                 : $"{countText} using {totalSize} in the Windows Recycle Bin.";
@@ -2061,8 +2066,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var entries = await RecycleBinService.GetItemsAsync();
-            UpdateRecycleBinTargetUsage(entries);
+            var usage = await RecycleBinService.GetUsageAsync();
+            UpdateRecycleBinTargetUsage(usage.SizeBytes, usage.ItemCount);
         }
         catch (Exception ex)
         {
@@ -2071,12 +2076,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void UpdateRecycleBinTargetUsage(IEnumerable<RecycleBinEntry> entries)
+    private void UpdateRecycleBinTargetUsage(long sizeBytes, long itemCount)
     {
-        var items = entries as IReadOnlyCollection<RecycleBinEntry> ?? entries.ToList();
         ReplaceTargetRow(
             TargetKind.RecycleBin,
-            TargetRow.RecycleBin(items.Sum(entry => entry.SizeBytes), items.Count));
+            TargetRow.RecycleBin(sizeBytes, itemCount));
     }
 
     private void ReplaceTargetRow(TargetKind kind, TargetRow row)
@@ -2555,7 +2559,7 @@ public sealed record TargetRow(
             Visibility.Collapsed,
             Visibility.Visible);
 
-    public static TargetRow RecycleBin(long sizeBytes, int itemCount)
+    public static TargetRow RecycleBin(long sizeBytes, long itemCount)
         => new(
             TargetKind.RecycleBin,
             "Recycle Bin",
@@ -2594,7 +2598,7 @@ public sealed record TargetRow(
             Visibility.Visible,
             Visibility.Collapsed);
 
-    private static string ItemCountText(int count)
+    private static string ItemCountText(long count)
         => count == 1 ? "1 item" : $"{count:n0} items";
 }
 
