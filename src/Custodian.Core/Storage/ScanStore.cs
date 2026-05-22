@@ -105,7 +105,15 @@ public sealed class ScanStore
             }
         }
 
-        var root = byId[parentById.Single(p => p.Value is null).Key];
+        var rootIds = parentById.Where(pair => pair.Value is null).Select(pair => pair.Key).ToList();
+        if (rootIds.Count != 1)
+        {
+            throw new InvalidDataException(rootIds.Count == 0
+                ? "No root folder found in scan file."
+                : "Multiple root folders found in scan file.");
+        }
+
+        var root = byId[rootIds[0]];
         var result = new ScanResult
         {
             RootPath = metadata["root_path"],

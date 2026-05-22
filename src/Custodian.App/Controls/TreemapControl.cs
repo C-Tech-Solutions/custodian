@@ -174,7 +174,13 @@ public sealed class TreemapControl : FrameworkElement
             _totalBytes += slice.RawBytes;
         }
 
-        _slices.Sort(static (left, right) => right.RawBytes.CompareTo(left.RawBytes));
+        _slices.Sort(static (left, right) =>
+        {
+            var sizeCompare = right.RawBytes.CompareTo(left.RawBytes);
+            return sizeCompare != 0
+                ? sizeCompare
+                : string.Compare(left.SourceKey, right.SourceKey, StringComparison.Ordinal);
+        });
     }
 
     protected override void OnRender(DrawingContext drawingContext)
