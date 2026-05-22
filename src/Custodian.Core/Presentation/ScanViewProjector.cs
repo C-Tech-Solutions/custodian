@@ -34,18 +34,14 @@ public static class ScanViewProjector
 
     public static IReadOnlyList<DetailRow> LargestFileRows(ScanResult result, int take = 200)
     {
-        return ScanAnalysis.EnsureGlobalIndex(result)
-            .LargestFiles
-            .Take(take)
+        return LargestFilesForTake(result, take)
             .Select(entry => DetailRow.From(entry, Math.Max(1, result.Root.LogicalSizeBytes)))
             .ToList();
     }
 
     public static IReadOnlyList<DetailRow> LargestFolderRows(ScanResult result, int take = 200)
     {
-        return ScanAnalysis.EnsureGlobalIndex(result)
-            .LargestFolders
-            .Take(take)
+        return LargestFoldersForTake(result, take)
             .Select(entry => DetailRow.From(entry, Math.Max(1, result.Root.LogicalSizeBytes)))
             .ToList();
     }
@@ -77,13 +73,13 @@ public static class ScanViewProjector
     public static ChartDataset LargestFoldersChart(ScanResult result, int take = 12)
     {
         var index = ScanAnalysis.EnsureGlobalIndex(result);
-        return IndexedEntryChart("Largest folders", index.LargestFolders, index.TotalFolderLogicalSizeBytes, index.FolderEntryCount, take);
+        return IndexedEntryChart("Largest folders", LargestFoldersForTake(result, take), index.TotalFolderLogicalSizeBytes, index.FolderEntryCount, take);
     }
 
     public static ChartDataset LargestFilesChart(ScanResult result, int take = 12)
     {
         var index = ScanAnalysis.EnsureGlobalIndex(result);
-        return IndexedEntryChart("Largest files", index.LargestFiles, index.TotalFileLogicalSizeBytes, index.FileEntryCount, take);
+        return IndexedEntryChart("Largest files", LargestFilesForTake(result, take), index.TotalFileLogicalSizeBytes, index.FileEntryCount, take);
     }
 
     public static ChartDataset ExtensionsChart(ScanResult result, int take = 12)
@@ -307,6 +303,35 @@ public static class ScanViewProjector
         }
 
         return new ChartDataset(title, totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
+    }
+
+    private static IReadOnlyList<FileSystemEntry> LargestFilesForTake(ScanResult result, int take)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        var index = ScanAnalysis.EnsureGlobalIndex(result);
+        return take <= index.TopEntryCount
+            ? index.LargestFiles.Take(take).ToList()
+            : ScanAnalysis.LargestFiles(result, take);
+    }
+
+    private static IReadOnlyList<FileSystemEntry> LargestFoldersForTake(ScanResult result, int take)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        var index = ScanAnalysis.EnsureGlobalIndex(result);
+        return take <= index.TopEntryCount
+            ? index.LargestFolders.Take(take).ToList()
+            : ScanAnalysis.LargestFolders(result, take + 1)
+                .Where(entry => !ReferenceEquals(entry, result.Root))
+                .Take(take)
+                .ToList();
     }
 
     private static ChartSlice EntrySlice(FileSystemEntry entry, long totalBytes, int index)

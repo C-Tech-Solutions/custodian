@@ -1,3 +1,4 @@
+using Custodian.Core.Analysis;
 using Custodian.Core.Model;
 using Custodian.Core.Presentation;
 
@@ -191,6 +192,41 @@ public sealed class ScanViewProjectorTests
 
         Assert.Equal("indexed.bin", rows.Single().Name);
         Assert.Equal("indexed.bin", chart.Slices.Single().Label);
+    }
+
+    [Fact]
+    public void LargestFileProjectionHonorsTakeBeyondPreparedIndex()
+    {
+        var root = Directory(@"C:\", 0, 0, 0);
+        long total = 0;
+        for (var i = 1; i <= 205; i++)
+        {
+            total += i;
+            root.Children.Add(File($@"C:\file{i:000}.bin", i, ".bin"));
+        }
+        root.LogicalSizeBytes = total;
+        root.FileCount = root.Children.Count;
+        var result = new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test Engine",
+            StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
+            CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z"),
+            GlobalIndex = ScanGlobalIndexBuilder.Build(root, take: 2)
+        };
+
+        var rowLabels = ScanViewProjector.LargestFileRows(result, take: 5)
+            .Select(row => row.Name)
+            .ToList();
+        var chartLabels = ScanViewProjector.LargestFilesChart(result, take: 5)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+
+        Assert.Equal(["file205.bin", "file204.bin", "file203.bin", "file202.bin", "file201.bin"], rowLabels);
+        Assert.Equal(rowLabels, chartLabels);
     }
 
     [Fact]
