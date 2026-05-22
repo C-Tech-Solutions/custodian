@@ -195,6 +195,59 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void ScopedLargestRowsUseSelectedFolderOnly()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var fileRows = ScanViewProjector.LargestFileRows(alpha).Select(row => row.FullPath).ToList();
+        var folderRows = ScanViewProjector.LargestFolderRows(alpha).Select(row => row.FullPath).ToList();
+
+        Assert.Equal([@"C:\Alpha\a.bin", @"C:\Alpha\Deep\nested.txt"], fileRows);
+        Assert.Equal([@"C:\Alpha\Deep"], folderRows);
+        Assert.DoesNotContain(fileRows, path => path.StartsWith(@"C:\Beta", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ScopedExtensionsUseSelectedFolderOnly()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var rows = ScanViewProjector.ExtensionRows(alpha).ToList();
+        var chartLabels = ScanViewProjector.ExtensionsChart(alpha)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.Label)
+            .ToList();
+
+        Assert.Equal([".bin", ".txt"], rows.Select(row => row.Name).ToList());
+        Assert.Equal(rows.Select(row => row.Name), chartLabels);
+        Assert.Equal("66.7%", rows[0].PercentText);
+    }
+
+    [Fact]
+    public void ScopedLargestChartsUseSelectedFolderOnly()
+    {
+        var result = NestedResult();
+        var alpha = result.Root.Children.Single(child => child.Name == "Alpha");
+
+        var fileLabels = ScanViewProjector.LargestFilesChart(alpha)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.SourceKey)
+            .ToList();
+        var folderLabels = ScanViewProjector.LargestFoldersChart(alpha)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.SourceKey)
+            .ToList();
+
+        Assert.Equal([@"C:\Alpha\a.bin", @"C:\Alpha\Deep\nested.txt"], fileLabels);
+        Assert.Equal([@"C:\Alpha\Deep"], folderLabels);
+    }
+
+    [Fact]
     public void LargestFileProjectionHonorsTakeBeyondPreparedIndex()
     {
         var root = Directory(@"C:\", 0, 0, 0);

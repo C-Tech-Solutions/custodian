@@ -1225,7 +1225,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
-    private Task RefreshDetailsAsync(bool refreshContext = true)
+    private async Task RefreshDetailsAsync(bool refreshContext = true)
     {
         var requestVersion = ++_detailRefreshVersion;
         var result = _currentScan;
@@ -1241,7 +1241,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             BreadcrumbItems.Clear();
             RefreshChart();
             RefreshNavigationState(null, null);
-            return Task.CompletedTask;
+            return;
         }
 
         var selected = _selectedEntry ?? result.Root;
@@ -1255,7 +1255,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             try
             {
-                rows = GetOrCreateGlobalDetailRows(result, viewMode);
+                rows = ReferenceEquals(selected, result.Root)
+                    ? GetOrCreateGlobalDetailRows(result, viewMode)
+                    : await Task.Run(() => ProjectScopedDetailRows(selected, viewMode));
             }
             catch (Exception ex)
             {
@@ -1264,13 +1266,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     DetailsGrid.IsEnabled = true;
                     ShowOperationError("View failed", ex);
                 }
-                return Task.CompletedTask;
+                return;
             }
         }
 
         if (!IsCurrentDetailRequest(requestVersion, result, selected, viewMode))
         {
-            return Task.CompletedTask;
+            return;
         }
 
         DetailsGrid.IsEnabled = true;
@@ -1295,7 +1297,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
         SelectedSubText.Text = BuildSelectedSubText(viewMode, selected);
-        return Task.CompletedTask;
     }
 
     private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(ScanResult result, DetailViewMode mode)
@@ -1316,6 +1317,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             DetailViewMode.LargestFiles => ScanViewProjector.LargestFileRows(result),
             DetailViewMode.LargestFolders => ScanViewProjector.LargestFolderRows(result),
             DetailViewMode.Extensions => ScanViewProjector.ExtensionRows(result),
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    private static IReadOnlyList<DetailRow> ProjectScopedDetailRows(FileSystemEntry selected, DetailViewMode mode)
+    {
+        return mode switch
+        {
+            DetailViewMode.LargestFiles => ScanViewProjector.LargestFileRows(selected),
+            DetailViewMode.LargestFolders => ScanViewProjector.LargestFolderRows(selected),
+            DetailViewMode.Extensions => ScanViewProjector.ExtensionRows(selected),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
     }
@@ -1353,9 +1365,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var selected = _selectedEntry ?? result.Root;
         var dataset = _chartScope switch
         {
-            ChartScope.LargestFolders => ScanViewProjector.LargestFoldersChart(result),
-            ChartScope.LargestFiles => ScanViewProjector.LargestFilesChart(result),
-            ChartScope.Extensions => ScanViewProjector.ExtensionsChart(result),
+            ChartScope.LargestFolders => ReferenceEquals(selected, result.Root)
+                ? ScanViewProjector.LargestFoldersChart(result)
+                : ScanViewProjector.LargestFoldersChart(selected),
+            ChartScope.LargestFiles => ReferenceEquals(selected, result.Root)
+                ? ScanViewProjector.LargestFilesChart(result)
+                : ScanViewProjector.LargestFilesChart(selected),
+            ChartScope.Extensions => ReferenceEquals(selected, result.Root)
+                ? ScanViewProjector.ExtensionsChart(result)
+                : ScanViewProjector.ExtensionsChart(selected),
             _ => ScanViewProjector.SelectedFolderChart(selected)
         };
 

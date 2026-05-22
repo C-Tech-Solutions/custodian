@@ -39,10 +39,24 @@ public static class ScanViewProjector
             .ToList();
     }
 
+    public static IReadOnlyList<DetailRow> LargestFileRows(FileSystemEntry scope, int take = 200)
+    {
+        return ScanAnalysis.LargestFiles(scope, take)
+            .Select(entry => DetailRow.From(entry, Math.Max(1, scope.LogicalSizeBytes)))
+            .ToList();
+    }
+
     public static IReadOnlyList<DetailRow> LargestFolderRows(ScanResult result, int take = 200)
     {
         return LargestFoldersForTake(result, take)
             .Select(entry => DetailRow.From(entry, Math.Max(1, result.Root.LogicalSizeBytes)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<DetailRow> LargestFolderRows(FileSystemEntry scope, int take = 200)
+    {
+        return LargestFoldersForScope(scope, take)
+            .Select(entry => DetailRow.From(entry, Math.Max(1, scope.LogicalSizeBytes)))
             .ToList();
     }
 
@@ -51,6 +65,13 @@ public static class ScanViewProjector
         return ScanAnalysis.EnsureGlobalIndex(result)
             .ExtensionSummaries
             .Select(summary => ExtensionDetailRow.From(summary, Math.Max(1, result.Root.LogicalSizeBytes)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<DetailRow> ExtensionRows(FileSystemEntry scope)
+    {
+        return ScanAnalysis.ExtensionSummary(scope)
+            .Select(summary => ExtensionDetailRow.From(summary, Math.Max(1, scope.LogicalSizeBytes)))
             .ToList();
     }
 
@@ -76,15 +97,35 @@ public static class ScanViewProjector
         return IndexedEntryChart("Largest folders", LargestFoldersForTake(result, take), index.TotalFolderLogicalSizeBytes, index.FolderEntryCount, take);
     }
 
+    public static ChartDataset LargestFoldersChart(FileSystemEntry scope, int take = 12)
+    {
+        return EntryChart($"Largest folders in {DisplayName(scope)}", DescendantFolders(scope), take);
+    }
+
     public static ChartDataset LargestFilesChart(ScanResult result, int take = 12)
     {
         var index = ScanAnalysis.EnsureGlobalIndex(result);
         return IndexedEntryChart("Largest files", LargestFilesForTake(result, take), index.TotalFileLogicalSizeBytes, index.FileEntryCount, take);
     }
 
+    public static ChartDataset LargestFilesChart(FileSystemEntry scope, int take = 12)
+    {
+        return EntryChart($"Largest files in {DisplayName(scope)}", DescendantFiles(scope), take);
+    }
+
     public static ChartDataset ExtensionsChart(ScanResult result, int take = 12)
     {
         var summaries = ScanAnalysis.EnsureGlobalIndex(result).ExtensionSummaries;
+        return ExtensionsChart("Extensions", summaries, take);
+    }
+
+    public static ChartDataset ExtensionsChart(FileSystemEntry scope, int take = 12)
+    {
+        return ExtensionsChart($"Extensions in {DisplayName(scope)}", ScanAnalysis.ExtensionSummary(scope), take);
+    }
+
+    private static ChartDataset ExtensionsChart(string title, IReadOnlyList<ExtensionSummary> summaries, int take)
+    {
         var top = new List<ExtensionSummary>(capacity: Math.Max(0, take));
         long totalBytes = 0;
 
@@ -113,7 +154,7 @@ public static class ScanViewProjector
             slices.Add(OtherSlice(otherBytes, totalBytes, "Other extensions"));
         }
 
-        return new ChartDataset("Extensions", totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
+        return new ChartDataset(title, totalBytes, SizeFormatter.Format(totalBytes), slices, otherBytes > 0);
     }
 
     public static IReadOnlyList<SummaryMetric> SummaryMetrics(ScanResult result)
@@ -333,6 +374,25 @@ public static class ScanViewProjector
                 .Take(take)
                 .ToList();
     }
+
+    private static IReadOnlyList<FileSystemEntry> LargestFoldersForScope(FileSystemEntry scope, int take)
+    {
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        return ScanAnalysis.LargestFolders(scope, take + 1)
+            .Where(entry => !ReferenceEquals(entry, scope))
+            .Take(take)
+            .ToList();
+    }
+
+    private static IEnumerable<FileSystemEntry> DescendantFiles(FileSystemEntry scope)
+        => scope.Flatten().Where(entry => !entry.IsDirectory);
+
+    private static IEnumerable<FileSystemEntry> DescendantFolders(FileSystemEntry scope)
+        => scope.Flatten().Where(entry => entry.IsDirectory && !ReferenceEquals(entry, scope));
 
     private static ChartSlice EntrySlice(FileSystemEntry entry, long totalBytes, int index)
     {

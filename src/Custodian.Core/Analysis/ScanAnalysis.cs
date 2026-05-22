@@ -11,19 +11,34 @@ public static class ScanAnalysis
 
     public static IReadOnlyList<FileSystemEntry> LargestFiles(ScanResult result, int take = 200)
     {
-        return TopEntries(result.Root, take, e => !e.IsDirectory);
+        return LargestFiles(result.Root, take);
+    }
+
+    public static IReadOnlyList<FileSystemEntry> LargestFiles(FileSystemEntry root, int take = 200)
+    {
+        return TopEntries(root, take, e => !e.IsDirectory);
     }
 
     public static IReadOnlyList<FileSystemEntry> LargestFolders(ScanResult result, int take = 200)
     {
-        return TopEntries(result.Root, take, e => e.IsDirectory);
+        return LargestFolders(result.Root, take);
+    }
+
+    public static IReadOnlyList<FileSystemEntry> LargestFolders(FileSystemEntry root, int take = 200)
+    {
+        return TopEntries(root, take, e => e.IsDirectory);
     }
 
     public static IReadOnlyList<ExtensionSummary> ExtensionSummary(ScanResult result)
     {
+        return ExtensionSummary(result.Root);
+    }
+
+    public static IReadOnlyList<ExtensionSummary> ExtensionSummary(FileSystemEntry root)
+    {
         var summaries = new Dictionary<string, ExtensionAccumulator>(StringComparer.OrdinalIgnoreCase);
 
-        Traverse(result.Root, entry =>
+        Traverse(root, entry =>
         {
             if (entry.IsDirectory)
             {
