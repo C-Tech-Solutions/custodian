@@ -103,16 +103,18 @@ public static class UiSettingsStore
     private static void LogFailure(string operation, Exception ex)
     {
         Debug.WriteLine(ex);
-        try
+        var message = $"{DateTimeOffset.UtcNow:O} {operation} failed{Environment.NewLine}{ex}{Environment.NewLine}";
+        _ = Task.Run(() =>
         {
-            Directory.CreateDirectory(AppDataDir);
-            File.AppendAllText(
-                LogFilePath,
-                $"{DateTimeOffset.UtcNow:O} {operation} failed{Environment.NewLine}{ex}{Environment.NewLine}");
-        }
-        catch (Exception logEx)
-        {
-            Debug.WriteLine(logEx);
-        }
+            try
+            {
+                Directory.CreateDirectory(AppDataDir);
+                File.AppendAllText(LogFilePath, message);
+            }
+            catch (Exception logEx)
+            {
+                Debug.WriteLine(logEx);
+            }
+        });
     }
 }

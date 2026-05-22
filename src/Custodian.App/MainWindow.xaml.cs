@@ -74,6 +74,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private int _detailRefreshVersion;
     private IReadOnlyList<DetailRow>? _boundDetailRows;
     private bool _settingsPersistedForClose;
+    private bool _isClosing;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
@@ -172,6 +173,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         e.Cancel = true;
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
+        _scanCts?.Cancel();
+        _updateCts?.Cancel();
         _settingsSaveTimer.Stop();
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
@@ -454,6 +463,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
+        _isClosing = true;
+        _scanCts?.Cancel();
+        _updateCts?.Cancel();
         _settingsSaveTimer.Stop();
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
@@ -1735,7 +1747,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {
-    private const int ResetNotificationThreshold = 512;
+    private const int ResetNotificationThreshold = 128;
     private bool _suppressNotifications;
 
     public void ReplaceAll(IEnumerable<T> items)
