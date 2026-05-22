@@ -139,10 +139,13 @@ internal sealed class AppUpdateService
             && !channel.Equals("production", StringComparison.OrdinalIgnoreCase);
     }
 
-    private string? CurrentVersionText() =>
-        _manager.CurrentVersion?.ToString()
-        ?? Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
+    private string? CurrentVersionText()
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+        return _manager.CurrentVersion?.ToString()
+            ?? assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString(3);
+    }
 }
 
 internal sealed record AppUpdateCheckResult(

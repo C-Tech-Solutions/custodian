@@ -1698,6 +1698,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {
     private const int ResetNotificationThreshold = 512;
+    private bool _suppressNotifications;
 
     public void ReplaceAll(IEnumerable<T> items)
     {
@@ -1737,42 +1738,34 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 
         foreach (var i in replacedIndexes)
         {
-            var oldItem = Items[i];
-            var newItem = newItems[i];
-            Items[i] = newItem;
-            OnCollectionChanged(new NotifyCollectionChangedEventArgs(
-                NotifyCollectionChangedAction.Replace, newItem, oldItem, i));
+            SetItem(i, newItems[i]);
         }
 
         for (var i = oldCount; i < newItems.Count; i++)
         {
-            Items.Add(newItems[i]);
-            OnCollectionChanged(new NotifyCollectionChangedEventArgs(
-                NotifyCollectionChangedAction.Add, newItems[i], i));
+            InsertItem(i, newItems[i]);
         }
 
         for (var i = oldCount - 1; i >= newItems.Count; i--)
         {
-            var removed = Items[i];
-            Items.RemoveAt(i);
-            OnCollectionChanged(new NotifyCollectionChangedEventArgs(
-                NotifyCollectionChangedAction.Remove, removed, i));
+            RemoveItem(i);
         }
-
-        if (Count != oldCount)
-        {
-            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
-        }
-
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
     }
 
     private void ReplaceWithReset(IReadOnlyList<T> newItems, int oldCount)
     {
-        Items.Clear();
-        foreach (var item in newItems)
+        _suppressNotifications = true;
+        try
         {
-            Items.Add(item);
+            ClearItems();
+            foreach (var item in newItems)
+            {
+                InsertItem(Count, item);
+            }
+        }
+        finally
+        {
+            _suppressNotifications = false;
         }
 
         if (Count != oldCount)
@@ -1782,6 +1775,22 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 
         OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
         OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    protected override void OnCollectionChanged(NotifyCollectionChangedEventArgs e)
+    {
+        if (!_suppressNotifications)
+        {
+            base.OnCollectionChanged(e);
+        }
+    }
+
+    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+    {
+        if (!_suppressNotifications)
+        {
+            base.OnPropertyChanged(e);
+        }
     }
 }
 
