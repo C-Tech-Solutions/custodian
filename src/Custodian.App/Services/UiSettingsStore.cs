@@ -31,6 +31,7 @@ public static class UiSettingsStore
     private static readonly string LogFilePath = Path.Combine(AppDataDir, "settings-errors.log");
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+    private static readonly SemaphoreSlim SaveGate = new(1, 1);
 
     public static UiSettings Load()
     {
@@ -50,8 +51,23 @@ public static class UiSettingsStore
         }
     }
 
-    public static void Save(UiSettings settings)
+    public static async Task SaveAsync(UiSettings settings)
     {
+        try
+        {
+            await SaveCoreAsync(settings);
+        }
+        catch (Exception ex)
+        {
+            LogFailure("Save UI settings", ex);
+            // Settings are best-effort; don't crash on disk full / permission errors.
+        }
+    }
+
+    private static async Task SaveCoreAsync(UiSettings settings)
+    {
+        await SaveGate.WaitAsync();
+
         try
         {
             var dir = Path.GetDirectoryName(FilePath);
@@ -66,7 +82,8 @@ public static class UiSettingsStore
 
             try
             {
-                File.WriteAllText(tempPath, JsonSerializer.Serialize(settings, Options));
+                var json = JsonSerializer.Serialize(settings, Options);
+                await File.WriteAllTextAsync(tempPath, json);
                 File.Move(tempPath, FilePath, overwrite: true);
             }
             finally
@@ -77,10 +94,9 @@ public static class UiSettingsStore
                 }
             }
         }
-        catch (Exception ex)
+        finally
         {
-            LogFailure("Save UI settings", ex);
-            // Settings are best-effort; don't crash on disk full / permission errors.
+            SaveGate.Release();
         }
     }
 

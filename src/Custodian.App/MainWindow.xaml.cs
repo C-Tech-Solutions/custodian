@@ -73,6 +73,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
     private int _detailRefreshVersion;
     private IReadOnlyList<DetailRow>? _boundDetailRows;
+    private bool _settingsPersistedForClose;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
@@ -105,7 +106,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             Interval = TimeSpan.FromMilliseconds(500)
         };
-        _settingsSaveTimer.Tick += (_, _) => { _settingsSaveTimer.Stop(); PersistSettings(); };
+        _settingsSaveTimer.Tick += SettingsSaveTimer_Tick;
         _folderJumpDebounceTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(175)
@@ -127,7 +128,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SizeChanged += (_, _) => ScheduleSettingsSave();
         LocationChanged += (_, _) => ScheduleSettingsSave();
         StateChanged += (_, _) => ScheduleSettingsSave();
-        Closing += (_, _) => PersistSettings();
+        Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
         SourceInitialized += (_, _) => ApplyNativeTitleBarTheme();
 
@@ -161,6 +162,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
         Closed -= MainWindow_Closed;
+    }
+
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_settingsPersistedForClose)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        _settingsSaveTimer.Stop();
+        await PersistSettingsAsync();
+        _settingsPersistedForClose = true;
+        Close();
     }
 
     // ============================================================
@@ -224,7 +239,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settingsSaveTimer.Start();
     }
 
-    private void PersistSettings()
+    private async void SettingsSaveTimer_Tick(object? sender, EventArgs e)
+    {
+        _settingsSaveTimer.Stop();
+        await PersistSettingsAsync();
+    }
+
+    private void CaptureSettings()
     {
         _settings.Theme = ThemeManager.Current.ToString();
         _settings.WindowMaximized = WindowState == WindowState.Maximized;
@@ -247,7 +268,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settings.ChartMode = _chartDisplayMode.ToString();
         _settings.LastPath = PathBox.Text ?? string.Empty;
         _settings.RecentPaths = RecentPaths.Take(15).ToList();
-        UiSettingsStore.Save(_settings);
+    }
+
+    private async Task PersistSettingsAsync()
+    {
+        CaptureSettings();
+        await UiSettingsStore.SaveAsync(_settings);
     }
 
     // ============================================================
@@ -328,7 +354,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     await PromptDownloadAndInstallAsync(result, _updateCts.Token);
                     break;
                 case AppUpdateStatusKind.ReadyToRestart:
-                    PromptRestartForInstall(result);
+                    await PromptRestartForInstallAsync(result);
                     break;
             }
         }
@@ -399,13 +425,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (shouldRestart)
         {
-            ApplyUpdateAndShutdown(result);
+            await ApplyUpdateAndShutdownAsync(result);
+            return;
         }
 
         UpdateFooterStatus("Updates", "Update downloaded. Use Help > Check for Updates when you are ready to restart and install.");
     }
 
-    private void PromptRestartForInstall(AppUpdateCheckResult result)
+    private async Task PromptRestartForInstallAsync(AppUpdateCheckResult result)
     {
         var shouldRestart = UpdateDialog.ShowConfirmation(
             this,
@@ -416,7 +443,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (shouldRestart)
         {
-            ApplyUpdateAndShutdown(result);
+            await ApplyUpdateAndShutdownAsync(result);
         }
     }
 
@@ -425,9 +452,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateFooterStatus("Updates", status.Message);
     }
 
-    private void ApplyUpdateAndShutdown(AppUpdateCheckResult result)
+    private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
-        PersistSettings();
+        _settingsSaveTimer.Stop();
+        await PersistSettingsAsync();
+        _settingsPersistedForClose = true;
         UpdateFooterStatus("Updates", "Installing update...");
         _updates.ApplyUpdatesAndRestart(result);
         System.Windows.Application.Current.Shutdown();
@@ -1066,7 +1095,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateFooterStatus("Ready", BuildFooterDetail(result));
         UpdateEmptyStateVisibility();
         AnimateGridFadeIn();
-        PersistSettings();
+        ScheduleSettingsSave();
     }
 
     private Task RefreshDetailsAsync(bool refreshContext = true)
@@ -1714,30 +1743,32 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         var newItems = items as IReadOnlyList<T> ?? items.ToList();
         var oldCount = Count;
 
-        // Reconcile small changes with granular notifications so virtualized
-        // rows can be reused. Very large changes fall back to one Reset below
-        // to cap notification fan-out.
-        var common = Math.Min(oldCount, newItems.Count);
-        var replacedIndexes = new List<int>();
-
-        for (var i = 0; i < common; i++)
+        var prefix = 0;
+        while (prefix < oldCount
+            && prefix < newItems.Count
+            && EqualityComparer<T>.Default.Equals(Items[prefix], newItems[prefix]))
         {
-            var oldItem = Items[i];
-            var newItem = newItems[i];
-            if (EqualityComparer<T>.Default.Equals(oldItem, newItem))
-            {
-                continue;
-            }
-
-            replacedIndexes.Add(i);
+            prefix++;
         }
 
-        var countDelta = Math.Abs(newItems.Count - oldCount);
-        var changedCount = replacedIndexes.Count + countDelta;
-        if (changedCount == 0)
+        if (prefix == oldCount && prefix == newItems.Count)
         {
             return;
         }
+
+        var oldSuffix = oldCount - 1;
+        var newSuffix = newItems.Count - 1;
+        while (oldSuffix >= prefix
+            && newSuffix >= prefix
+            && EqualityComparer<T>.Default.Equals(Items[oldSuffix], newItems[newSuffix]))
+        {
+            oldSuffix--;
+            newSuffix--;
+        }
+
+        var oldChangedCount = oldSuffix >= prefix ? oldSuffix - prefix + 1 : 0;
+        var newChangedCount = newSuffix >= prefix ? newSuffix - prefix + 1 : 0;
+        var changedCount = oldChangedCount + newChangedCount;
 
         if (changedCount > ResetNotificationThreshold)
         {
@@ -1745,19 +1776,24 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
             return;
         }
 
-        foreach (var i in replacedIndexes)
+        if (oldChangedCount == newChangedCount)
         {
-            SetItem(i, newItems[i]);
+            for (var i = 0; i < newChangedCount; i++)
+            {
+                SetItem(prefix + i, newItems[prefix + i]);
+            }
+
+            return;
         }
 
-        for (var i = oldCount; i < newItems.Count; i++)
+        for (var i = 0; i < oldChangedCount; i++)
         {
-            InsertItem(i, newItems[i]);
+            RemoveItem(prefix);
         }
 
-        for (var i = oldCount - 1; i >= newItems.Count; i--)
+        for (var i = 0; i < newChangedCount; i++)
         {
-            RemoveItem(i);
+            InsertItem(prefix + i, newItems[prefix + i]);
         }
     }
 
