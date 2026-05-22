@@ -268,48 +268,45 @@ public sealed class TreemapControl : FrameworkElement
         Layout(remaining, rect);
     }
 
-    private void Layout(List<(ChartSlice slice, double area)> items, Rect rect)
+    private void Layout(IReadOnlyList<(ChartSlice slice, double area)> items, Rect rect)
     {
-        while (items.Count > 0 && rect.Width > 0.5 && rect.Height > 0.5)
+        var start = 0;
+        while (start < items.Count && rect.Width > 0.5 && rect.Height > 0.5)
         {
             var shortSide = Math.Min(rect.Width, rect.Height);
-            var row = new List<(ChartSlice slice, double area)> { items[0] };
-            var rowIndex = 1;
-            var bestWorst = Worst(row, shortSide);
+            var rowEnd = start + 1;
+            var sum = items[start].area;
+            var min = sum;
+            var max = sum;
+            var bestWorst = Worst(sum, min, max, shortSide);
 
-            while (rowIndex < items.Count)
+            while (rowEnd < items.Count)
             {
-                var candidate = new List<(ChartSlice slice, double area)>(row) { items[rowIndex] };
-                var w = Worst(candidate, shortSide);
+                var area = items[rowEnd].area;
+                var candidateSum = sum + area;
+                var candidateMin = Math.Min(min, area);
+                var candidateMax = Math.Max(max, area);
+                var w = Worst(candidateSum, candidateMin, candidateMax, shortSide);
                 if (w > bestWorst)
                 {
                     break;
                 }
-                row = candidate;
+
+                sum = candidateSum;
+                min = candidateMin;
+                max = candidateMax;
                 bestWorst = w;
-                rowIndex++;
+                rowEnd++;
             }
 
-            rect = PlaceRow(row, rect);
-            items.RemoveRange(0, row.Count);
+            rect = PlaceRow(items, start, rowEnd, sum, rect);
+            start = rowEnd;
         }
     }
 
-    private static double Worst(IReadOnlyList<(ChartSlice slice, double area)> row, double shortSide)
+    private static double Worst(double sum, double min, double max, double shortSide)
     {
-        if (row.Count == 0) return double.PositiveInfinity;
         if (shortSide <= double.Epsilon) return double.PositiveInfinity;
-
-        var sum = 0.0;
-        var max = double.MinValue;
-        var min = double.MaxValue;
-        foreach (var item in row)
-        {
-            sum += item.area;
-            max = Math.Max(max, item.area);
-            min = Math.Min(min, item.area);
-        }
-
         if (sum <= double.Epsilon || min <= double.Epsilon)
         {
             return double.PositiveInfinity;
@@ -325,14 +322,13 @@ public sealed class TreemapControl : FrameworkElement
         return Math.Max(s2 * max / sum2, sum2 / (s2 * min));
     }
 
-    private Rect PlaceRow(IReadOnlyList<(ChartSlice slice, double area)> row, Rect rect)
+    private Rect PlaceRow(
+        IReadOnlyList<(ChartSlice slice, double area)> items,
+        int start,
+        int end,
+        double sum,
+        Rect rect)
     {
-        var sum = 0.0;
-        foreach (var item in row)
-        {
-            sum += item.area;
-        }
-
         if (sum <= 0) return rect;
 
         if (rect.Width >= rect.Height)
@@ -340,8 +336,9 @@ public sealed class TreemapControl : FrameworkElement
             // Lay row top-to-bottom along the left edge, advance rect.X to the right.
             var rowWidth = sum / rect.Height;
             var y = rect.Y;
-            foreach (var item in row)
+            for (var i = start; i < end; i++)
             {
+                var item = items[i];
                 var h = item.area / rowWidth;
                 _tiles.Add(new RenderedTile(item.slice, new Rect(rect.X, y, rowWidth, h)));
                 y += h;
@@ -353,8 +350,9 @@ public sealed class TreemapControl : FrameworkElement
             // Lay row left-to-right along the top edge, advance rect.Y downward.
             var rowHeight = sum / rect.Width;
             var x = rect.X;
-            foreach (var item in row)
+            for (var i = start; i < end; i++)
             {
+                var item = items[i];
                 var w = item.area / rowHeight;
                 _tiles.Add(new RenderedTile(item.slice, new Rect(x, rect.Y, w, rowHeight)));
                 x += w;
@@ -374,10 +372,7 @@ public sealed class TreemapControl : FrameworkElement
         var fill = ResolveBrush(tile.Slice.Color);
         var isSelected = SelectedSlice is not null && string.Equals(SelectedSlice.SourceKey, tile.Slice.SourceKey, StringComparison.Ordinal);
 
-        // Filled rectangle
-        var geometry = new RectangleGeometry(rect, 3, 3);
-        geometry.Freeze();
-        dc.DrawGeometry(fill, null, geometry);
+        dc.DrawRoundedRectangle(fill, null, rect, 3, 3);
 
         // Slight inner highlight along the top for depth.
         if (rect.Height > 16 && rect.Width > 16)
@@ -392,12 +387,11 @@ public sealed class TreemapControl : FrameworkElement
             var inner = Shrink(rect, 1.5);
             if (inner.Width > 0 && inner.Height > 0)
             {
-                dc.DrawGeometry(null, _selectionPen, new RectangleGeometry(inner, 2.5, 2.5));
+                dc.DrawRoundedRectangle(null, _selectionPen, inner, 2.5, 2.5);
             }
         }
 
-        // Separator
-        dc.DrawGeometry(null, _separatorPen, geometry);
+        dc.DrawRoundedRectangle(null, _separatorPen, rect, 3, 3);
 
         // Label
         if (rect.Width >= 70 && rect.Height >= 28)
