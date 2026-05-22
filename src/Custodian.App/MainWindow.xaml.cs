@@ -1071,29 +1071,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ShowToast("Select an existing file or folder.");
             return;
         }
-        var answer = WpfMessageBox.Show(this, $"Move to Recycle Bin?\n\n{path}", "Confirm delete",
+
+        var targetEntry = SelectedEntry();
+        var sizeLine = targetEntry is not null && targetEntry.LogicalSizeBytes > 0
+            ? $"{Environment.NewLine}{Environment.NewLine}Size: {SizeFormatter.Format(targetEntry.LogicalSizeBytes)}"
+            : string.Empty;
+
+        var answer = WpfMessageBox.Show(
+            this,
+            $"Move to Recycle Bin?\n\n{path}{sizeLine}\n\nCustodian will ask Windows to recycle this item, not permanently delete it. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
+            "Confirm Recycle Bin move",
             MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
         try
         {
-            if (Directory.Exists(path))
+            var result = RecycleBinService.MoveToRecycleBin(path, new WindowInteropHelper(this).Handle);
+            if (result == RecycleBinMoveResult.Cancelled)
             {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
-                    path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                ShowToast("Recycle Bin move cancelled.");
+                return;
             }
-            else
-            {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(
-                    path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-            }
+
             ShowToast($"Moved to Recycle Bin: {Path.GetFileName(path)}");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException)
         {
-            WpfMessageBox.Show(this, ex.Message, "Delete failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            WpfMessageBox.Show(this, ex.Message, "Recycle Bin move failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private FileSystemEntry? SelectedEntry()
+    {
+        if (DetailsGrid.SelectedItem is DetailRow row) return row.Entry;
+        return _selectedEntry;
     }
 
     // ============================================================
