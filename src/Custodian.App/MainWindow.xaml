@@ -117,6 +117,8 @@
                         <MenuItem Header="Export JSON..." Click="ExportJson_Click"/>
                     </MenuItem>
                     <MenuItem Header="View" Padding="8,4">
+                        <MenuItem Header="Recycle Bin" Click="ShowRecycleBin_Click"/>
+                        <Separator/>
                         <MenuItem Header="Toggle Theme                Ctrl+T" Click="ToggleTheme_Click"/>
                         <MenuItem Header="Keyboard Shortcuts          Ctrl+/" Click="ShowShortcuts_Click"/>
                     </MenuItem>
@@ -207,33 +209,46 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="170" MinHeight="88"/>
+                        <RowDefinition Height="260" MinHeight="160"/>
                         <RowDefinition Height="8"/>
                         <RowDefinition Height="*" MinHeight="120"/>
                     </Grid.RowDefinitions>
                     <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="14,12,14,4"/>
                     <ListBox x:Name="DriveList" Grid.Row="1"
-                             ItemsSource="{Binding DriveRows}"
+                             ItemsSource="{Binding TargetRows}"
                              SelectionChanged="DriveList_SelectionChanged"
                              Margin="8,0,8,8">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Margin="2,3">
+                                <Grid Margin="2,3" MinHeight="34">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="24"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding UsedText}"
+                                    <TextBlock Text="{Binding Icon}" FontFamily="{StaticResource IconFont}"
+                                               FontSize="14"
+                                               Foreground="{Binding IconBrush, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding UsedText}"
                                                Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                                Margin="8,0,0,0"/>
-                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Height="4"
+                                    <ProgressBar Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="4"
                                                  Maximum="100" Value="{Binding UsedPercent}"
-                                                 Margin="0,4,0,0"/>
+                                                 Margin="0,4,0,0"
+                                                 Visibility="{Binding UsageVisibility}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                               Text="{Binding DetailText}"
+                                               Foreground="{DynamicResource MutedBrush}"
+                                               FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,2,0,0"
+                                               Visibility="{Binding DetailVisibility}"/>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -541,6 +556,208 @@
                             </ListView>
                         </DockPanel>
                     </DockPanel>
+
+                    <!-- Recycle Bin workspace -->
+                    <Grid x:Name="RecycleBinHost" Background="{DynamicResource SurfaceRaised}" Visibility="Collapsed">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Top"
+                                    Background="{DynamicResource SurfaceSubtle}"
+                                    BorderBrush="{DynamicResource Border}"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="14,12">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Width="34" Height="34" CornerRadius="8"
+                                                Background="{DynamicResource AccentSubtle}"
+                                                BorderBrush="{DynamicResource AccentRing}"
+                                                BorderThickness="1">
+                                            <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                                                       Foreground="{DynamicResource AccentBrush}"
+                                                       FontSize="16"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="Recycle Bin" Style="{StaticResource DisplayHeader}"/>
+                                            <TextBlock x:Name="RecycleBinStatusText"
+                                                       Text="Review deleted items managed by Windows."
+                                                       Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="11.5"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <WrapPanel Grid.Row="1" HorizontalAlignment="Right" Margin="46,10,0,0">
+                                        <Button Content="Back to Scan" Click="BackToScan_Click" ToolTip="Return to the scan workspace"/>
+                                        <Button x:Name="RecycleBinRefreshButton" Content="Refresh" Click="RefreshRecycleBin_Click" ToolTip="Refresh Recycle Bin items"/>
+                                        <Button Content="Open in Explorer" Click="OpenRecycleBinExplorer_Click" ToolTip="Open the Windows Recycle Bin"/>
+                                        <Button x:Name="RecycleBinRestoreButton" Content="Restore" Click="RestoreRecycleBinSelected_Click" ToolTip="Restore selected items"/>
+                                        <Button x:Name="RecycleBinDeleteButton" Content="Delete Permanently" Click="DeleteRecycleBinSelected_Click" ToolTip="Permanently delete selected items"/>
+                                        <Button x:Name="RecycleBinEmptyButton" Content="Empty" Click="EmptyRecycleBin_Click" ToolTip="Permanently delete all Recycle Bin items"/>
+                                    </WrapPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border DockPanel.Dock="Top"
+                                    Background="{DynamicResource SurfaceRaised}"
+                                    BorderBrush="{DynamicResource Border}"
+                                    BorderThickness="0,0,0,1"
+                                    Padding="14,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid>
+                                        <TextBox x:Name="RecycleBinFilterBox"
+                                                 Padding="32,6,28,6"
+                                                 TextChanged="RecycleBinFilterBox_TextChanged"
+                                                 KeyDown="RecycleBinFilterBox_KeyDown"
+                                                 ToolTip="Filter Recycle Bin items"/>
+                                        <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource MutedBrush}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="11,0,0,0"
+                                                   IsHitTestVisible="False"/>
+                                        <TextBlock x:Name="RecycleBinFilterPlaceholder"
+                                                   Text="Filter by name, original location, type, or recycle path..."
+                                                   Foreground="{DynamicResource DisabledTextBrush}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="36,0,0,0"
+                                                   IsHitTestVisible="False"/>
+                                        <Button x:Name="RecycleBinFilterClearButton"
+                                                Style="{StaticResource IconButton}"
+                                                Content="&#xE711;"
+                                                Width="24"
+                                                Visibility="Collapsed"
+                                                HorizontalAlignment="Right"
+                                                Margin="0,0,2,0"
+                                                Click="RecycleBinFilterClear_Click"
+                                                ToolTip="Clear filter"/>
+                                    </Grid>
+                                    <TextBlock Grid.Column="1"
+                                               x:Name="RecycleBinFilterCountText"
+                                               Foreground="{DynamicResource MutedBrush}"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"
+                                               Margin="12,0,0,0"/>
+                                </Grid>
+                            </Border>
+
+                            <Grid Background="{DynamicResource SurfaceRaised}">
+                                <DockPanel x:Name="RecycleBinResultsHost"
+                                           Background="{DynamicResource SurfaceRaised}">
+                                    <StackPanel DockPanel.Dock="Top"
+                                                Orientation="Horizontal"
+                                                Background="{DynamicResource SurfaceSubtle}"
+                                                Height="32">
+                                        <Border Width="36"/>
+                                        <Border Width="260" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="Name" MouseLeftButtonUp="RecycleBinColumnHeader_Click">
+                                            <TextBlock x:Name="RecycleBinNameHeader" Text="Name" Style="{StaticResource SortableColumnHeaderText}"/>
+                                        </Border>
+                                        <Border Width="300" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="OriginalLocation" MouseLeftButtonUp="RecycleBinColumnHeader_Click">
+                                            <TextBlock x:Name="RecycleBinOriginalLocationHeader" Text="Original Location" Style="{StaticResource SortableColumnHeaderText}"/>
+                                        </Border>
+                                        <Border Width="150" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="DateDeleted" MouseLeftButtonUp="RecycleBinColumnHeader_Click">
+                                            <TextBlock x:Name="RecycleBinDateDeletedHeader" Text="Date Deleted" Style="{StaticResource SortableColumnHeaderText}"/>
+                                        </Border>
+                                        <Border Width="92" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="Size" MouseLeftButtonUp="RecycleBinColumnHeader_Click">
+                                            <TextBlock x:Name="RecycleBinSizeHeader" Text="Size" Style="{StaticResource SortableColumnHeaderText}"/>
+                                        </Border>
+                                        <Border Width="160" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="ItemType" MouseLeftButtonUp="RecycleBinColumnHeader_Click">
+                                            <TextBlock x:Name="RecycleBinTypeHeader" Text="Type" Style="{StaticResource SortableColumnHeaderText}"/>
+                                        </Border>
+                                        <Border Width="340" Margin="4,0" Background="Transparent" Cursor="Hand" Tag="RecyclePath" MouseLeftButtonUp="RecycleBinColumnHeader_Click">
+                                            <TextBlock x:Name="RecycleBinPathHeader" Text="Recycle Path" Style="{StaticResource SortableColumnHeaderText}"/>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <ListView x:Name="RecycleBinGrid"
+                                              Background="{DynamicResource SurfaceRaised}"
+                                              ItemsSource="{Binding RecycleBinRowsView}"
+                                              SelectionMode="Extended"
+                                              VirtualizingPanel.IsVirtualizing="True"
+                                              VirtualizingPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True"
+                                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                              SelectionChanged="RecycleBinGrid_SelectionChanged"
+                                              MouseDoubleClick="RecycleBinGrid_MouseDoubleClick"
+                                              PreviewKeyDown="RecycleBinGrid_PreviewKeyDown">
+                                        <ListView.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Restore" Click="RestoreRecycleBinSelected_Click"/>
+                                                <MenuItem Header="Delete Permanently" Click="DeleteRecycleBinSelected_Click"/>
+                                                <Separator/>
+                                                <MenuItem Header="Open Recycle Bin in Explorer" Click="OpenRecycleBinExplorer_Click"/>
+                                                <MenuItem Header="Copy Original Path" Click="CopyRecycleBinOriginalPath_Click"/>
+                                                <MenuItem Header="Copy Recycle Path" Click="CopyRecycleBinRecyclePath_Click"/>
+                                                <Separator/>
+                                                <MenuItem Header="Refresh" Click="RefreshRecycleBin_Click"/>
+                                            </ContextMenu>
+                                        </ListView.ContextMenu>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal" Height="30">
+                                                    <TextBlock Width="36"
+                                                               Text="{Binding Icon}"
+                                                               FontFamily="{StaticResource IconFont}"
+                                                               FontSize="14"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{Binding CategoryColor, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"/>
+                                                    <TextBlock Width="260" Margin="4,0" Text="{Binding Name}"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                    <TextBlock Width="300" Margin="4,0" Text="{Binding OriginalLocation}"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                    <TextBlock Width="150" Margin="4,0" Text="{Binding DateDeleted}"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBlock Width="92" Margin="4,0" Text="{Binding Size}"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBlock Width="160" Margin="4,0" Text="{Binding ItemType}"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                    <TextBlock Width="340" Margin="4,0" Text="{Binding RecyclePath}"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </DockPanel>
+
+                                <Border x:Name="RecycleBinLoadingOverlay"
+                                        Background="{DynamicResource SurfaceRaised}"
+                                        Visibility="Collapsed">
+                                    <StackPanel HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                MaxWidth="360">
+                                        <Border Width="48" Height="48" CornerRadius="12"
+                                                Background="{DynamicResource AccentSubtle}"
+                                                HorizontalAlignment="Center">
+                                            <TextBlock Text="&#xE74D;" FontFamily="{StaticResource IconFont}"
+                                                       FontSize="24"
+                                                       Foreground="{DynamicResource AccentBrush}"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock x:Name="RecycleBinLoadingText"
+                                                   Text="Loading Recycle Bin items..."
+                                                   Style="{StaticResource DisplayHeader}"
+                                                   FontSize="15"
+                                                   HorizontalAlignment="Center"
+                                                   TextAlignment="Center"
+                                                   Margin="0,14,0,4"/>
+                                        <TextBlock Text="Reading the Windows Recycle Bin."
+                                                   Style="{StaticResource MutedText}"
+                                                   HorizontalAlignment="Center"
+                                                   TextAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </DockPanel>
+                    </Grid>
 
                     <!-- Empty state -->
                     <Grid x:Name="EmptyStateHost" Background="{DynamicResource SurfaceRaised}">

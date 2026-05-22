@@ -8,9 +8,15 @@ public partial class UpdateDialog : Window
         InitializeComponent();
     }
 
-    public static bool ShowConfirmation(Window owner, string title, string message, string primaryText, string secondaryText)
+    public static bool ShowConfirmation(
+        Window owner,
+        string title,
+        string message,
+        string primaryText,
+        string secondaryText,
+        UpdateDialogTone tone = UpdateDialogTone.Information)
     {
-        var dialog = Create(owner, title, message, primaryText, secondaryText, UpdateDialogTone.Information);
+        var dialog = Create(owner, title, message, primaryText, secondaryText, tone);
         return dialog.ShowDialog() == true;
     }
 

@@ -52,6 +52,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly AppUpdateService _updates = new();
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _updateCts;
+    private CancellationTokenSource? _recycleBinCts;
     private ScanResult? _currentScan;
     private FileSystemEntry? _selectedEntry;
     private DetailViewMode _viewMode = DetailViewMode.Contents;
@@ -77,10 +78,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private IReadOnlyList<DetailRow>? _boundDetailRows;
     private DetailSortColumn? _detailSortColumn;
     private ListSortDirection _detailSortDirection = ListSortDirection.Ascending;
+    private bool _isRecycleBinViewActive;
+    private string _recycleBinFilterText = string.Empty;
+    private RecycleBinSortColumn _recycleBinSortColumn = RecycleBinSortColumn.DateDeleted;
+    private ListSortDirection _recycleBinSortDirection = ListSortDirection.Descending;
     private bool _settingsPersistedForClose;
     private bool _isClosing;
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
+    public ObservableCollection<TargetRow> TargetRows { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
     public BulkObservableCollection<FolderNode> FolderNodes { get; } = [];
     public BulkObservableCollection<DetailRow> DetailRows { get; } = [];
@@ -88,8 +94,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public BulkObservableCollection<SummaryMetric> SummaryMetrics { get; } = [];
     public BulkObservableCollection<BreadcrumbItem> BreadcrumbItems { get; } = [];
     public BulkObservableCollection<FolderJumpRow> FolderJumpRows { get; } = [];
+    public BulkObservableCollection<RecycleBinRow> RecycleBinRows { get; } = [];
 
     public ICollectionView DetailRowsView { get; }
+    public ICollectionView RecycleBinRowsView { get; }
 
     public MainWindow()
     {
@@ -101,6 +109,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         DetailRowsView = CollectionViewSource.GetDefaultView(DetailRows);
         DetailRowsView.Filter = RowMatchesFilter;
+        RecycleBinRowsView = CollectionViewSource.GetDefaultView(RecycleBinRows);
+        RecycleBinRowsView.Filter = RecycleBinRowMatchesFilter;
 
         PathBox.ItemsSource = RecentPaths;
         JumpBox.ItemsSource = FolderJumpRows;
@@ -130,6 +140,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateEmptyStateVisibility();
         UpdateFilterUiState();
         RefreshDetailSortHeaders();
+        ApplyRecycleBinSort();
+        UpdateRecycleBinFilterUiState();
+        UpdateRecycleBinActionState();
 
         SizeChanged += (_, _) => ScheduleSettingsSave();
         LocationChanged += (_, _) => ScheduleSettingsSave();
@@ -186,6 +199,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isClosing = true;
         _scanCts?.Cancel();
         _updateCts?.Cancel();
+        _recycleBinCts?.Cancel();
         _settingsSaveTimer.Stop();
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
@@ -666,7 +680,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private void DriveList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (DriveList.SelectedItem is DriveRow row)
+        if (DriveList.SelectedItem is not TargetRow row)
+        {
+            return;
+        }
+
+        if (row.Kind == TargetKind.RecycleBin)
+        {
+            _ = ShowRecycleBinAsync();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(row.RootPath))
         {
             PathBox.Text = row.RootPath;
             AddRecentPath(row.RootPath);
@@ -1080,6 +1105,415 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (string.IsNullOrWhiteSpace(path)) return;
         PathBox.Text = Directory.Exists(path) ? path : Path.GetDirectoryName(path) ?? path;
         await StartScanAsync();
+    }
+
+    // ============================================================
+    //  Recycle Bin
+    // ============================================================
+    private async void ShowRecycleBin_Click(object sender, RoutedEventArgs e)
+    {
+        await ShowRecycleBinAsync();
+    }
+
+    private async Task ShowRecycleBinAsync()
+    {
+        _isRecycleBinViewActive = true;
+        LoadingHost.Visibility = Visibility.Collapsed;
+        UpdateEmptyStateVisibility();
+        UpdateFooterStatus("Recycle Bin", "Loading Recycle Bin items...");
+        await RefreshRecycleBinAsync();
+    }
+
+    private void BackToScan_Click(object sender, RoutedEventArgs e)
+    {
+        _isRecycleBinViewActive = false;
+        _recycleBinCts?.Cancel();
+        UpdateEmptyStateVisibility();
+        if (_currentScan is not null)
+        {
+            UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+        }
+        else
+        {
+            UpdateFooterStatus("Ready", "Choose a path and scan, or open a saved scan.");
+        }
+    }
+
+    private async void RefreshRecycleBin_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshRecycleBinAsync();
+    }
+
+    private async Task RefreshRecycleBinAsync()
+    {
+        if (_recycleBinCts is not null)
+        {
+            return;
+        }
+
+        using var cts = new CancellationTokenSource();
+        _recycleBinCts = cts;
+        SetRecycleBinBusy(true, "Loading Recycle Bin items...");
+        try
+        {
+            var entries = await RecycleBinService.GetItemsAsync(cts.Token);
+            ReplaceCollection(RecycleBinRows, RecycleBinViewProjector.Rows(entries));
+            ApplyRecycleBinSort();
+            UpdateRecycleBinFilterUiState();
+            UpdateRecycleBinTargetUsage(entries);
+            var countText = RecycleBinItemCountText(RecycleBinRows.Count);
+            var totalSize = SizeFormatter.Format(entries.Sum(entry => entry.SizeBytes));
+            RecycleBinStatusText.Text = RecycleBinRows.Count == 0
+                ? "The Recycle Bin is empty."
+                : $"{countText} using {totalSize} in the Windows Recycle Bin.";
+            UpdateFooterStatus("Recycle Bin", RecycleBinRows.Count == 0 ? "Empty." : $"{countText} using {totalSize} loaded.");
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh cancelled.");
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError("Recycle Bin failed", ex);
+            UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh failed.");
+        }
+        finally
+        {
+            _recycleBinCts = null;
+            SetRecycleBinBusy(false);
+        }
+    }
+
+    private async void RestoreRecycleBinSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = SelectedRecycleBinRows();
+        if (rows.Count == 0)
+        {
+            ShowToast("Select one or more Recycle Bin items first.");
+            return;
+        }
+
+        var countText = RecycleBinItemCountText(rows.Count);
+        if (!UpdateDialog.ShowConfirmation(
+            this,
+            "Restore Recycle Bin items",
+            $"Restore {countText} to the original location Windows recorded for each item?",
+            "Restore",
+            "Cancel"))
+        {
+            return;
+        }
+
+        await RunRecycleBinOperationAsync(
+            "Restoring Recycle Bin items...",
+            token => RecycleBinService.RestoreAsync(rows.Select(row => row.Entry).ToList(), token),
+            $"Restored {countText}.",
+            "Restore failed");
+    }
+
+    private async void DeleteRecycleBinSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = SelectedRecycleBinRows();
+        if (rows.Count == 0)
+        {
+            ShowToast("Select one or more Recycle Bin items first.");
+            return;
+        }
+
+        var countText = RecycleBinItemCountText(rows.Count);
+        if (!UpdateDialog.ShowConfirmation(
+            this,
+            "Delete permanently",
+            $"Permanently delete {countText} from the Recycle Bin?\n\nThis cannot be undone.",
+            "Delete permanently",
+            "Cancel",
+            UpdateDialogTone.Error))
+        {
+            return;
+        }
+
+        await RunRecycleBinOperationAsync(
+            "Deleting Recycle Bin items...",
+            token => RecycleBinService.DeletePermanentlyAsync(rows.Select(row => row.Entry).ToList(), token),
+            $"Permanently deleted {countText}.",
+            "Permanent delete failed");
+    }
+
+    private async void EmptyRecycleBin_Click(object sender, RoutedEventArgs e)
+    {
+        if (RecycleBinRows.Count == 0)
+        {
+            ShowToast("The Recycle Bin is already empty.");
+            return;
+        }
+
+        var countText = RecycleBinItemCountText(RecycleBinRows.Count);
+        if (!UpdateDialog.ShowConfirmation(
+            this,
+            "Empty Recycle Bin",
+            $"Permanently delete all {countText} in the Recycle Bin?\n\nThis cannot be undone.",
+            "Empty Recycle Bin",
+            "Cancel",
+            UpdateDialogTone.Error))
+        {
+            return;
+        }
+
+        await RunRecycleBinOperationAsync(
+            "Emptying Recycle Bin...",
+            token => RecycleBinService.EmptyAsync(new WindowInteropHelper(this).Handle, token),
+            "Emptied the Recycle Bin.",
+            "Empty Recycle Bin failed");
+    }
+
+    private void OpenRecycleBinExplorer_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            RecycleBinService.OpenInExplorer();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            ShowOperationError("Open Recycle Bin failed", ex);
+        }
+    }
+
+    private async Task RunRecycleBinOperationAsync(
+        string busyMessage,
+        Func<CancellationToken, Task> operation,
+        string successMessage,
+        string errorTitle)
+    {
+        if (_recycleBinCts is not null)
+        {
+            return;
+        }
+
+        using var cts = new CancellationTokenSource();
+        _recycleBinCts = cts;
+        SetRecycleBinBusy(true, busyMessage);
+        var refreshAfterOperation = true;
+        try
+        {
+            await operation(cts.Token);
+            ShowToast(successMessage);
+            await Task.Delay(250, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            refreshAfterOperation = false;
+            UpdateFooterStatus("Recycle Bin", "Recycle Bin operation cancelled.");
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError(errorTitle, ex);
+        }
+        finally
+        {
+            _recycleBinCts = null;
+            SetRecycleBinBusy(false);
+        }
+
+        if (refreshAfterOperation)
+        {
+            await RefreshRecycleBinAsync();
+        }
+    }
+
+    private void RecycleBinFilterBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _recycleBinFilterText = RecycleBinFilterBox.Text ?? string.Empty;
+        RecycleBinRowsView.Refresh();
+        UpdateRecycleBinFilterUiState();
+    }
+
+    private void RecycleBinFilterBox_KeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            ClearRecycleBinFilter();
+            e.Handled = true;
+        }
+    }
+
+    private void RecycleBinFilterClear_Click(object sender, RoutedEventArgs e)
+    {
+        ClearRecycleBinFilter();
+    }
+
+    private void ClearRecycleBinFilter()
+    {
+        RecycleBinFilterBox.Clear();
+        _recycleBinFilterText = string.Empty;
+        RecycleBinRowsView.Refresh();
+        UpdateRecycleBinFilterUiState();
+    }
+
+    private bool RecycleBinRowMatchesFilter(object obj)
+    {
+        return obj is RecycleBinRow row
+            && RecycleBinViewProjector.RowMatchesFilter(row, _recycleBinFilterText);
+    }
+
+    private void RecycleBinColumnHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string tag }
+            || !Enum.TryParse(tag, out RecycleBinSortColumn column))
+        {
+            return;
+        }
+
+        if (_recycleBinSortColumn == column)
+        {
+            _recycleBinSortDirection = _recycleBinSortDirection == ListSortDirection.Ascending
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending;
+        }
+        else
+        {
+            _recycleBinSortColumn = column;
+            _recycleBinSortDirection = RecycleBinViewProjector.DefaultSortDirection(column);
+        }
+
+        ApplyRecycleBinSort();
+        e.Handled = true;
+    }
+
+    private void ApplyRecycleBinSort()
+    {
+        if (RecycleBinRowsView is ListCollectionView listView)
+        {
+            listView.CustomSort = new RecycleBinRowComparer(_recycleBinSortColumn, _recycleBinSortDirection);
+        }
+        else
+        {
+            RecycleBinRowsView.Refresh();
+        }
+
+        RefreshRecycleBinSortHeaders();
+        UpdateRecycleBinFilterUiState();
+    }
+
+    private void RefreshRecycleBinSortHeaders()
+    {
+        SetRecycleBinSortHeader(RecycleBinNameHeader, "Name", RecycleBinSortColumn.Name);
+        SetRecycleBinSortHeader(RecycleBinOriginalLocationHeader, "Original Location", RecycleBinSortColumn.OriginalLocation);
+        SetRecycleBinSortHeader(RecycleBinDateDeletedHeader, "Date Deleted", RecycleBinSortColumn.DateDeleted);
+        SetRecycleBinSortHeader(RecycleBinSizeHeader, "Size", RecycleBinSortColumn.Size);
+        SetRecycleBinSortHeader(RecycleBinTypeHeader, "Type", RecycleBinSortColumn.ItemType);
+        SetRecycleBinSortHeader(RecycleBinPathHeader, "Recycle Path", RecycleBinSortColumn.RecyclePath);
+    }
+
+    private void SetRecycleBinSortHeader(TextBlock header, string label, RecycleBinSortColumn column)
+    {
+        if (_recycleBinSortColumn == column)
+        {
+            header.Text = $"{label} {(_recycleBinSortDirection == ListSortDirection.Ascending ? "^" : "v")}";
+            header.Foreground = (WpfBrush?)TryFindResource("AccentBrush") ?? header.Foreground;
+        }
+        else
+        {
+            header.Text = label;
+            header.ClearValue(TextBlock.ForegroundProperty);
+        }
+    }
+
+    private void RecycleBinGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateRecycleBinActionState();
+    }
+
+    private void RecycleBinGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        OpenRecycleBinExplorer_Click(sender, e);
+    }
+
+    private void RecycleBinGrid_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (e.Key == Key.Delete)
+        {
+            DeleteRecycleBinSelected_Click(sender, e);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            RestoreRecycleBinSelected_Click(sender, e);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F5)
+        {
+            RefreshRecycleBin_Click(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void CopyRecycleBinOriginalPath_Click(object sender, RoutedEventArgs e)
+    {
+        CopyRecycleBinText(rows => rows.Select(row => Path.Combine(row.OriginalLocation, row.Name)), "original path");
+    }
+
+    private void CopyRecycleBinRecyclePath_Click(object sender, RoutedEventArgs e)
+    {
+        CopyRecycleBinText(rows => rows.Select(row => row.RecyclePath), "recycle path");
+    }
+
+    private void CopyRecycleBinText(Func<IReadOnlyList<RecycleBinRow>, IEnumerable<string>> textFactory, string label)
+    {
+        var rows = SelectedRecycleBinRows();
+        if (rows.Count == 0)
+        {
+            ShowToast("Select one or more Recycle Bin items first.");
+            return;
+        }
+
+        WpfClipboard.SetText(string.Join(Environment.NewLine, textFactory(rows)));
+        ShowToast($"Copied {rows.Count:n0} {label}(s).");
+    }
+
+    private IReadOnlyList<RecycleBinRow> SelectedRecycleBinRows()
+        => RecycleBinGrid.SelectedItems.OfType<RecycleBinRow>().ToList();
+
+    private void SetRecycleBinBusy(bool busy, string? message = null)
+    {
+        RecycleBinGrid.IsEnabled = !busy;
+        RecycleBinRefreshButton.IsEnabled = !busy;
+        RecycleBinLoadingOverlay.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            RecycleBinLoadingText.Text = message;
+            RecycleBinStatusText.Text = message;
+            UpdateFooterStatus("Recycle Bin", message);
+        }
+
+        UpdateRecycleBinActionState();
+    }
+
+    private void UpdateRecycleBinActionState()
+    {
+        var busy = _recycleBinCts is not null;
+        var hasSelection = RecycleBinGrid.SelectedItems.Count > 0;
+        RecycleBinRestoreButton.IsEnabled = !busy && hasSelection;
+        RecycleBinDeleteButton.IsEnabled = !busy && hasSelection;
+        RecycleBinEmptyButton.IsEnabled = !busy && RecycleBinRows.Count > 0;
+    }
+
+    private void UpdateRecycleBinFilterUiState()
+    {
+        var hasText = !string.IsNullOrEmpty(_recycleBinFilterText);
+        RecycleBinFilterPlaceholder.Visibility = hasText ? Visibility.Collapsed : Visibility.Visible;
+        RecycleBinFilterClearButton.Visibility = hasText ? Visibility.Visible : Visibility.Collapsed;
+        if (hasText)
+        {
+            var total = RecycleBinRows.Count;
+            var visible = RecycleBinRowsView is System.Collections.ICollection collection
+                ? collection.Count
+                : RecycleBinRowsView.Cast<object>().Count();
+            RecycleBinFilterCountText.Text = $"{visible:n0} of {total:n0}";
+        }
+        else
+        {
+            RecycleBinFilterCountText.Text = string.Empty;
+        }
     }
 
     // ============================================================
@@ -1572,6 +2006,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ClearViewsForNewScan(string path)
     {
+        _isRecycleBinViewActive = false;
+        RecycleBinHost.Visibility = Visibility.Collapsed;
         ClearGlobalDetailRowsCache();
         _currentScan = null;
         FolderNodes.Clear();
@@ -1604,16 +2040,65 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             var rows = await Task.Run(BuildDriveRows);
             DriveRows.Clear();
+            TargetRows.Clear();
+            TargetRows.Add(TargetRow.RecycleBin());
             foreach (var row in rows)
             {
                 DriveRows.Add(row);
+                TargetRows.Add(TargetRow.FromDrive(row));
                 AddRecentPath(row.RootPath);
             }
+
+            await RefreshRecycleBinTargetUsageAsync();
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
         }
+    }
+
+    private async Task RefreshRecycleBinTargetUsageAsync()
+    {
+        try
+        {
+            var entries = await RecycleBinService.GetItemsAsync();
+            UpdateRecycleBinTargetUsage(entries);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            ReplaceTargetRow(TargetKind.RecycleBin, TargetRow.RecycleBinUnavailable());
+        }
+    }
+
+    private void UpdateRecycleBinTargetUsage(IEnumerable<RecycleBinEntry> entries)
+    {
+        var items = entries as IReadOnlyCollection<RecycleBinEntry> ?? entries.ToList();
+        ReplaceTargetRow(
+            TargetKind.RecycleBin,
+            TargetRow.RecycleBin(items.Sum(entry => entry.SizeBytes), items.Count));
+    }
+
+    private void ReplaceTargetRow(TargetKind kind, TargetRow row)
+    {
+        var index = TargetRows
+            .Select((target, targetIndex) => new { target, targetIndex })
+            .FirstOrDefault(item => item.target.Kind == kind)
+            ?.targetIndex;
+        if (index is null)
+        {
+            if (kind == TargetKind.RecycleBin)
+            {
+                TargetRows.Insert(0, row);
+            }
+            else
+            {
+                TargetRows.Add(row);
+            }
+            return;
+        }
+
+        TargetRows[index.Value] = row;
     }
 
     private static IReadOnlyList<DriveRow> BuildDriveRows()
@@ -1689,6 +2174,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void UpdateEmptyStateVisibility()
     {
+        if (_isRecycleBinViewActive)
+        {
+            RecycleBinHost.Visibility = Visibility.Visible;
+            WorkspaceHost.Visibility = Visibility.Collapsed;
+            EmptyStateHost.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        RecycleBinHost.Visibility = Visibility.Collapsed;
         var hasScan = _currentScan is not null;
         WorkspaceHost.Visibility = hasScan ? Visibility.Visible : Visibility.Collapsed;
         EmptyStateHost.Visibility = hasScan ? Visibility.Collapsed : Visibility.Visible;
@@ -1699,6 +2193,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private void StartLoadingAnimation()
     {
+        RecycleBinHost.Visibility = Visibility.Collapsed;
         WorkspaceHost.Visibility = Visibility.Collapsed;
         EmptyStateHost.Visibility = Visibility.Collapsed;
         LoadingHost.Visibility = Visibility.Visible;
@@ -1825,6 +2320,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         return $"{ViewModeLabel(mode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
     }
+
+    private static string RecycleBinItemCountText(int count)
+        => count == 1 ? "1 item" : $"{count:n0} items";
 
     private static void RevealPath(string path)
     {
@@ -2031,6 +2529,80 @@ public sealed record ScanUiPreparation(FolderNode RootNode, IReadOnlyList<Folder
 
 public sealed record DriveRow(
     string Label, string RootPath, string UsedText, string FreeText, double UsedPercent);
+
+public sealed record TargetRow(
+    TargetKind Kind,
+    string Label,
+    string RootPath,
+    string UsedText,
+    string DetailText,
+    double UsedPercent,
+    string Icon,
+    string IconBrush,
+    Visibility UsageVisibility,
+    Visibility DetailVisibility)
+{
+    public static TargetRow RecycleBin()
+        => new(
+            TargetKind.RecycleBin,
+            "Recycle Bin",
+            string.Empty,
+            string.Empty,
+            "Calculating usage...",
+            0,
+            "\uE74D",
+            "#F59E0B",
+            Visibility.Collapsed,
+            Visibility.Visible);
+
+    public static TargetRow RecycleBin(long sizeBytes, int itemCount)
+        => new(
+            TargetKind.RecycleBin,
+            "Recycle Bin",
+            string.Empty,
+            SizeFormatter.Format(sizeBytes),
+            itemCount == 0 ? "Windows Recycle Bin - empty" : $"Windows Recycle Bin - {ItemCountText(itemCount)}",
+            0,
+            "\uE74D",
+            "#F59E0B",
+            Visibility.Collapsed,
+            Visibility.Visible);
+
+    public static TargetRow RecycleBinUnavailable()
+        => new(
+            TargetKind.RecycleBin,
+            "Recycle Bin",
+            string.Empty,
+            "Unavailable",
+            "Windows Recycle Bin",
+            0,
+            "\uE74D",
+            "#F59E0B",
+            Visibility.Collapsed,
+            Visibility.Visible);
+
+    public static TargetRow FromDrive(DriveRow row)
+        => new(
+            TargetKind.Drive,
+            row.Label,
+            row.RootPath,
+            row.UsedText,
+            row.FreeText,
+            row.UsedPercent,
+            "\uEDA2",
+            "#3B82F6",
+            Visibility.Visible,
+            Visibility.Collapsed);
+
+    private static string ItemCountText(int count)
+        => count == 1 ? "1 item" : $"{count:n0} items";
+}
+
+public enum TargetKind
+{
+    Drive,
+    RecycleBin
+}
 
 internal enum DetailViewMode { Contents, LargestFiles, LargestFolders, Extensions }
 internal enum ChartScope { SelectedFolder, LargestFolders, LargestFiles, Extensions }
