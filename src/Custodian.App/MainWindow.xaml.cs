@@ -76,8 +76,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _folderJumpDebounceTimer;
     private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
+    private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
     private int _detailRefreshVersion;
+    private int _chartRefreshVersion;
     private IReadOnlyList<DetailRow>? _boundDetailRows;
     private DetailSortColumn? _detailSortColumn;
     private ListSortDirection _detailSortDirection = ListSortDirection.Ascending;
@@ -406,7 +408,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            _updateCts.Dispose();
+            _updateCts?.Dispose();
             _updateCts = null;
             CheckUpdatesMenuItem.IsEnabled = true;
         }
@@ -818,7 +820,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (ChartScopeBox.SelectedItem is not ComboBoxItem { Tag: string tag } || !Enum.TryParse(tag, out ChartScope scope)) return;
         _chartScope = scope;
         _selectedChartSourceKey = null;
-        RefreshChart();
+        RunUiAction(RefreshChartAsync, "Chart refresh failed");
     }
 
     private void ChartMode_Click(object sender, RoutedEventArgs e)
@@ -1663,7 +1665,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             ShowToast($"Moved to Recycle Bin: {Path.GetFileName(path)}");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException)
+        catch (Exception ex)
         {
             Logger.LogError(ex, "Recycle Bin move failed for {Path}.", path);
             WpfMessageBox.Show(this, ex.Message, "Recycle Bin move failed", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -1727,7 +1729,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ChartSlices.Clear();
             SummaryMetrics.Clear();
             BreadcrumbItems.Clear();
-            RefreshChart();
+            await RefreshChartAsync();
             RefreshNavigationState(null, null);
             return;
         }
@@ -1744,7 +1746,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             try
             {
                 rows = ReferenceEquals(selected, result.Root)
-                    ? GetOrCreateGlobalDetailRows(result, viewMode)
+                    ? await Task.Run(() => GetOrCreateGlobalDetailRows(result, viewMode))
                     : await Task.Run(() => ProjectScopedDetailRows(selected, viewMode));
             }
             catch (Exception ex)
@@ -1780,7 +1782,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             ReplaceCollection(SummaryMetrics, ScanViewProjector.SelectedSummaryMetrics(result, selected));
             RefreshNavigationState(selected, result.Root);
-            RefreshChart();
+            await RefreshChartAsync();
             UpdatePathDisplay(selected.FullPath);
         }
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
@@ -1789,13 +1791,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(ScanResult result, DetailViewMode mode)
     {
-        if (!_globalDetailRowsCache.TryGetValue(mode, out var rows))
+        lock (_globalDetailRowsCacheGate)
         {
-            rows = ProjectGlobalDetailRows(result, mode);
-            _globalDetailRowsCache[mode] = rows;
+            if (_globalDetailRowsCache.TryGetValue(mode, out var cachedRows))
+            {
+                return cachedRows;
+            }
         }
 
-        return rows;
+        var rows = ProjectGlobalDetailRows(result, mode);
+        lock (_globalDetailRowsCacheGate)
+        {
+            if (_globalDetailRowsCache.TryGetValue(mode, out var cachedRows))
+            {
+                return cachedRows;
+            }
+
+            _globalDetailRowsCache[mode] = rows;
+            return rows;
+        }
     }
 
     private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)
@@ -1830,12 +1844,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ClearGlobalDetailRowsCache()
     {
-        _globalDetailRowsCache.Clear();
+        lock (_globalDetailRowsCacheGate)
+        {
+            _globalDetailRowsCache.Clear();
+        }
+
         _detailRefreshVersion++;
+        _chartRefreshVersion++;
     }
 
-    private void RefreshChart()
+    private async Task RefreshChartAsync()
     {
+        var requestVersion = ++_chartRefreshVersion;
         var result = _currentScan;
         if (result is null)
         {
@@ -1851,7 +1871,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var selected = _selectedEntry ?? result.Root;
-        var dataset = _chartScope switch
+        var scope = _chartScope;
+        ChartDataset dataset;
+        try
+        {
+            dataset = await Task.Run(() => ProjectChartDataset(result, selected, scope));
+        }
+        catch (Exception ex)
+        {
+            if (IsCurrentChartRequest(requestVersion, result, selected, scope))
+            {
+                ShowOperationError("Chart refresh failed", ex);
+            }
+
+            return;
+        }
+
+        if (!IsCurrentChartRequest(requestVersion, result, selected, scope))
+        {
+            return;
+        }
+
+        ApplyChartDataset(dataset);
+    }
+
+    private static ChartDataset ProjectChartDataset(ScanResult result, FileSystemEntry selected, ChartScope scope)
+    {
+        return scope switch
         {
             ChartScope.LargestFolders => ReferenceEquals(selected, result.Root)
                 ? ScanViewProjector.LargestFoldersChart(result)
@@ -1864,7 +1910,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 : ScanViewProjector.ExtensionsChart(selected),
             _ => ScanViewProjector.SelectedFolderChart(selected)
         };
+    }
 
+    private bool IsCurrentChartRequest(int requestVersion, ScanResult result, FileSystemEntry selected, ChartScope scope)
+    {
+        return requestVersion == _chartRefreshVersion
+            && ReferenceEquals(_currentScan, result)
+            && ReferenceEquals(_selectedEntry ?? result.Root, selected)
+            && _chartScope == scope;
+    }
+
+    private void ApplyChartDataset(ChartDataset dataset)
+    {
         ReplaceCollection(ChartSlices, dataset.Slices);
         ChartTitleText.Text = dataset.Title;
         ChartTotalText.Text = dataset.HasOther

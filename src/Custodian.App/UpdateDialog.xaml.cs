@@ -14,7 +14,14 @@ public partial class UpdateDialog : Window
         base.OnMouseLeftButtonDown(e);
         if (e.ButtonState == MouseButtonState.Pressed)
         {
-            DragMove();
+            try
+            {
+                DragMove();
+            }
+            catch (InvalidOperationException)
+            {
+                // Mouse state can change between the click event and DragMove.
+            }
         }
     }
 

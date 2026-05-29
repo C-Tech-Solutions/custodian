@@ -298,9 +298,9 @@ public sealed class ScanViewProjectorTests
             StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
             CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z"),
             GlobalIndex = new ScanGlobalIndex(
-                3,
+                2,
                 [],
-                [root, alpha, beta],
+                [root, alpha],
                 [],
                 0,
                 0,

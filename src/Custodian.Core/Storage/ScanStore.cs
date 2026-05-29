@@ -116,7 +116,11 @@ public sealed class ScanStore
                 : "Multiple root folders found in scan file.");
         }
 
-        var root = byId[rootIds[0]];
+        if (!byId.TryGetValue(rootIds[0], out var root))
+        {
+            throw new InvalidDataException("Root folder ID not found in scan file entries.");
+        }
+
         var result = new ScanResult
         {
             RootPath = metadata["root_path"],

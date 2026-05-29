@@ -367,12 +367,25 @@ public static class ScanViewProjector
         }
 
         var index = ScanAnalysis.EnsureGlobalIndex(result);
-        var folders = take <= index.TopEntryCount
-            ? index.LargestFolders
-            : ScanAnalysis.LargestFolders(result, take + 1);
+        if (take <= index.TopEntryCount)
+        {
+            var indexedFolders = ExcludeRootFolder(index.LargestFolders, result.Root, take);
+            if (indexedFolders.Count >= take)
+            {
+                return indexedFolders;
+            }
+        }
 
+        return ExcludeRootFolder(ScanAnalysis.LargestFolders(result, take + 1), result.Root, take);
+    }
+
+    private static IReadOnlyList<FileSystemEntry> ExcludeRootFolder(
+        IReadOnlyList<FileSystemEntry> folders,
+        FileSystemEntry root,
+        int take)
+    {
         return folders
-            .Where(entry => !ReferenceEquals(entry, result.Root))
+            .Where(entry => !ReferenceEquals(entry, root))
             .Take(take)
             .ToList();
     }
