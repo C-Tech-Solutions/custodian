@@ -1241,8 +1241,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         await RunRecycleBinOperationAsync(
             "Restoring Recycle Bin items...",
-            token => RecycleBinService.RestoreAsync(rows.Select(row => row.Entry).ToList(), token),
-            $"Restored {countText}.",
+            async token => BuildRecycleBinOperationMessage(
+                "Restored",
+                await RecycleBinService.RestoreAsync(rows.Select(row => row.Entry).ToList(), token)),
             "Restore failed");
     }
 
@@ -1270,8 +1271,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         await RunRecycleBinOperationAsync(
             "Deleting Recycle Bin items...",
-            token => RecycleBinService.DeletePermanentlyAsync(rows.Select(row => row.Entry).ToList(), token),
-            $"Permanently deleted {countText}.",
+            async token => BuildRecycleBinOperationMessage(
+                "Permanently deleted",
+                await RecycleBinService.DeletePermanentlyAsync(rows.Select(row => row.Entry).ToList(), token)),
             "Permanent delete failed");
     }
 
@@ -1298,8 +1300,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         await RunRecycleBinOperationAsync(
             "Emptying Recycle Bin...",
-            token => RecycleBinService.EmptyAsync(new WindowInteropHelper(this).Handle, token),
-            "Emptied the Recycle Bin.",
+            async token =>
+            {
+                await RecycleBinService.EmptyAsync(new WindowInteropHelper(this).Handle, token);
+                return "Emptied the Recycle Bin.";
+            },
             "Empty Recycle Bin failed");
     }
 
@@ -1317,8 +1322,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RunRecycleBinOperationAsync(
         string busyMessage,
-        Func<CancellationToken, Task> operation,
-        string successMessage,
+        Func<CancellationToken, Task<string>> operation,
         string errorTitle)
     {
         if (_recycleBinCts is not null)
@@ -1332,7 +1336,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var refreshAfterOperation = true;
         try
         {
-            await operation(cts.Token);
+            var successMessage = await operation(cts.Token);
             ShowToast(successMessage);
             await Task.Delay(250);
         }
@@ -1355,6 +1359,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             await RefreshRecycleBinAsync();
         }
+    }
+
+    private static string BuildRecycleBinOperationMessage(string completedVerb, RecycleBinOperationResult result)
+    {
+        if (result.ActedOnCount == 0)
+        {
+            return result.SkippedCount == 0
+                ? "No Recycle Bin items were selected."
+                : $"No selected Recycle Bin items were available. {RecycleBinItemCountText(result.SkippedCount)} skipped.";
+        }
+
+        var message = $"{completedVerb} {RecycleBinItemCountText(result.ActedOnCount)}.";
+        if (result.SkippedCount > 0)
+        {
+            message += $" {RecycleBinItemCountText(result.SkippedCount)} skipped because no longer available.";
+        }
+
+        return message;
     }
 
     private void RecycleBinFilterBox_TextChanged(object sender, TextChangedEventArgs e)

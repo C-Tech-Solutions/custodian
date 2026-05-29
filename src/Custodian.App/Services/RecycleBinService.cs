@@ -16,6 +16,11 @@ internal enum RecycleBinMoveResult
     Cancelled
 }
 
+internal sealed record RecycleBinOperationResult(int RequestedCount, int ActedOnCount)
+{
+    public int SkippedCount => Math.Max(0, RequestedCount - ActedOnCount);
+}
+
 internal static class RecycleBinService
 {
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(RecycleBinService).FullName!);
@@ -96,13 +101,13 @@ internal static class RecycleBinService
         }, cancellationToken);
     }
 
-    public static Task RestoreAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
+    public static Task<RecycleBinOperationResult> RestoreAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
         => RunOnShellStaThreadAsync(
             () => InvokeVerbOnEntries(entries, RestoreCanonicalVerb, cancellationToken),
             cancellationToken,
             waitWithCancellation: false);
 
-    public static Task DeletePermanentlyAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
+    public static Task<RecycleBinOperationResult> DeletePermanentlyAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
         => RunOnShellStaThreadAsync(
             () => InvokeVerbOnEntries(entries, DeleteCanonicalVerb, cancellationToken),
             cancellationToken,
@@ -215,14 +220,14 @@ internal static class RecycleBinService
             BuildStableKey(recyclePath, originalLocation, name, dateDeletedText));
     }
 
-    private static void InvokeVerbOnEntries(
+    private static RecycleBinOperationResult InvokeVerbOnEntries(
         IReadOnlyCollection<RecycleBinEntry> entries,
         string verbName,
         CancellationToken cancellationToken)
     {
         if (entries.Count == 0)
         {
-            return;
+            return new RecycleBinOperationResult(0, 0);
         }
 
         dynamic? shell = null;
@@ -256,6 +261,8 @@ internal static class RecycleBinService
                         $"Failed to apply the Recycle Bin {verbName} action to {failures.Count:n0} selected item(s).",
                         failures);
                 }
+
+                return new RecycleBinOperationResult(entries.Count, matchedItems.Count);
             }
             finally
             {
