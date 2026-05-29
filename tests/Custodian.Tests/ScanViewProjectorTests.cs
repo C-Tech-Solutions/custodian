@@ -283,6 +283,45 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void IndexedLargestFolderProjectionExcludesRoot()
+    {
+        var root = Directory(@"C:\", 300, 0, 2);
+        var alpha = Directory(@"C:\Alpha", 180, 0, 0);
+        var beta = Directory(@"C:\Beta", 120, 0, 0);
+        root.Children.Add(alpha);
+        root.Children.Add(beta);
+        var result = new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test Engine",
+            StartedAt = DateTimeOffset.Parse("2026-05-19T12:00:00Z"),
+            CompletedAt = DateTimeOffset.Parse("2026-05-19T12:00:03Z"),
+            GlobalIndex = new ScanGlobalIndex(
+                3,
+                [],
+                [root, alpha, beta],
+                [],
+                0,
+                0,
+                alpha.LogicalSizeBytes + beta.LogicalSizeBytes,
+                2)
+        };
+
+        var rowPaths = ScanViewProjector.LargestFolderRows(result, take: 2)
+            .Select(row => row.FullPath)
+            .ToList();
+        var chartPaths = ScanViewProjector.LargestFoldersChart(result, take: 2)
+            .Slices
+            .Where(slice => slice.Kind != ChartSliceKind.Other)
+            .Select(slice => slice.SourceKey)
+            .ToList();
+
+        Assert.Equal([alpha.FullPath, beta.FullPath], rowPaths);
+        Assert.Equal(rowPaths, chartPaths);
+    }
+
+    [Fact]
     public void ExtensionChartMatchesExtensionRowOrder()
     {
         var result = SampleResult();

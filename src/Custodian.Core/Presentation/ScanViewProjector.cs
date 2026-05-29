@@ -367,12 +367,14 @@ public static class ScanViewProjector
         }
 
         var index = ScanAnalysis.EnsureGlobalIndex(result);
-        return take <= index.TopEntryCount
-            ? index.LargestFolders.Take(take).ToList()
-            : ScanAnalysis.LargestFolders(result, take + 1)
-                .Where(entry => !ReferenceEquals(entry, result.Root))
-                .Take(take)
-                .ToList();
+        var folders = take <= index.TopEntryCount
+            ? index.LargestFolders
+            : ScanAnalysis.LargestFolders(result, take + 1);
+
+        return folders
+            .Where(entry => !ReferenceEquals(entry, result.Root))
+            .Take(take)
+            .ToList();
     }
 
     private static IReadOnlyList<FileSystemEntry> LargestFoldersForScope(FileSystemEntry scope, int take)
