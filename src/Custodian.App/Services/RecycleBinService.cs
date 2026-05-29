@@ -136,6 +136,10 @@ internal static class RecycleBinService
             folder = shell.NameSpace(RecycleBinShellNamespace)
                 ?? throw new InvalidOperationException("Windows Recycle Bin namespace is unavailable.");
             items = folder.Items();
+            if (items is null)
+            {
+                throw new InvalidOperationException("Failed to retrieve items from the Windows Recycle Bin.");
+            }
 
             var entries = new List<RecycleBinEntry>();
             IEnumerator? enumerator = null;
@@ -286,6 +290,11 @@ internal static class RecycleBinService
         try
         {
             items = folder.Items();
+            if (items is null)
+            {
+                return matchedItems;
+            }
+
             IEnumerator? enumerator = null;
             try
             {

@@ -111,8 +111,15 @@ internal sealed class AppUpdateService
 
     private static string? ReadEnvironmentValue(string name)
     {
-        var value = Environment.GetEnvironmentVariable(name);
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        try
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+        catch (System.Security.SecurityException)
+        {
+            return null;
+        }
     }
 
     private static bool? ReadEnvironmentFlag(string name)

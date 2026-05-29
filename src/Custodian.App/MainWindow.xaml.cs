@@ -2219,7 +2219,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             drives = DriveInfo.GetDrives();
         }
-        catch (IOException ex)
+        catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to enumerate drives.");
             return rows;
@@ -2252,6 +2252,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 Logger.LogWarning(ex, "Access denied enumerating drive {Drive}.", drive.Name);
                 rows.Add(new DriveRow(drive.Name, drive.Name, "Access denied", "", 0));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Drive {Drive} unavailable.", drive.Name);
+                rows.Add(new DriveRow(drive.Name, drive.Name, "Unavailable", "", 0));
             }
         }
 

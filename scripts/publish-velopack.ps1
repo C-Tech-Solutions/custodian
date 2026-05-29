@@ -15,6 +15,33 @@ $publishRoot = Join-Path $repo "artifacts\velopack-publish"
 $appOut = Join-Path $publishRoot "Custodian"
 $output = Join-Path $repo $OutputRoot
 
+function Get-NumericVersion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InputVersion
+    )
+
+    $coreVersion = ($InputVersion -split '[+-]', 2)[0]
+    $parts = @($coreVersion -split '\.')
+    if ($parts.Count -lt 1 -or $parts.Count -gt 4) {
+        throw "Version '$InputVersion' must use one to four numeric components before prerelease metadata."
+    }
+
+    foreach ($part in $parts) {
+        if ($part -notmatch '^\d+$') {
+            throw "Version '$InputVersion' contains non-numeric assembly version component '$part'."
+        }
+    }
+
+    while ($parts.Count -lt 3) {
+        $parts += "0"
+    }
+
+    return ($parts -join ".")
+}
+
+$numericVersion = Get-NumericVersion -InputVersion $Version
+
 if (Test-Path $publishRoot) {
     Remove-Item $publishRoot -Recurse -Force
 }
@@ -34,8 +61,8 @@ dotnet publish (Join-Path $repo "src\Custodian.App\Custodian.App.csproj") `
     --self-contained true `
     -p:PublishSingleFile=false `
     -p:Version=$Version `
-    -p:AssemblyVersion=$Version `
-    -p:FileVersion=$Version `
+    -p:AssemblyVersion=$numericVersion `
+    -p:FileVersion=$numericVersion `
     -p:InformationalVersion=$Version `
     -o $appOut
 
@@ -45,8 +72,8 @@ dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
     --self-contained true `
     -p:PublishSingleFile=false `
     -p:Version=$Version `
-    -p:AssemblyVersion=$Version `
-    -p:FileVersion=$Version `
+    -p:AssemblyVersion=$numericVersion `
+    -p:FileVersion=$numericVersion `
     -p:InformationalVersion=$Version `
     -o (Join-Path $appOut "cli")
 
