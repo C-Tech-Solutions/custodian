@@ -14,20 +14,33 @@ public partial class UpdateDialog : Window
         string message,
         string primaryText,
         string secondaryText,
-        UpdateDialogTone tone = UpdateDialogTone.Information)
+        UpdateDialogTone tone = UpdateDialogTone.Information,
+        string subtitle = "Custodian updater")
     {
-        var dialog = Create(owner, title, message, primaryText, secondaryText, tone);
+        var dialog = Create(owner, title, subtitle, message, primaryText, secondaryText, tone);
         return dialog.ShowDialog() == true;
     }
 
-    public static void ShowInformation(Window owner, string title, string message, UpdateDialogTone tone = UpdateDialogTone.Information)
+    public static void ShowInformation(
+        Window owner,
+        string title,
+        string message,
+        UpdateDialogTone tone = UpdateDialogTone.Information,
+        string subtitle = "Custodian updater")
     {
-        var dialog = Create(owner, title, message, "OK", string.Empty, tone);
+        var dialog = Create(owner, title, subtitle, message, "OK", string.Empty, tone);
         dialog.SecondaryButton.Visibility = Visibility.Collapsed;
         dialog.ShowDialog();
     }
 
-    private static UpdateDialog Create(Window owner, string title, string message, string primaryText, string secondaryText, UpdateDialogTone tone)
+    private static UpdateDialog Create(
+        Window owner,
+        string title,
+        string subtitle,
+        string message,
+        string primaryText,
+        string secondaryText,
+        UpdateDialogTone tone)
     {
         var dialog = new UpdateDialog
         {
@@ -35,6 +48,7 @@ public partial class UpdateDialog : Window
         };
 
         dialog.TitleText.Text = title;
+        dialog.SubtitleText.Text = subtitle;
         dialog.MessageText.Text = message;
         dialog.PrimaryButton.Content = primaryText;
         dialog.SecondaryButton.Content = secondaryText;

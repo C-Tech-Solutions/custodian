@@ -1209,7 +1209,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             "Restore Recycle Bin items",
             $"Restore {countText} to the original location Windows recorded for each item?",
             "Restore",
-            "Cancel"))
+            "Cancel",
+            subtitle: "Recycle Bin"))
         {
             return;
         }
@@ -1237,7 +1238,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             $"Permanently delete {countText} from the Recycle Bin?\n\nThis cannot be undone.",
             "Delete permanently",
             "Cancel",
-            UpdateDialogTone.Error))
+            UpdateDialogTone.Error,
+            "Recycle Bin"))
         {
             return;
         }
@@ -1264,7 +1266,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             $"Permanently delete all {countText} in the Recycle Bin?\n\nThis cannot be undone.",
             "Empty Recycle Bin",
             "Cancel",
-            UpdateDialogTone.Error))
+            UpdateDialogTone.Error,
+            "Recycle Bin"))
         {
             return;
         }

@@ -49,18 +49,29 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     private void ProcessQueue()
     {
-        foreach (var line in _queue.GetConsumingEnumerable())
+        try
         {
-            try
+            foreach (var line in _queue.GetConsumingEnumerable())
             {
-                var path = Path.Combine(_directory, $"custodian-{DateTime.UtcNow:yyyyMMdd}.log");
-                File.AppendAllText(path, line, Encoding.UTF8);
+                try
+                {
+                    var path = Path.Combine(_directory, $"custodian-{DateTime.UtcNow:yyyyMMdd}.log");
+                    File.AppendAllText(path, line, Encoding.UTF8);
+                }
+                catch
+                {
+                    // Logging must never throw into the app. If the disk is full or the
+                    // file is locked, the entry is lost — that is acceptable for diagnostics.
+                }
             }
-            catch
-            {
-                // Logging must never throw into the app. If the disk is full or the
-                // file is locked, the entry is lost — that is acceptable for diagnostics.
-            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // The queue can be disposed during shutdown after the bounded flush wait.
+        }
+        catch
+        {
+            // A background logger failure must never crash the application.
         }
     }
 

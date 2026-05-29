@@ -63,7 +63,8 @@
                                        Style="{StaticResource DisplayHeader}"
                                        FontSize="16"
                                        TextWrapping="Wrap"/>
-                            <TextBlock Text="Custodian updater"
+                            <TextBlock x:Name="SubtitleText"
+                                       Text="Custodian updater"
                                        Style="{StaticResource MutedText}"
                                        FontSize="11"
                                        Margin="0,1,0,0"/>

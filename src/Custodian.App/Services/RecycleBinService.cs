@@ -4,7 +4,9 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Custodian.App.Logging;
 using Custodian.Core.Model;
+using Microsoft.Extensions.Logging;
 
 namespace Custodian.App.Services;
 
@@ -16,6 +18,8 @@ internal enum RecycleBinMoveResult
 
 internal static class RecycleBinService
 {
+    private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(RecycleBinService).FullName!);
+
     private const int RecycleBinShellNamespace = 10;
     private const int RecycleBinColumnOriginalLocation = 1;
     private const int RecycleBinColumnDateDeleted = 2;
@@ -143,7 +147,15 @@ internal static class RecycleBinService
                             continue;
                         }
 
-                        entries.Add(CreateEntry(folder, item));
+                        try
+                        {
+                            entries.Add(CreateEntry(folder, item));
+                        }
+                        catch (Exception ex) when (ex is COMException or InvalidOperationException or FormatException or InvalidCastException or OverflowException)
+                        {
+                            Logger.LogWarning(ex, "Skipping an inaccessible Recycle Bin item during enumeration.");
+                            Debug.WriteLine($"Failed to load Recycle Bin item: {ex.Message}");
+                        }
                     }
                     finally
                     {
