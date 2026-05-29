@@ -1208,6 +1208,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception ex)
         {
             _recycleBinShellItemCount = 0;
+            RecycleBinGrid.SelectedItems.Clear();
+            RecycleBinRows.Clear();
+            RecycleBinRowsView.Refresh();
+            UpdateRecycleBinFilterUiState();
+            RecycleBinStatusText.Text = "Recycle Bin refresh failed.";
             ShowOperationError("Recycle Bin failed", ex);
             UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh failed.");
         }
