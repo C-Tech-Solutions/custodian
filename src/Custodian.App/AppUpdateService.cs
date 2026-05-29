@@ -1,6 +1,6 @@
 using System.Reflection;
+using Custodian.App.Logging;
 using Custodian.Core.Updates;
-using Microsoft.Extensions.Logging.Abstractions;
 using Velopack;
 using Velopack.Locators;
 using Velopack.Sources;
@@ -86,7 +86,7 @@ internal sealed class AppUpdateService
 
     private static UpdateManager CreateUpdateManager()
     {
-        var logger = NullLogger.Instance;
+        var logger = AppLogging.CreateLogger("Custodian.App.Velopack");
         var locator = VelopackLocator.GetDefault(logger);
         var options = new UpdateOptions();
         var channelOverride = ReadEnvironmentValue(UpdateChannelOverrideVariable);

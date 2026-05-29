@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Velopack" Version="0.0.626" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
   </ItemGroup>
 
   <PropertyGroup>

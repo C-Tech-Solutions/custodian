@@ -910,6 +910,14 @@
                                 Content=">>"
                                 Click="CollapseRight_Click" ToolTip="Collapse panel"/>
                     </Grid>
+
+                    <!-- Everything below the header scrolls as one unit so the chart and
+                         summary tiles are never clipped when the window is short. The inner
+                         DockPanel tracks the viewport height so the chart still fills the
+                         panel when the window is tall, but scrolls once content overflows. -->
+                    <ScrollViewer x:Name="SummaryScrollViewer"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <DockPanel MinHeight="{Binding ViewportHeight, ElementName=SummaryScrollViewer}">
                     <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding SummaryMetrics}" Margin="11,4,11,8">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -979,7 +987,7 @@
                                Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                Margin="14,8,14,12" TextWrapping="Wrap"/>
 
-                    <Grid Margin="11,10,11,0">
+                    <Grid MinHeight="280" Margin="11,10,11,0">
                         <Grid x:Name="TreemapHost">
                             <controls:TreemapControl x:Name="Treemap"
                                                      Slices="{Binding ChartSlices}"
@@ -989,14 +997,13 @@
                         <Grid x:Name="PieHost" Visibility="Collapsed">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="230"/>
-                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <controls:PieChartControl x:Name="PieChart"
                                                       Slices="{Binding ChartSlices}"
                                                       SliceSelected="Chart_SliceSelected"
                                                       SliceDoubleClicked="Chart_SliceDoubleClicked"/>
-                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="220" Margin="0,6,0,0">
-                                <ItemsControl ItemsSource="{Binding ChartSlices}">
+                            <ItemsControl Grid.Row="1" Margin="0,6,0,0" ItemsSource="{Binding ChartSlices}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <Border Padding="4" Margin="0,1"
@@ -1030,7 +1037,6 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                            </ScrollViewer>
                         </Grid>
 
                         <Grid x:Name="BarHost" Visibility="Collapsed">
@@ -1074,6 +1080,8 @@
                             </ListBox>
                         </Grid>
                     </Grid>
+                    </DockPanel>
+                    </ScrollViewer>
                 </DockPanel>
             </Border>
 

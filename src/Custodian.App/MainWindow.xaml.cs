@@ -17,7 +17,9 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Windows.Interop;
 using Custodian.App.Controls;
+using Custodian.App.Logging;
 using Custodian.App.Services;
+using Microsoft.Extensions.Logging;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
@@ -47,6 +49,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const double CollapsedRightPanelWidth = 36;
     private static readonly TimeSpan AutomaticUpdateCheckInterval = TimeSpan.FromHours(12);
 
+    private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
@@ -392,6 +395,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Update check failed (automatic={IsAutomatic}).", isAutomatic);
             var status = AppUpdateStatusFactory.Failed(ex.Message);
             ApplyUpdateStatus(status);
             if (!isAutomatic)
@@ -544,6 +548,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Scan failed.");
             WpfMessageBox.Show(this, ex.Message, "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
             UpdateFooterStatus("Scan failed", ex.Message);
             EngineBadge.Text = "Failed";
@@ -1617,6 +1622,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException)
         {
+            Logger.LogError(ex, "Recycle Bin move failed for {Path}.", path);
             WpfMessageBox.Show(this, ex.Message, "Recycle Bin move failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -2058,7 +2064,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            Logger.LogError(ex, "Failed to refresh drive and target list.");
         }
     }
 
@@ -2071,7 +2077,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            Logger.LogWarning(ex, "Recycle Bin usage unavailable.");
             ReplaceTargetRow(TargetKind.RecycleBin, TargetRow.RecycleBinUnavailable());
         }
     }
@@ -2115,7 +2121,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (IOException ex)
         {
-            Debug.WriteLine(ex);
+            Logger.LogWarning(ex, "Failed to enumerate drives.");
             return rows;
         }
 
@@ -2137,8 +2143,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     total <= 0 ? string.Empty : $"{SizeFormatter.Format(free)} free",
                     percent));
             }
-            catch (IOException) { rows.Add(new DriveRow(drive.Name, drive.Name, "Not ready", "", 0)); }
-            catch (UnauthorizedAccessException) { rows.Add(new DriveRow(drive.Name, drive.Name, "Access denied", "", 0)); }
+            catch (IOException ex)
+            {
+                Logger.LogWarning(ex, "Drive {Drive} not ready.", drive.Name);
+                rows.Add(new DriveRow(drive.Name, drive.Name, "Not ready", "", 0));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Logger.LogWarning(ex, "Access denied enumerating drive {Drive}.", drive.Name);
+                rows.Add(new DriveRow(drive.Name, drive.Name, "Access denied", "", 0));
+            }
         }
 
         return rows;
@@ -2289,6 +2303,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ShowOperationError(string title, Exception ex)
     {
+        Logger.LogError(ex, "{Title}", title);
         WpfMessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
@@ -2346,7 +2361,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var result = DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int));
         if (result != 0)
         {
-            Debug.WriteLine($"DwmSetWindowAttribute {attributeName} failed with HRESULT 0x{result:X8}.");
+            Logger.LogDebug("DwmSetWindowAttribute {Attribute} failed with HRESULT 0x{Result:X8}.", attributeName, result);
         }
     }
 

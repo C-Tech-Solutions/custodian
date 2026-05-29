@@ -14,7 +14,10 @@ public sealed class ScanStore
             File.Delete(path);
         }
 
-        await using var connection = new SqliteConnection($"Data Source={path}");
+        // Pooling is disabled so the file handle is released as soon as the connection is
+        // disposed. With the default pool the handle lingers, causing the File.Delete above
+        // (or an external rename/overwrite) to fail with a sharing violation.
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(connection, """
@@ -62,7 +65,7 @@ public sealed class ScanStore
 
     public async Task<ScanResult> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
-        await using var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly");
+        await using var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         var metadata = await LoadMetadataAsync(connection, cancellationToken).ConfigureAwait(false);

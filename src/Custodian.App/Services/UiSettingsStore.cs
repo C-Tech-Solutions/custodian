@@ -1,6 +1,7 @@
 using System.IO;
-using System.Diagnostics;
 using System.Text.Json;
+using Custodian.App.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Custodian.App.Services;
 
@@ -28,11 +29,10 @@ public static class UiSettingsStore
         "Custodian");
 
     private static readonly string FilePath = Path.Combine(AppDataDir, "ui.json");
-    private static readonly string LogFilePath = Path.Combine(AppDataDir, "settings-errors.log");
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
-    private static readonly object LogGate = new();
+    private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(UiSettingsStore).FullName!);
 
     public static UiSettings Load()
     {
@@ -101,24 +101,6 @@ public static class UiSettingsStore
         }
     }
 
-    private static void LogFailure(string operation, Exception ex)
-    {
-        Debug.WriteLine(ex);
-        var message = $"{DateTimeOffset.UtcNow:O} {operation} failed{Environment.NewLine}{ex}{Environment.NewLine}";
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                lock (LogGate)
-                {
-                    Directory.CreateDirectory(AppDataDir);
-                    File.AppendAllText(LogFilePath, message);
-                }
-            }
-            catch (Exception logEx)
-            {
-                Debug.WriteLine(logEx);
-            }
-        });
-    }
+    private static void LogFailure(string operation, Exception ex) =>
+        Logger.LogError(ex, "{Operation} failed.", operation);
 }
