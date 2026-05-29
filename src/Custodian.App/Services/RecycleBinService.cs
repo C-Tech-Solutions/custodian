@@ -97,10 +97,16 @@ internal static class RecycleBinService
     }
 
     public static Task RestoreAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
-        => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, RestoreCanonicalVerb, cancellationToken), cancellationToken);
+        => RunOnShellStaThreadAsync(
+            () => InvokeVerbOnEntries(entries, RestoreCanonicalVerb, cancellationToken),
+            cancellationToken,
+            waitWithCancellation: false);
 
     public static Task DeletePermanentlyAsync(IReadOnlyCollection<RecycleBinEntry> entries, CancellationToken cancellationToken = default)
-        => RunOnShellStaThreadAsync(() => InvokeVerbOnEntries(entries, DeleteCanonicalVerb, cancellationToken), cancellationToken);
+        => RunOnShellStaThreadAsync(
+            () => InvokeVerbOnEntries(entries, DeleteCanonicalVerb, cancellationToken),
+            cancellationToken,
+            waitWithCancellation: false);
 
     public static Task EmptyAsync(IntPtr ownerHandle, CancellationToken cancellationToken = default)
     {
@@ -228,7 +234,6 @@ internal static class RecycleBinService
             {
                 foreach (var item in matchedItems)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
                     InvokeShellVerb(item, verbName);
                 }
             }
@@ -261,6 +266,7 @@ internal static class RecycleBinService
         var matchedItems = new List<object>();
 
         dynamic? items = null;
+        var success = false;
         try
         {
             items = folder.Items();
@@ -317,23 +323,25 @@ internal static class RecycleBinService
 
                 ReleaseComObject(enumerator);
             }
+            if (matchedItems.Count != entries.Count)
+            {
+                throw new FileNotFoundException("One or more selected Recycle Bin items are no longer available.");
+            }
+
+            success = true;
+            return matchedItems;
         }
         finally
         {
             ReleaseComObject(items);
-        }
-
-        if (matchedItems.Count != entries.Count)
-        {
-            foreach (var item in matchedItems)
+            if (!success)
             {
-                ReleaseComObject(item);
+                foreach (var item in matchedItems)
+                {
+                    ReleaseComObject(item);
+                }
             }
-
-            throw new FileNotFoundException("One or more selected Recycle Bin items are no longer available.");
         }
-
-        return matchedItems;
     }
 
     private static string? GetRequestedEntryKey(
@@ -378,7 +386,10 @@ internal static class RecycleBinService
         }
     }
 
-    private static Task<T> RunOnShellStaThreadAsync<T>(Func<T> action, CancellationToken cancellationToken)
+    private static Task<T> RunOnShellStaThreadAsync<T>(
+        Func<T> action,
+        CancellationToken cancellationToken,
+        bool waitWithCancellation = true)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -405,15 +416,18 @@ internal static class RecycleBinService
 
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        return completion.Task.WaitAsync(cancellationToken);
+        return waitWithCancellation ? completion.Task.WaitAsync(cancellationToken) : completion.Task;
     }
 
-    private static Task RunOnShellStaThreadAsync(Action action, CancellationToken cancellationToken)
+    private static Task RunOnShellStaThreadAsync(
+        Action action,
+        CancellationToken cancellationToken,
+        bool waitWithCancellation = true)
         => RunOnShellStaThreadAsync(() =>
         {
             action();
             return true;
-        }, cancellationToken);
+        }, cancellationToken, waitWithCancellation);
 
     private static dynamic CreateShellApplication()
     {
@@ -549,7 +563,8 @@ internal static class RecycleBinService
         => string.Join("|", recyclePath, originalLocation, name, dateDeletedText);
 
     private static bool IsShellMetadataException(Exception ex)
-        => ex is COMException or InvalidOperationException or FormatException or InvalidCastException or OverflowException;
+        => ex is COMException or InvalidOperationException or FormatException or InvalidCastException or OverflowException
+            or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException;
 
     private static string CleanShellText(object? value)
     {

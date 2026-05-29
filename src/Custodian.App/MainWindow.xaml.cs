@@ -699,6 +699,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (!string.IsNullOrWhiteSpace(row.RootPath))
         {
+            if (_isRecycleBinViewActive)
+            {
+                LeaveRecycleBinView();
+            }
+
             PathBox.Text = row.RootPath;
             AddRecentPath(row.RootPath);
         }
@@ -1131,6 +1136,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void BackToScan_Click(object sender, RoutedEventArgs e)
+        => LeaveRecycleBinView();
+
+    private void LeaveRecycleBinView()
     {
         _isRecycleBinViewActive = false;
         _recycleBinCts?.Cancel();
@@ -1324,7 +1332,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             await operation(cts.Token);
             ShowToast(successMessage);
-            await Task.Delay(250, cts.Token);
+            await Task.Delay(250);
         }
         catch (OperationCanceledException)
         {
