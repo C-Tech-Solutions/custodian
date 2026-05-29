@@ -1479,8 +1479,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        WpfClipboard.SetText(string.Join(Environment.NewLine, textFactory(rows)));
-        ShowToast($"Copied {rows.Count:n0} {label}(s).");
+        CopyTextToClipboard(
+            string.Join(Environment.NewLine, textFactory(rows)),
+            $"Copied {rows.Count:n0} {label}(s).");
     }
 
     private IReadOnlyList<RecycleBinRow> SelectedRecycleBinRows()
@@ -1555,12 +1556,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var rows = SelectedDetailRows().ToList();
         if (rows.Count > 0)
         {
-            WpfClipboard.SetText(string.Join(Environment.NewLine, rows.Select(r => r.FullPath)));
-            ShowToast($"Copied {rows.Count:n0} path(s).");
+            CopyTextToClipboard(
+                string.Join(Environment.NewLine, rows.Select(r => r.FullPath)),
+                $"Copied {rows.Count:n0} path(s).");
             return;
         }
         var path = SelectedPath();
-        if (path is not null) { WpfClipboard.SetText(path); ShowToast("Copied path."); }
+        if (path is not null)
+        {
+            CopyTextToClipboard(path, "Copied path.");
+        }
     }
 
     private void CopyRows_Click(object sender, RoutedEventArgs e)
@@ -1569,8 +1574,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (rows.Count == 0) return;
         var builder = new StringBuilder();
         foreach (var row in rows) builder.AppendLine(row.ToString());
-        WpfClipboard.SetText(builder.ToString());
-        ShowToast($"Copied {rows.Count:n0} row(s).");
+        CopyTextToClipboard(builder.ToString(), $"Copied {rows.Count:n0} row(s).");
+    }
+
+    private void CopyTextToClipboard(string text, string successMessage)
+    {
+        try
+        {
+            WpfClipboard.SetText(text);
+            ShowToast(successMessage);
+        }
+        catch (Exception ex) when (ex is COMException or ExternalException)
+        {
+            Logger.LogWarning(ex, "Failed to copy text to clipboard.");
+            ShowToast("Clipboard is currently busy. Please try again.");
+        }
     }
 
     private async void ExportSelectionCsv_Click(object sender, RoutedEventArgs e)

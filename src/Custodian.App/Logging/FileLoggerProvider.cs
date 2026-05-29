@@ -43,8 +43,19 @@ public sealed class FileLoggerProvider : ILoggerProvider
             return;
         }
 
-        // Non-blocking: if the queue is saturated we drop the line rather than stall the UI.
-        _queue.TryAdd(line);
+        try
+        {
+            // Non-blocking: if the queue is saturated we drop the line rather than stall the UI.
+            _queue.TryAdd(line);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The queue was disposed during shutdown.
+        }
+        catch (InvalidOperationException)
+        {
+            // The queue was marked complete during shutdown.
+        }
     }
 
     private void ProcessQueue()
