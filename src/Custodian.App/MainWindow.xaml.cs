@@ -85,6 +85,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _recycleBinFilterText = string.Empty;
     private RecycleBinSortColumn _recycleBinSortColumn = RecycleBinSortColumn.DateDeleted;
     private ListSortDirection _recycleBinSortDirection = ListSortDirection.Descending;
+    private long _recycleBinShellItemCount;
     private bool _settingsPersistedForClose;
     private bool _isClosing;
 
@@ -1168,15 +1169,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var entries = await entriesTask;
             var usage = await usageTask;
             ReplaceCollection(RecycleBinRows, RecycleBinViewProjector.Rows(entries));
+            _recycleBinShellItemCount = Math.Max(0, usage.ItemCount);
             ApplyRecycleBinSort();
             UpdateRecycleBinFilterUiState();
             UpdateRecycleBinTargetUsage(usage.SizeBytes, usage.ItemCount);
             var countText = RecycleBinItemCountText(RecycleBinRows.Count);
             var totalSize = SizeFormatter.Format(usage.SizeBytes);
-            RecycleBinStatusText.Text = RecycleBinRows.Count == 0
-                ? "The Recycle Bin is empty."
-                : $"{countText} using {totalSize} in the Windows Recycle Bin.";
-            UpdateFooterStatus("Recycle Bin", RecycleBinRows.Count == 0 ? "Empty." : $"{countText} using {totalSize} loaded.");
+            var shellCountText = RecycleBinItemCountText(_recycleBinShellItemCount);
+            if (RecycleBinRows.Count == 0)
+            {
+                RecycleBinStatusText.Text = _recycleBinShellItemCount == 0
+                    ? "The Recycle Bin is empty."
+                    : $"Windows reports {shellCountText} using {totalSize}, but no readable item metadata was loaded.";
+                UpdateFooterStatus("Recycle Bin", _recycleBinShellItemCount == 0 ? "Empty." : $"{shellCountText} reported by Windows.");
+            }
+            else
+            {
+                var skippedCount = Math.Max(0, _recycleBinShellItemCount - RecycleBinRows.Count);
+                var skippedText = skippedCount > 0 ? $" ({RecycleBinItemCountText(skippedCount)} unreadable)" : string.Empty;
+                RecycleBinStatusText.Text = $"{countText}{skippedText} using {totalSize} in the Windows Recycle Bin.";
+                UpdateFooterStatus("Recycle Bin", $"{countText}{skippedText} using {totalSize} loaded.");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1184,6 +1197,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            _recycleBinShellItemCount = 0;
             ShowOperationError("Recycle Bin failed", ex);
             UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh failed.");
         }
@@ -1253,13 +1267,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void EmptyRecycleBin_Click(object sender, RoutedEventArgs e)
     {
-        if (RecycleBinRows.Count == 0)
+        if (_recycleBinShellItemCount == 0)
         {
             ShowToast("The Recycle Bin is already empty.");
             return;
         }
 
-        var countText = RecycleBinItemCountText(RecycleBinRows.Count);
+        var countText = RecycleBinItemCountText(_recycleBinShellItemCount);
         if (!UpdateDialog.ShowConfirmation(
             this,
             "Empty Recycle Bin",
@@ -1508,7 +1522,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var hasSelection = RecycleBinGrid.SelectedItems.Count > 0;
         RecycleBinRestoreButton.IsEnabled = !busy && hasSelection;
         RecycleBinDeleteButton.IsEnabled = !busy && hasSelection;
-        RecycleBinEmptyButton.IsEnabled = !busy && RecycleBinRows.Count > 0;
+        RecycleBinEmptyButton.IsEnabled = !busy && _recycleBinShellItemCount > 0;
     }
 
     private void UpdateRecycleBinFilterUiState()
@@ -2361,7 +2375,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{ViewModeLabel(mode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
     }
 
-    private static string RecycleBinItemCountText(int count)
+    private static string RecycleBinItemCountText(long count)
         => count == 1 ? "1 item" : $"{count:n0} items";
 
     private static void RevealPath(string path)

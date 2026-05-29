@@ -104,7 +104,7 @@ internal sealed class AppUpdateService
         var channel = channelOverride ?? locator.Channel;
         var accessToken = ReadEnvironmentValue(GitHubAccessTokenVariable) ?? string.Empty;
         var includePrereleases = ReadEnvironmentFlag(GitHubPrereleaseVariable) ?? IsPrereleaseChannel(channel);
-        var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases, downloader: null!);
+        var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases);
 
         return new UpdateManager(source, options, logger, locator);
     }

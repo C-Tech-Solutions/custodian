@@ -27,11 +27,18 @@ public static class AppLogging
             return;
         }
 
-        _factory = LoggerFactory.Create(builder =>
+        try
         {
-            builder.SetMinimumLevel(minLevel);
-            builder.AddProvider(new FileLoggerProvider(LogDirectory, minLevel));
-        });
+            _factory = LoggerFactory.Create(builder =>
+            {
+                builder.SetMinimumLevel(minLevel);
+                builder.AddProvider(new FileLoggerProvider(LogDirectory, minLevel));
+            });
+        }
+        catch
+        {
+            _factory = NullLoggerFactory.Instance;
+        }
     }
 
     public static ILogger<T> CreateLogger<T>() =>

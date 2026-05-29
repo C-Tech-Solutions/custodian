@@ -151,7 +151,7 @@ internal static class RecycleBinService
                         {
                             entries.Add(CreateEntry(folder, item));
                         }
-                        catch (Exception ex) when (ex is COMException or InvalidOperationException or FormatException or InvalidCastException or OverflowException)
+                        catch (Exception ex) when (IsShellMetadataException(ex))
                         {
                             Logger.LogWarning(ex, "Skipping an inaccessible Recycle Bin item during enumeration.");
                             Debug.WriteLine($"Failed to load Recycle Bin item: {ex.Message}");
@@ -280,7 +280,17 @@ internal static class RecycleBinService
                             continue;
                         }
 
-                        var itemKey = GetRequestedEntryKey(folder, item, requestedRecyclePaths, requestedStableKeys);
+                        string? itemKey;
+                        try
+                        {
+                            itemKey = GetRequestedEntryKey(folder, item, requestedRecyclePaths, requestedStableKeys);
+                        }
+                        catch (Exception ex) when (IsShellMetadataException(ex))
+                        {
+                            Logger.LogWarning(ex, "Skipping an inaccessible Recycle Bin item while finding selected items.");
+                            continue;
+                        }
+
                         if (itemKey is null || !matchedKeys.Add(itemKey))
                         {
                             continue;
@@ -537,6 +547,9 @@ internal static class RecycleBinService
         string name,
         string dateDeletedText)
         => string.Join("|", recyclePath, originalLocation, name, dateDeletedText);
+
+    private static bool IsShellMetadataException(Exception ex)
+        => ex is COMException or InvalidOperationException or FormatException or InvalidCastException or OverflowException;
 
     private static string CleanShellText(object? value)
     {
