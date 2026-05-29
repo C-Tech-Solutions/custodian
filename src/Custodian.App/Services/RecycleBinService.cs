@@ -230,11 +230,27 @@ internal static class RecycleBinService
                 ?? throw new InvalidOperationException("Windows Recycle Bin namespace is unavailable.");
 
             var matchedItems = FindRecycleBinItems(folder, entries, cancellationToken);
+            var failures = new List<Exception>();
             try
             {
                 foreach (var item in matchedItems)
                 {
-                    InvokeShellVerb(item, verbName);
+                    try
+                    {
+                        InvokeShellVerb(item, verbName);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        Logger.LogWarning(ex, "Recycle Bin {Verb} failed for one selected item.", verbName);
+                        failures.Add(ex);
+                    }
+                }
+
+                if (failures.Count > 0)
+                {
+                    throw new AggregateException(
+                        $"Failed to apply the Recycle Bin {verbName} action to {failures.Count:n0} selected item(s).",
+                        failures);
                 }
             }
             finally
@@ -384,6 +400,10 @@ internal static class RecycleBinService
         {
             throw new InvalidOperationException($"Windows did not expose the {verbName} action for the selected Recycle Bin item.", ex);
         }
+        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
+        {
+            throw new InvalidOperationException($"Windows did not expose the {verbName} action for the selected Recycle Bin item.", ex);
+        }
     }
 
     private static Task<T> RunOnShellStaThreadAsync<T>(
@@ -447,7 +467,7 @@ internal static class RecycleBinService
                 return systemSize;
             }
         }
-        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or COMException)
+        catch (Exception ex) when (IsShellMetadataException(ex))
         {
         }
 
@@ -455,7 +475,7 @@ internal static class RecycleBinService
         {
             return ConvertShellSize(item.Size);
         }
-        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException or COMException)
+        catch (Exception ex) when (IsShellMetadataException(ex))
         {
             return 0;
         }
@@ -520,7 +540,7 @@ internal static class RecycleBinService
         {
             return Convert.ToBoolean(item.IsFolder, CultureInfo.InvariantCulture);
         }
-        catch (Exception ex) when (ex is FormatException or InvalidCastException or COMException)
+        catch (Exception ex) when (IsShellMetadataException(ex))
         {
             return itemType.Contains("folder", StringComparison.OrdinalIgnoreCase);
         }
