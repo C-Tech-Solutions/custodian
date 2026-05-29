@@ -101,7 +101,7 @@ internal sealed class AppUpdateService
             return new UpdateManager(sourceOverride, options, logger, locator);
         }
 
-        var channel = channelOverride ?? locator.Channel;
+        var channel = channelOverride ?? locator?.Channel;
         var accessToken = ReadEnvironmentValue(GitHubAccessTokenVariable) ?? string.Empty;
         var includePrereleases = ReadEnvironmentFlag(GitHubPrereleaseVariable) ?? IsPrereleaseChannel(channel);
         var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases);
@@ -148,7 +148,7 @@ internal sealed class AppUpdateService
         var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
         return _manager.CurrentVersion?.ToString()
             ?? assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? assembly.GetName().Version?.ToString(3);
+            ?? assembly.GetName().Version?.ToString();
     }
 }
 
