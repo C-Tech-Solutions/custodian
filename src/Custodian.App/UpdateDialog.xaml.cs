@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 namespace Custodian.App;
 
 public partial class UpdateDialog : Window
@@ -6,6 +7,15 @@ public partial class UpdateDialog : Window
     public UpdateDialog()
     {
         InitializeComponent();
+    }
+
+    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonDown(e);
+        if (e.ButtonState == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
     }
 
     public static bool ShowConfirmation(

@@ -165,12 +165,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
-        var driveRowsTask = LoadDriveRowsAsync();
+        await LoadDriveRowsAsync();
         if (ShouldRunAutomaticUpdateCheck())
         {
             await CheckForUpdatesAsync(isAutomatic: true);
         }
-        await driveRowsTask;
     }
 
     private void ThemeManager_ThemeChanged(object? sender, AppTheme theme)
@@ -201,6 +200,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         _isClosing = true;
+        IsEnabled = false;
         _scanCts?.Cancel();
         _updateCts?.Cancel();
         _recycleBinCts?.Cancel();
