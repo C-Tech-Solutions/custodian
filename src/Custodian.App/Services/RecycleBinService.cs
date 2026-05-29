@@ -119,7 +119,7 @@ internal static class RecycleBinService
 
     public static void OpenInExplorer()
     {
-        Process.Start(new ProcessStartInfo("explorer.exe", "shell:RecycleBinFolder")
+        Process.Start(new ProcessStartInfo("shell:RecycleBinFolder")
         {
             UseShellExecute = true
         });
