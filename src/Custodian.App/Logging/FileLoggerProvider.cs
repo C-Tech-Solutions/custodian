@@ -67,7 +67,12 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 try
                 {
                     var path = Path.Combine(_directory, $"custodian-{DateTime.UtcNow:yyyyMMdd}.log");
-                    File.AppendAllText(path, line, Encoding.UTF8);
+                    using var writer = new StreamWriter(path, append: true, Encoding.UTF8);
+                    writer.Write(line);
+                    while (_queue.TryTake(out var extraLine))
+                    {
+                        writer.Write(extraLine);
+                    }
                 }
                 catch
                 {

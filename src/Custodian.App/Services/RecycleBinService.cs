@@ -341,7 +341,9 @@ internal static class RecycleBinService
             }
             if (matchedItems.Count != entries.Count)
             {
-                throw new FileNotFoundException("One or more selected Recycle Bin items are no longer available.");
+                Logger.LogWarning(
+                    "{MissingCount} selected Recycle Bin item(s) are no longer available and will be skipped.",
+                    entries.Count - matchedItems.Count);
             }
 
             success = true;
