@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Security.Principal;
 
 namespace Custodian.App.Services;
@@ -41,9 +42,13 @@ internal static class ElevationService
             FileName = executablePath,
             UseShellExecute = true,
             Verb = "runas",
-            WorkingDirectory = Environment.CurrentDirectory,
-            Arguments = JoinArguments(BuildRelaunchArguments(arguments, currentPath))
+            WorkingDirectory = Environment.CurrentDirectory
         };
+
+        foreach (var argument in BuildRelaunchArguments(arguments, currentPath))
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
 
         using var process = Process.Start(startInfo);
         if (process is null)
@@ -97,53 +102,16 @@ internal static class ElevationService
         if (!string.IsNullOrWhiteSpace(currentPath))
         {
             relaunchArguments.Add(LaunchPathArgument);
-            relaunchArguments.Add(currentPath);
+            try
+            {
+                relaunchArguments.Add(Path.GetFullPath(currentPath));
+            }
+            catch
+            {
+                relaunchArguments.Add(currentPath);
+            }
         }
 
         return relaunchArguments;
-    }
-
-    private static string JoinArguments(IEnumerable<string> arguments)
-        => string.Join(" ", arguments.Select(QuoteArgument));
-
-    private static string QuoteArgument(string argument)
-    {
-        if (argument.Length == 0)
-        {
-            return "\"\"";
-        }
-
-        if (!argument.Any(char.IsWhiteSpace) && !argument.Contains('"'))
-        {
-            return argument;
-        }
-
-        var builder = new System.Text.StringBuilder();
-        builder.Append('"');
-        var backslashes = 0;
-        foreach (var character in argument)
-        {
-            if (character == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
-            if (character == '"')
-            {
-                builder.Append('\\', backslashes * 2 + 1);
-                builder.Append('"');
-                backslashes = 0;
-                continue;
-            }
-
-            builder.Append('\\', backslashes);
-            builder.Append(character);
-            backslashes = 0;
-        }
-
-        builder.Append('\\', backslashes * 2);
-        builder.Append('"');
-        return builder.ToString();
     }
 }
