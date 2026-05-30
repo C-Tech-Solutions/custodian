@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 using System.Security.Principal;
+using Custodian.Core.Scanning;
 
 namespace Custodian.App.Services;
 
@@ -104,7 +104,7 @@ internal static class ElevationService
             relaunchArguments.Add(LaunchPathArgument);
             try
             {
-                relaunchArguments.Add(Path.GetFullPath(currentPath));
+                relaunchArguments.Add(ScanPathUtility.NormalizeRoot(currentPath));
             }
             catch
             {

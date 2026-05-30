@@ -225,6 +225,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void RelaunchAsAdmin_Click(object sender, RoutedEventArgs e)
     {
         RelaunchAsAdminButton.IsEnabled = false;
+        IsEnabled = false;
         try
         {
             _isClosing = true;
@@ -244,6 +245,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception ex) when (ElevationService.IsElevationCancelled(ex))
         {
             _isClosing = false;
+            IsEnabled = true;
             ShowToast("Administrator relaunch cancelled.");
             RefreshElevationWarning();
         }
@@ -251,6 +253,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _isClosing = false;
             Logger.LogError(ex, "Failed to relaunch Custodian as administrator.");
+            IsEnabled = true;
             RelaunchAsAdminButton.IsEnabled = true;
             ShowOperationError("Relaunch as administrator failed", ex);
         }
