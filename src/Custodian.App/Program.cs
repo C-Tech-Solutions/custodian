@@ -1,4 +1,5 @@
 using Custodian.App.Logging;
+using Custodian.App.Services;
 using Microsoft.Extensions.Logging;
 using Velopack;
 
@@ -14,14 +15,17 @@ internal static class Program
 
         try
         {
+            var velopackArgs = ElevationService.RemoveCustodianArguments(args);
+            var launchPath = ElevationService.GetLaunchPath(args);
+
             VelopackApp.Build()
-                .SetArgs(args)
+                .SetArgs(velopackArgs.ToArray())
                 .SetAutoApplyOnStartup(false)
                 .Run(null);
 
             var app = new App();
             app.InitializeComponent();
-            app.Run(new MainWindow());
+            app.Run(new MainWindow(launchPath));
         }
         catch (Exception ex)
         {
