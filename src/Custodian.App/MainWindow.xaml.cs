@@ -68,6 +68,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Stack<FileSystemEntry> _forwardStack = new();
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
     private readonly UiSettings _settings;
+    private readonly string? _launchPath;
     private DispatcherTimer? _scanProgressTimer;
     private DateTime _scanStarted;
     private long _scanFilesSeen;
@@ -105,10 +106,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public ICollectionView DetailRowsView { get; }
     public ICollectionView RecycleBinRowsView { get; }
 
-    public MainWindow()
+    public MainWindow(string? launchPath = null)
     {
         InitializeComponent();
         DataContext = this;
+        _launchPath = launchPath;
 
         _settings = UiSettingsStore.Load();
         ApplySettingsEarly();
@@ -225,12 +227,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RelaunchAsAdminButton.IsEnabled = false;
         try
         {
+            _isClosing = true;
             _settingsSaveTimer.Stop();
             await PersistSettingsAsync();
 
-            ElevationService.RelaunchAsAdministrator(Environment.GetCommandLineArgs().Skip(1));
+            ElevationService.RelaunchAsAdministrator(
+                Environment.GetCommandLineArgs().Skip(1),
+                PathBox.Text?.Trim());
 
-            _isClosing = true;
             _scanCts?.Cancel();
             _updateCts?.Cancel();
             _recycleBinCts?.Cancel();
@@ -239,11 +243,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex) when (ElevationService.IsElevationCancelled(ex))
         {
+            _isClosing = false;
             ShowToast("Administrator relaunch cancelled.");
             RefreshElevationWarning();
         }
         catch (Exception ex)
         {
+            _isClosing = false;
             Logger.LogError(ex, "Failed to relaunch Custodian as administrator.");
             RelaunchAsAdminButton.IsEnabled = true;
             ShowOperationError("Relaunch as administrator failed", ex);
@@ -299,7 +305,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SeedPathFromSettings()
     {
-        var path = !string.IsNullOrWhiteSpace(_settings.LastPath)
+        var path = !string.IsNullOrWhiteSpace(_launchPath)
+            ? _launchPath
+            : !string.IsNullOrWhiteSpace(_settings.LastPath)
             ? _settings.LastPath
             : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         PathBox.Text = path;
