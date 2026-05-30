@@ -162,6 +162,41 @@
             </Grid>
         </Border>
 
+        <!-- =============== ELEVATION WARNING =============== -->
+        <Border x:Name="ElevationWarningBanner"
+                DockPanel.Dock="Top"
+                Background="{DynamicResource SurfaceSubtle}"
+                BorderBrush="{DynamicResource WarningBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="14,8"
+                Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#xE7BA;"
+                           FontFamily="{StaticResource IconFont}"
+                           FontSize="15"
+                           Foreground="{DynamicResource WarningBrush}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0"/>
+                <TextBlock Grid.Column="1"
+                           Text="Custodian is not running as administrator. NTFS MFT scans may fall back or miss protected areas."
+                           Foreground="{DynamicResource TextStrong}"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"/>
+                <Button x:Name="RelaunchAsAdminButton"
+                        Grid.Column="2"
+                        Content="Relaunch as administrator"
+                        Margin="14,0,0,0"
+                        Click="RelaunchAsAdmin_Click"
+                        ToolTip="Restart Custodian elevated so MFT scans can access protected NTFS metadata"/>
+            </Grid>
+        </Border>
+
         <!-- =============== BOTTOM FOOTER =============== -->
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SurfaceSubtle}"

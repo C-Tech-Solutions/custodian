@@ -149,6 +149,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ApplyRecycleBinSort();
         UpdateRecycleBinFilterUiState();
         UpdateRecycleBinActionState();
+        RefreshElevationWarning();
 
         SizeChanged += (_, _) => ScheduleSettingsSave();
         LocationChanged += (_, _) => ScheduleSettingsSave();
@@ -210,6 +211,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
         Close();
+    }
+
+    private void RefreshElevationWarning()
+    {
+        var isElevated = ElevationService.IsRunningAsAdministrator();
+        ElevationWarningBanner.Visibility = isElevated ? Visibility.Collapsed : Visibility.Visible;
+        RelaunchAsAdminButton.IsEnabled = !isElevated;
+    }
+
+    private async void RelaunchAsAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        RelaunchAsAdminButton.IsEnabled = false;
+        try
+        {
+            _settingsSaveTimer.Stop();
+            await PersistSettingsAsync();
+
+            ElevationService.RelaunchAsAdministrator(Environment.GetCommandLineArgs().Skip(1));
+
+            _isClosing = true;
+            _scanCts?.Cancel();
+            _updateCts?.Cancel();
+            _recycleBinCts?.Cancel();
+            _settingsPersistedForClose = true;
+            System.Windows.Application.Current.Shutdown();
+        }
+        catch (Exception ex) when (ElevationService.IsElevationCancelled(ex))
+        {
+            ShowToast("Administrator relaunch cancelled.");
+            RefreshElevationWarning();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to relaunch Custodian as administrator.");
+            RelaunchAsAdminButton.IsEnabled = true;
+            ShowOperationError("Relaunch as administrator failed", ex);
+        }
     }
 
     // ============================================================
