@@ -42,13 +42,9 @@ internal static class ElevationService
             FileName = executablePath,
             UseShellExecute = true,
             Verb = "runas",
-            WorkingDirectory = Environment.CurrentDirectory
+            WorkingDirectory = Environment.CurrentDirectory,
+            Arguments = string.Join(" ", BuildRelaunchArguments(arguments, currentPath).Select(EscapeCommandLineArgument))
         };
-
-        foreach (var argument in BuildRelaunchArguments(arguments, currentPath))
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
 
         using var process = Process.Start(startInfo);
         if (process is null)
@@ -113,5 +109,50 @@ internal static class ElevationService
         }
 
         return relaunchArguments;
+    }
+
+    private static string EscapeCommandLineArgument(string argument)
+    {
+        if (string.IsNullOrEmpty(argument))
+        {
+            return "\"\"";
+        }
+
+        if (!argument.Any(character => char.IsWhiteSpace(character) || character is '"' or '\\'))
+        {
+            return argument;
+        }
+
+        var builder = new System.Text.StringBuilder();
+        builder.Append('"');
+        for (var index = 0; index < argument.Length; index++)
+        {
+            var backslashes = 0;
+            while (index < argument.Length && argument[index] == '\\')
+            {
+                backslashes++;
+                index++;
+            }
+
+            if (index == argument.Length)
+            {
+                builder.Append('\\', backslashes * 2);
+                break;
+            }
+
+            if (argument[index] == '"')
+            {
+                builder.Append('\\', backslashes * 2 + 1);
+                builder.Append('"');
+            }
+            else
+            {
+                builder.Append('\\', backslashes);
+                builder.Append(argument[index]);
+            }
+        }
+
+        builder.Append('"');
+        return builder.ToString();
     }
 }
