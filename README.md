@@ -1,17 +1,63 @@
 # Custodian Disk Analyzer
 
-Custodian is a Windows disk usage analyzer built for server-friendly use cases where third-party tools are blocked. It ships as a self-updating desktop app, a portable desktop app, a CLI, and an optional legacy EXE installer.
+[![Latest release](https://img.shields.io/github/v/release/ctech1313/custodian?label=release)](https://github.com/ctech1313/custodian/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#requirements)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 
-## Features
+Custodian is a Windows disk usage analyzer for machines where you need fast,
+local inspection without depending on third-party desktop utilities. It ships as
+a self-updating desktop app, a portable desktop app, and a CLI for repeatable
+server or workstation workflows.
 
-- Recursive scanner for local folders, removable drives, and UNC/network shares.
-- Optional NTFS MFT scanner for local NTFS volumes when Windows allows raw volume enumeration; it falls back safely through the app's Auto mode.
-- Explorer-style WPF UI with folder tree, sortable grids, largest files/folders, extension summaries, treemap blocks, save/load, CSV/JSON export, and Recycle Bin deletes with confirmation.
-- Desktop auto-updates through GitHub Releases with manual checks from Help > Check for Updates and a startup notification when a new stable update is available.
-- CLI for scheduled/server automation.
-- Portable `.custodian-scan` SQLite save files.
+## Why Custodian?
 
-## CLI
+- **Find space quickly** with folder trees, sortable detail grids, largest-file
+  and largest-folder views, extension summaries, treemaps, pie charts, and bar
+  charts.
+- **Choose the right scanner** with Auto mode, recursive scanning for folders
+  and network shares, and optional NTFS MFT scanning for local NTFS volumes.
+- **Run in locked-down environments** with a portable build, a CLI, UNC path
+  support, and safe fallbacks when raw NTFS access is unavailable.
+- **Review before deleting** with Recycle Bin management, restore, permanent
+  delete, empty-bin actions, and confirmation prompts.
+- **Keep results portable** with `.custodian-scan` SQLite save files plus CSV
+  and JSON export from the desktop app or CLI.
+- **Stay updated** through Velopack-powered GitHub Releases for installed
+  desktop builds.
+
+## Download
+
+Get the latest release from:
+
+https://github.com/ctech1313/custodian/releases/latest
+
+Release assets include:
+
+- `Custodian.DiskAnalyzer-win-Setup.exe` - installed desktop app with updates.
+- `Custodian.DiskAnalyzer-win-Portable.zip` - portable desktop app and CLI.
+- `Custodian.DiskAnalyzer-<version>-full.nupkg`, `RELEASES`, and
+  `releases.win.json` - Velopack update assets for installed clients.
+
+## Requirements
+
+- Windows 10, Windows 11, or Windows Server with Desktop Experience for the WPF
+  desktop app.
+- Administrator launch is recommended for full local NTFS MFT access.
+- The CLI can run in more constrained server workflows, including scheduled
+  jobs, recursive scans, and export tasks.
+
+## Desktop Workflow
+
+1. Choose a drive, folder, or UNC path.
+2. Pick Auto, Recursive, or MFT scanning.
+3. Scan and inspect space by folder, file, extension, or chart slice.
+4. Save the scan for later, export CSV/JSON, or manage deleted items through the
+   Recycle Bin view.
+
+Custodian warns when it is not running as administrator and can relaunch itself
+elevated when you need MFT scanning to reach protected NTFS metadata.
+
+## CLI Examples
 
 ```powershell
 custodian scan C:\Data --out data.custodian-scan
@@ -19,7 +65,7 @@ custodian scan \\server\share --export share.csv --silent
 custodian export data.custodian-scan --format json --out data.json
 ```
 
-## Build
+## Build From Source
 
 ```powershell
 dotnet restore
@@ -28,29 +74,49 @@ dotnet test
 .\scripts\publish-portable.ps1
 ```
 
-The portable output is written under `artifacts\portable\Custodian`.
+The portable output is written to `artifacts\portable\Custodian`.
 
-## Updates
+## Release Packaging
 
-The primary desktop installer/update package is built with Velopack:
+The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.0.0
+.\scripts\publish-velopack.ps1 -Version 1.1.1
 ```
 
-Release assets are written under `artifacts\velopack`. Publish those assets to GitHub Releases so installed apps can discover updates:
+Release assets are written under `artifacts\velopack`. Publish those assets to
+GitHub Releases so installed apps can discover updates:
 
 ```powershell
 $env:GITHUB_TOKEN = "<token with release access>"
 .\scripts\upload-velopack-github.ps1 -Publish
 ```
 
-The repo pins `vpk` 0.0.626 because newer tool builds require a .NET 9 runtime that is not installed in the current development environment.
-The app follows the update channel embedded in the installed Velopack package. The scripts default to the `win` channel; pass `-Channel <name>` when producing or uploading another channel, or set `CUSTODIAN_UPDATE_CHANNEL` only for deliberate local/managed overrides.
-Automatic startup checks are throttled. Managed deployments that need authenticated GitHub release checks can set `CUSTODIAN_GITHUB_TOKEN` in the user or machine environment instead of embedding a token in the app. Non-stable update channels include GitHub prereleases by default; set `CUSTODIAN_UPDATE_PRERELEASES` to `0` or `1` to override that behavior.
-The packaging script cleans `artifacts\velopack` by default for repeatable local builds; pass `-PreserveExistingReleases` when retaining previous release assets for delta generation.
-For local update validation without GitHub Releases, run `scripts\prepare-local-update-test.ps1`, install the preserved baseline setup, then set `CUSTODIAN_UPDATE_SOURCE` to the generated local release folder before launching the installed test build.
+The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
+that may not be installed in the current development environment.
 
-## Installer
+## Update Configuration
 
-The installer script is `installer\Custodian.iss` and targets Inno Setup 6. It packages the portable publish output and creates Start Menu shortcuts for the GUI and CLI. This path remains available for manual or legacy installs, but it is not the auto-update channel.
+Custodian follows the update channel embedded in the installed Velopack package.
+The scripts default to the `win` channel; pass `-Channel <name>` when producing
+or uploading another channel.
+
+Optional environment overrides:
+
+- `CUSTODIAN_UPDATE_CHANNEL` - deliberate local or managed channel override.
+- `CUSTODIAN_GITHUB_TOKEN` - token for authenticated GitHub release checks in
+  managed deployments.
+- `CUSTODIAN_UPDATE_PRERELEASES` - set to `0` or `1` to override prerelease
+  checks for non-stable channels.
+- `CUSTODIAN_UPDATE_SOURCE` - local release folder for unsigned update testing.
+
+For local update validation without GitHub Releases, run
+`scripts\prepare-local-update-test.ps1`, install the preserved baseline setup,
+set `CUSTODIAN_UPDATE_SOURCE` to the generated local release folder, and launch
+the installed test build.
+
+## Legacy Installer
+
+The Inno Setup script at `installer\Custodian.iss` packages the portable publish
+output and creates Start Menu shortcuts for the GUI and CLI. This path remains
+available for manual or legacy installs, but it is not the auto-update channel.
