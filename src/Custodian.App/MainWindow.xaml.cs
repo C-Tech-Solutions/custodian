@@ -583,6 +583,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        var navigationVersion = BeginNavigation();
         var scanKey = TryGetScanCacheKey(path, out var normalizedKey)
             ? normalizedKey
             : path;
@@ -600,8 +601,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (TryGetCachedScan(path, out var cached))
         {
-            await RestoreCachedScanAsync(cached, showToast: false);
-            UpdateFooterStatus("Scanning", $"Refreshing {path}...");
+            if (await RestoreCachedScanAsync(cached, navigationVersion, showToast: false))
+            {
+                UpdateFooterStatus("Scanning", $"Refreshing {path}...");
+            }
         }
         else
         {
@@ -639,7 +642,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var shouldShowCompletedScan = ShouldShowCompletedScan(scanKey);
             if (shouldShowCompletedScan)
             {
-                await RestoreCachedScanAsync(completed, showToast: false);
+                await RestoreCachedScanAsync(completed, _targetSelectionVersion, showToast: false);
             }
             else if (_currentScan is not null)
             {
@@ -782,13 +785,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             try
             {
-                var loaded = await _store.LoadAsync(dialog.FileName);
                 RememberCurrentScanState();
+                var navigationVersion = BeginNavigation();
+                var loaded = await _store.LoadAsync(dialog.FileName);
                 var cached = await CacheScanResultAsync(loaded);
+                if (!IsCurrentNavigation(navigationVersion))
+                {
+                    return;
+                }
+
                 PathBox.Text = loaded.RootPath;
                 AddRecentPath(loaded.RootPath);
-                await RestoreCachedScanAsync(cached, showToast: false);
-                ShowToast($"Opened {Path.GetFileName(dialog.FileName)}");
+                var restored = await RestoreCachedScanAsync(cached, navigationVersion, showToast: false);
+                if (restored)
+                {
+                    ShowToast($"Opened {Path.GetFileName(dialog.FileName)}");
+                }
             }
             catch (Exception ex)
             {
@@ -836,7 +848,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var targetSelectionVersion = ++_targetSelectionVersion;
+        var targetSelectionVersion = BeginNavigation();
         RunUiAction(() => SelectTargetAsync(row, targetSelectionVersion), "Target selection failed");
     }
 
@@ -845,7 +857,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (row.Kind == TargetKind.RecycleBin)
         {
             RememberCurrentScanState();
-            await ShowRecycleBinAsync();
+            await ShowRecycleBinAsync(targetSelectionVersion);
             return;
         }
 
@@ -869,7 +881,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (TryGetCachedScan(row.RootPath, out var cached))
             {
-                await RestoreCachedScanAsync(cached, showToast: false, targetSelectionVersion);
+                await RestoreCachedScanAsync(cached, targetSelectionVersion, showToast: false);
                 return;
             }
 
@@ -1314,24 +1326,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private async void ShowRecycleBin_Click(object sender, RoutedEventArgs e)
     {
-        await ShowRecycleBinAsync();
+        await ShowRecycleBinAsync(BeginNavigation());
     }
 
-    private async Task ShowRecycleBinAsync()
+    private async Task ShowRecycleBinAsync(int navigationVersion)
     {
         RememberCurrentScanState();
         _isRecycleBinViewActive = true;
         LoadingHost.Visibility = Visibility.Collapsed;
         UpdateEmptyStateVisibility();
         UpdateFooterStatus("Recycle Bin", "Loading Recycle Bin items...");
-        await RefreshRecycleBinAsync();
+        await RefreshRecycleBinAsync(navigationVersion);
     }
 
     private void BackToScan_Click(object sender, RoutedEventArgs e)
-        => LeaveRecycleBinView();
+        => LeaveRecycleBinView(advanceNavigation: true);
 
-    private void LeaveRecycleBinView()
+    private void LeaveRecycleBinView(bool advanceNavigation = false)
     {
+        if (advanceNavigation)
+        {
+            BeginNavigation();
+        }
+
         _isRecycleBinViewActive = false;
         _recycleBinCts?.Cancel();
         UpdateEmptyStateVisibility();
@@ -1347,10 +1364,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void RefreshRecycleBin_Click(object sender, RoutedEventArgs e)
     {
-        await RefreshRecycleBinAsync();
+        await RefreshRecycleBinAsync(_targetSelectionVersion);
     }
 
-    private async Task RefreshRecycleBinAsync()
+    private async Task RefreshRecycleBinAsync(int navigationVersion)
     {
         if (_recycleBinCts is not null)
         {
@@ -1365,6 +1382,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var entriesTask = RecycleBinService.GetItemsAsync(cts.Token);
             var usageTask = RecycleBinService.GetUsageAsync(cts.Token);
             await Task.WhenAll(entriesTask, usageTask);
+            if (!IsCurrentRecycleBinNavigation(navigationVersion))
+            {
+                return;
+            }
 
             var entries = await entriesTask;
             var usage = await usageTask;
@@ -1393,10 +1414,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException)
         {
-            UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh cancelled.");
+            if (IsCurrentRecycleBinNavigation(navigationVersion))
+            {
+                UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh cancelled.");
+            }
         }
         catch (Exception ex)
         {
+            if (!IsCurrentRecycleBinNavigation(navigationVersion))
+            {
+                return;
+            }
+
             _recycleBinShellItemCount = 0;
             RecycleBinGrid.SelectedItems.Clear();
             RecycleBinRows.Clear();
@@ -1409,7 +1438,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         finally
         {
             _recycleBinCts = null;
-            SetRecycleBinBusy(false);
+            if (IsCurrentRecycleBinNavigation(navigationVersion))
+            {
+                SetRecycleBinBusy(false);
+            }
         }
     }
 
@@ -1552,7 +1584,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (refreshAfterOperation)
         {
-            await RefreshRecycleBinAsync();
+            await RefreshRecycleBinAsync(_targetSelectionVersion);
         }
     }
 
@@ -1998,32 +2030,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string.Equals(_visibleScanKey, scan.RootKey, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task RestoreCachedScanAsync(CachedScan cached, bool showToast = true, int? targetSelectionVersion = null)
+    private async Task<bool> RestoreCachedScanAsync(CachedScan cached, int navigationVersion, bool showToast = true)
     {
-        var restored = await LoadScanIntoUiAsync(cached, targetSelectionVersion);
+        var restored = await LoadScanIntoUiAsync(cached, navigationVersion);
         if (!restored)
         {
-            return;
+            return false;
         }
 
         if (showToast)
         {
             ShowToast($"Restored cached scan: {cached.Result.RootPath}");
         }
+
+        return true;
     }
 
-    private bool IsCurrentTargetRestore(string rootKey, int targetSelectionVersion)
+    private int BeginNavigation()
+        => ++_targetSelectionVersion;
+
+    private bool IsCurrentNavigation(int navigationVersion)
+        => navigationVersion == _targetSelectionVersion;
+
+    private bool IsCurrentRecycleBinNavigation(int navigationVersion)
+        => IsCurrentNavigation(navigationVersion) && _isRecycleBinViewActive;
+
+    private bool IsCurrentScanRestore(string rootKey, int navigationVersion)
     {
-        if (targetSelectionVersion != _targetSelectionVersion ||
+        if (!IsCurrentNavigation(navigationVersion) ||
             _isRecycleBinViewActive ||
             !string.Equals(_visibleScanKey, rootKey, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        return DriveList.SelectedItem is TargetRow { Kind: TargetKind.Drive } selected &&
-            TryGetScanCacheKey(selected.RootPath, out var selectedKey) &&
-            string.Equals(selectedKey, rootKey, StringComparison.OrdinalIgnoreCase);
+        return true;
     }
 
     private void RefreshTargetStatus(string rootPath)
@@ -2127,7 +2168,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     //  UI population
     // ============================================================
-    private async Task<bool> LoadScanIntoUiAsync(CachedScan cached, int? targetSelectionVersion = null)
+    private async Task<bool> LoadScanIntoUiAsync(CachedScan cached, int navigationVersion)
     {
         ResetProjectionRequests();
 
@@ -2150,7 +2191,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _selectedChartSourceKey = null;
         RefreshFolderJumpRows(string.Empty);
         await RefreshDetailsAsync();
-        if (targetSelectionVersion is int version && !IsCurrentTargetRestore(cached.RootKey, version))
+        if (!IsCurrentScanRestore(cached.RootKey, navigationVersion))
         {
             return false;
         }
@@ -2198,9 +2239,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             try
             {
-                rows = ReferenceEquals(selected, result.Root)
-                    ? await Task.Run(() => GetOrCreateGlobalDetailRows(result, viewMode))
-                    : await Task.Run(() => ProjectScopedDetailRows(selected, viewMode));
+                if (ReferenceEquals(selected, result.Root))
+                {
+                    var globalRowsCache = GlobalDetailRowsCacheFor(result);
+                    rows = await Task.Run(() => GetOrCreateGlobalDetailRows(result, viewMode, globalRowsCache));
+                }
+                else
+                {
+                    rows = await Task.Run(() => ProjectScopedDetailRows(selected, viewMode));
+                }
             }
             catch (Exception ex)
             {
@@ -2242,9 +2289,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SelectedSubText.Text = BuildSelectedSubText(viewMode, selected);
     }
 
-    private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(ScanResult result, DetailViewMode mode)
+    private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(
+        ScanResult result,
+        DetailViewMode mode,
+        Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> cache)
     {
-        var cache = VisibleGlobalDetailRowsCache();
         lock (_globalDetailRowsCacheGate)
         {
             if (cache.TryGetValue(mode, out var cachedRows))
@@ -2266,8 +2315,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> VisibleGlobalDetailRowsCache()
-        => _visibleCachedScan?.GlobalDetailRowsCache ?? _globalDetailRowsCache;
+    private Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> GlobalDetailRowsCacheFor(ScanResult result)
+    {
+        if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
+        {
+            return visible.GlobalDetailRowsCache;
+        }
+
+        foreach (var cached in _sessionScanCache.Values)
+        {
+            if (ReferenceEquals(cached.Result, result))
+            {
+                return cached.GlobalDetailRowsCache;
+            }
+        }
+
+        return _globalDetailRowsCache;
+    }
 
     private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)
     {
