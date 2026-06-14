@@ -14,10 +14,14 @@ server or workstation workflows.
 - **Find space quickly** with folder trees, sortable detail grids, largest-file
   and largest-folder views, extension summaries, treemaps, pie charts, and bar
   charts.
+- **Switch between drives without losing context** with a session scan cache
+  that restores recent scan results, selected folder, detail mode, and chart
+  scope while Custodian stays open.
 - **Choose the right scanner** with Auto mode, recursive scanning for folders
   and network shares, and optional NTFS MFT scanning for local NTFS volumes.
 - **Run in locked-down environments** with a portable build, a CLI, UNC path
-  support, and safe fallbacks when raw NTFS access is unavailable.
+  support, safe fallbacks when raw NTFS access is unavailable, and an optional
+  always-open-as-administrator launch setting.
 - **Review before deleting** with Recycle Bin management, restore, permanent
   delete, empty-bin actions, and confirmation prompts.
 - **Keep results portable** with `.custodian-scan` SQLite save files plus CSV
@@ -51,11 +55,18 @@ Release assets include:
 1. Choose a drive, folder, or UNC path.
 2. Pick Auto, Recursive, or MFT scanning.
 3. Scan and inspect space by folder, file, extension, or chart slice.
-4. Save the scan for later, export CSV/JSON, or manage deleted items through the
+4. Switch to another drive and return to any cached scan without rescanning.
+5. Save the scan for later, export CSV/JSON, or manage deleted items through the
    Recycle Bin view.
 
 Custodian warns when it is not running as administrator and can relaunch itself
 elevated when you need MFT scanning to reach protected NTFS metadata.
+Use View > Always open as administrator when you want Windows to request
+elevation before future launches instead of starting normally and relaunching.
+
+Drive targets show whether a scan is currently running or already cached for
+the session. Uncached drives show a Start Scan prompt instead of clearing the
+workspace without direction.
 
 ## CLI Examples
 
@@ -81,7 +92,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.1.1
+.\scripts\publish-velopack.ps1 -Version 1.2.0
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -94,6 +105,10 @@ $env:GITHUB_TOKEN = "<token with release access>"
 
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
 that may not be installed in the current development environment.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Update Configuration
 
