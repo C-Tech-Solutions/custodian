@@ -603,6 +603,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RememberCurrentScanState();
         AddRecentPath(path);
         RefreshTargetStatus(path);
+        if (_isRecycleBinViewActive)
+        {
+            await LeaveRecycleBinViewAsync();
+        }
 
         if (TryGetCachedScan(path, out var cached))
         {
@@ -797,6 +801,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 if (!IsCurrentNavigation(navigationVersion))
                 {
                     return;
+                }
+
+                if (_isRecycleBinViewActive)
+                {
+                    await LeaveRecycleBinViewAsync();
                 }
 
                 PathBox.Text = loaded.RootPath;
@@ -3381,6 +3390,8 @@ public sealed record TargetRow(
     string ScanStatusBrush,
     Visibility ScanStatusVisibility)
 {
+    private const string TransparentBrush = "#00000000";
+
     public static TargetRow RecycleBin()
         => new(
             TargetKind.RecycleBin,
@@ -3395,7 +3406,7 @@ public sealed record TargetRow(
             Visibility.Visible,
             string.Empty,
             string.Empty,
-            string.Empty,
+            TransparentBrush,
             Visibility.Collapsed);
 
     public static TargetRow RecycleBin(long sizeBytes, long itemCount)
@@ -3412,7 +3423,7 @@ public sealed record TargetRow(
             Visibility.Visible,
             string.Empty,
             string.Empty,
-            string.Empty,
+            TransparentBrush,
             Visibility.Collapsed);
 
     public static TargetRow RecycleBinUnavailable()
@@ -3429,7 +3440,7 @@ public sealed record TargetRow(
             Visibility.Visible,
             string.Empty,
             string.Empty,
-            string.Empty,
+            TransparentBrush,
             Visibility.Collapsed);
 
     public static TargetRow FromDrive(DriveRow row, bool scanCached = false, bool scanActive = false)
@@ -3446,7 +3457,7 @@ public sealed record TargetRow(
             Visibility.Collapsed,
             scanActive ? "\uE895" : scanCached ? "\uE930" : string.Empty,
             scanActive ? "Scanning" : scanCached ? "Scanned" : string.Empty,
-            scanActive ? "#3B82F6" : scanCached ? "#10B981" : string.Empty,
+            scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
             scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed);
 
     private static string ItemCountText(long count)
