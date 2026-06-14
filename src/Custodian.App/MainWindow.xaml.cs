@@ -48,6 +48,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const double DefaultRightPanelWidth = 350;
     private const double CollapsedRightPanelWidth = 36;
     private const int MaxSessionScanCacheEntries = 8;
+    private const string DefaultEmptyStateTitle = "Scan a folder to get started";
+    private const string DefaultEmptyStateDetail = "Pick a drive or folder, then press Scan. You can also drag a folder onto this window.";
     private static readonly TimeSpan AutomaticUpdateCheckInterval = TimeSpan.FromHours(12);
 
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
@@ -2726,6 +2728,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RecycleBinHost.Visibility = Visibility.Collapsed;
         _visibleCachedScan = null;
         _visibleScanKey = scanKey;
+        ResetEmptyStateText();
         ClearGlobalDetailRowsCache();
         _currentScan = null;
         FolderNodes.Clear();
@@ -2750,6 +2753,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ChartSelectionText.Text = "Select a slice to locate it in the grid.";
         RefreshNavigationState(null, null);
         UpdateEmptyStateVisibility();
+    }
+
+    private void ResetEmptyStateText()
+    {
+        EmptyStateTitleText.Text = DefaultEmptyStateTitle;
+        EmptyStateDetailText.Text = DefaultEmptyStateDetail;
     }
 
     private void ShowActiveScanPage(ActiveScanJob scan)
