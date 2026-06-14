@@ -618,7 +618,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 LoadingPathText.Text = _scanCurrentPath;
                 if (IsShowingActiveScan(scan))
                 {
-                UpdateFooterStatus(p.Message, $"{p.FilesSeen:n0} files · {p.DirectoriesSeen:n0} folders · {SizeFormatter.Format(p.BytesSeen)}");
+                    UpdateFooterStatus(p.Message, $"{p.FilesSeen:n0} files, {p.DirectoriesSeen:n0} folders, {SizeFormatter.Format(p.BytesSeen)}");
                 }
             });
 
@@ -649,7 +649,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException)
         {
-            if (_currentScan is not null)
+            if (ShouldShowCompletedScan(scanKey) && _currentScan is null)
+            {
+                UpdateFooterStatus("Cancelled", string.Empty);
+                EngineBadge.Text = "Cancelled";
+                EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("WarningBrush") ?? WpfBrushes.Orange;
+            }
+            else if (_currentScan is not null)
             {
                 UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
                 EngineBadge.Text = _currentScan.Engine;
@@ -657,27 +663,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             else
             {
-                UpdateFooterStatus("Cancelled", string.Empty);
-                EngineBadge.Text = "Cancelled";
-                EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("WarningBrush") ?? WpfBrushes.Orange;
+                ShowToast($"Scan cancelled: {path}");
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Scan failed.");
-            if (ShouldShowCompletedScan(scanKey) || _currentScan is null)
+            if (ShouldShowCompletedScan(scanKey))
             {
                 WpfMessageBox.Show(this, ex.Message, "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
                 UpdateFooterStatus("Scan failed", ex.Message);
                 EngineBadge.Text = "Failed";
                 EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("DangerBrush") ?? WpfBrushes.Red;
             }
-            else
+            else if (_currentScan is not null)
             {
                 ShowToast($"Scan failed: {path}");
                 UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
                 EngineBadge.Text = _currentScan.Engine;
                 EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("SuccessBrush") ?? WpfBrushes.Green;
+            }
+            else
+            {
+                ShowToast($"Scan failed: {path}");
             }
         }
         finally
@@ -2033,12 +2041,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 if (!EqualityComparer<TargetRow>.Default.Equals(target, replacement))
                 {
                     TargetRows[i] = replacement;
-                }
 
-                if (!string.IsNullOrWhiteSpace(selectedRootPath) &&
-                    string.Equals(selectedRootPath, replacement.RootPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    selectedReplacement = replacement;
+                    if (!string.IsNullOrWhiteSpace(selectedRootPath) &&
+                        string.Equals(selectedRootPath, replacement.RootPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedReplacement = replacement;
+                    }
                 }
 
                 break;
@@ -2594,7 +2602,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RecycleBinHost.Visibility = Visibility.Collapsed;
         LoadingHost.Visibility = Visibility.Collapsed;
         _visibleCachedScan = null;
-        _visibleScanKey = null;
+        _visibleScanKey = TryGetScanCacheKey(path, out var promptKey)
+            ? promptKey
+            : path;
         ClearGlobalDetailRowsCache();
         _currentScan = null;
         _selectedEntry = null;
