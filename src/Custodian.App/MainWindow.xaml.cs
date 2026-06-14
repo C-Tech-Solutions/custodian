@@ -868,7 +868,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (_isRecycleBinViewActive)
             {
-                LeaveRecycleBinView();
+                await LeaveRecycleBinViewAsync();
             }
 
             PathBox.Text = row.RootPath;
@@ -1334,25 +1334,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         RememberCurrentScanState();
         _isRecycleBinViewActive = true;
-        LoadingHost.Visibility = Visibility.Collapsed;
+        StopLoadingAnimation();
         UpdateEmptyStateVisibility();
         UpdateFooterStatus("Recycle Bin", "Loading Recycle Bin items...");
         await RefreshRecycleBinAsync(navigationVersion);
     }
 
-    private void BackToScan_Click(object sender, RoutedEventArgs e)
-        => LeaveRecycleBinView(advanceNavigation: true);
+    private async void BackToScan_Click(object sender, RoutedEventArgs e)
+        => await LeaveRecycleBinViewAsync(advanceNavigation: true, restoreVisibleCachedScan: true);
 
-    private void LeaveRecycleBinView(bool advanceNavigation = false)
+    private async Task LeaveRecycleBinViewAsync(bool advanceNavigation = false, bool restoreVisibleCachedScan = false)
     {
-        if (advanceNavigation)
-        {
-            BeginNavigation();
-        }
+        var navigationVersion = advanceNavigation ? BeginNavigation() : _targetSelectionVersion;
 
         _isRecycleBinViewActive = false;
         _recycleBinCts?.Cancel();
         UpdateEmptyStateVisibility();
+        if (restoreVisibleCachedScan &&
+            _currentScan is null &&
+            !string.IsNullOrWhiteSpace(_visibleScanKey) &&
+            _sessionScanCache.TryGetValue(_visibleScanKey, out var cached) &&
+            await RestoreCachedScanAsync(cached, navigationVersion, showToast: false))
+        {
+            return;
+        }
+
         if (_currentScan is not null)
         {
             UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
@@ -2198,7 +2204,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _currentScan = result;
         _visibleScanKey = cached.RootKey;
         _visibleCachedScan = cached;
-        LoadingHost.Visibility = Visibility.Collapsed;
+        StopLoadingAnimation();
 
         FolderNodes.Clear();
         FolderNodes.Add(cached.Preparation.RootNode);
@@ -2710,7 +2716,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _isRecycleBinViewActive = false;
         RecycleBinHost.Visibility = Visibility.Collapsed;
-        LoadingHost.Visibility = Visibility.Collapsed;
+        StopLoadingAnimation();
         _visibleCachedScan = null;
         _visibleScanKey = TryGetScanCacheKey(path, out var promptKey)
             ? promptKey
