@@ -119,6 +119,11 @@
                     <MenuItem Header="View" Padding="8,4">
                         <MenuItem Header="Recycle Bin" Click="ShowRecycleBin_Click"/>
                         <Separator/>
+                        <MenuItem x:Name="AutoRelaunchAdminMenuItem"
+                                  Header="Always open as administrator"
+                                  IsCheckable="True"
+                                  Click="AutoRelaunchAdmin_Click"/>
+                        <Separator/>
                         <MenuItem Header="Toggle Theme                Ctrl+T" Click="ToggleTheme_Click"/>
                         <MenuItem Header="Keyboard Shortcuts          Ctrl+/" Click="ShowShortcuts_Click"/>
                     </MenuItem>
@@ -269,7 +274,33 @@
                                                FontSize="14"
                                                Foreground="{Binding IconBrush, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
                                                VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                    <Grid Grid.Column="1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        <Border Grid.Column="1"
+                                                Padding="5,1"
+                                                Margin="6,0,0,0"
+                                                CornerRadius="4"
+                                                BorderBrush="{DynamicResource Border}"
+                                                BorderThickness="1"
+                                                Background="{DynamicResource SurfaceSubtle}"
+                                                Visibility="{Binding ScanStatusVisibility}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding ScanStatusIcon}"
+                                                           FontFamily="{StaticResource IconFont}"
+                                                           Foreground="{Binding ScanStatusBrush, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                           FontSize="10"
+                                                           Margin="0,0,3,0"/>
+                                                <TextBlock Text="{Binding ScanStatusText}"
+                                                           Foreground="{Binding ScanStatusBrush, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
                                     <TextBlock Grid.Column="2" Text="{Binding UsedText}"
                                                Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                                Margin="8,0,0,0"/>
@@ -804,10 +835,12 @@
                                            FontSize="32" Foreground="{DynamicResource AccentBrush}"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
-                            <TextBlock Text="Scan a folder to get started"
+                            <TextBlock x:Name="EmptyStateTitleText"
+                                       Text="Scan a folder to get started"
                                        Style="{StaticResource DisplayHeader}"
                                        HorizontalAlignment="Center" Margin="0,20,0,4"/>
-                            <TextBlock Text="Pick a drive or folder, then press Scan. You can also drag a folder onto this window."
+                            <TextBlock x:Name="EmptyStateDetailText"
+                                       Text="Pick a drive or folder, then press Scan. You can also drag a folder onto this window."
                                        Style="{StaticResource MutedText}" TextWrapping="Wrap"
                                        TextAlignment="Center" Margin="20,0,20,18"/>
                             <ItemsControl x:Name="EmptyStateDrives" Margin="0,0,0,18">
@@ -836,6 +869,16 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Button x:Name="EmptyStateStartButton"
+                                        Click="Start_Click"
+                                        Style="{StaticResource AccentButton}"
+                                        Margin="4">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}"
+                                                   FontSize="12" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Start Scan"/>
+                                    </StackPanel>
+                                </Button>
                                 <Button Click="OpenScan_Click" Margin="4">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="&#xE8E5;" FontFamily="{StaticResource IconFont}"

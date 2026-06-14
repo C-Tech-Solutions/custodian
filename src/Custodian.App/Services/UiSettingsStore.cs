@@ -18,6 +18,7 @@ public sealed class UiSettings
     public bool RightPanelCollapsed { get; set; }
     public string ChartMode { get; set; } = "Treemap";
     public string LastPath { get; set; } = string.Empty;
+    public bool AutoRelaunchAsAdministrator { get; set; }
     public DateTime LastAutomaticUpdateCheckUtc { get; set; } = DateTime.MinValue;
     public List<string> RecentPaths { get; set; } = [];
 }

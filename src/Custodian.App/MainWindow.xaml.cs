@@ -53,10 +53,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
-    private CancellationTokenSource? _scanCts;
+    private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _updateCts;
     private CancellationTokenSource? _recycleBinCts;
     private ScanResult? _currentScan;
+    private string? _visibleScanKey;
     private FileSystemEntry? _selectedEntry;
     private DetailViewMode _viewMode = DetailViewMode.Contents;
     private ChartScope _chartScope = ChartScope.SelectedFolder;
@@ -67,6 +68,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Stack<FileSystemEntry> _backStack = new();
     private readonly Stack<FileSystemEntry> _forwardStack = new();
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
+    private readonly Dictionary<string, CachedScan> _sessionScanCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly UiSettings _settings;
     private readonly string? _launchPath;
     private DispatcherTimer? _scanProgressTimer;
@@ -79,12 +81,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
     private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
+    private CachedScan? _visibleCachedScan;
     private int _detailRefreshVersion;
     private int _chartRefreshVersion;
     private IReadOnlyList<DetailRow>? _boundDetailRows;
     private DetailSortColumn? _detailSortColumn;
     private ListSortDirection _detailSortDirection = ListSortDirection.Ascending;
     private bool _isRecycleBinViewActive;
+    private bool _suppressTargetSelection;
+    private bool _suppressChartScopeSelection;
     private string _recycleBinFilterText = string.Empty;
     private RecycleBinSortColumn _recycleBinSortColumn = RecycleBinSortColumn.DateDeleted;
     private ListSortDirection _recycleBinSortDirection = ListSortDirection.Descending;
@@ -206,7 +211,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         _isClosing = true;
         IsEnabled = false;
-        _scanCts?.Cancel();
+        _activeScan?.Cancellation.Cancel();
         _updateCts?.Cancel();
         _recycleBinCts?.Cancel();
         _settingsSaveTimer.Stop();
@@ -220,6 +225,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var isElevated = ElevationService.IsRunningAsAdministrator();
         ElevationWarningBanner.Visibility = isElevated ? Visibility.Collapsed : Visibility.Visible;
         RelaunchAsAdminButton.IsEnabled = !isElevated;
+        AutoRelaunchAdminMenuItem.IsChecked = IsRunAsAdministratorOnLaunchEnabled();
+    }
+
+    private bool IsRunAsAdministratorOnLaunchEnabled()
+    {
+        try
+        {
+            return ElevationService.IsRunAsAdministratorOnLaunchEnabled();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read administrator launch setting.");
+            return _settings.AutoRelaunchAsAdministrator;
+        }
     }
 
     private async void RelaunchAsAdmin_Click(object sender, RoutedEventArgs e)
@@ -236,7 +255,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 Environment.GetCommandLineArgs().Skip(1),
                 PathBox.Text?.Trim());
 
-            _scanCts?.Cancel();
+            _activeScan?.Cancellation.Cancel();
             _updateCts?.Cancel();
             _recycleBinCts?.Cancel();
             _settingsPersistedForClose = true;
@@ -289,6 +308,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             CollapseRight();
         }
+
+        AutoRelaunchAdminMenuItem.IsChecked = IsRunAsAdministratorOnLaunchEnabled();
 
         _chartDisplayMode = _settings.ChartMode switch
         {
@@ -350,6 +371,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settings.RightPanelCollapsed = RightPanel.Visibility != Visibility.Visible;
         _settings.ChartMode = _chartDisplayMode.ToString();
         _settings.LastPath = PathBox.Text ?? string.Empty;
+        _settings.AutoRelaunchAsAdministrator = AutoRelaunchAdminMenuItem.IsChecked;
         _settings.RecentPaths = RecentPaths.Take(15).ToList();
     }
 
@@ -395,7 +417,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void Stop_Click(object sender, RoutedEventArgs e) => StopScan();
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await StartScanAsync();
 
-    private void StopScan() => _scanCts?.Cancel();
+    private void StopScan() => _activeScan?.Cancellation.Cancel();
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
     {
@@ -539,7 +561,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
         _isClosing = true;
-        _scanCts?.Cancel();
+        _activeScan?.Cancellation.Cancel();
         _updateCts?.Cancel();
         _settingsSaveTimer.Stop();
         await PersistSettingsAsync();
@@ -551,7 +573,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task StartScanAsync()
     {
-        if (_scanCts is not null) return;
+        if (_activeScan is not null) return;
 
         var path = PathBox.Text?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(path))
@@ -560,11 +582,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        _scanCts = new CancellationTokenSource();
+        var scanKey = TryGetScanCacheKey(path, out var normalizedKey)
+            ? normalizedKey
+            : path;
+        var cts = new CancellationTokenSource();
+        var scan = new ActiveScanJob(scanKey, path, cts);
+        _activeScan = scan;
+        _scanStarted = DateTime.UtcNow;
+        _scanFilesSeen = 0;
+        _scanBytesSeen = 0;
+        _scanCurrentPath = path;
         SetScanningState(true);
-        ClearViewsForNewScan(path);
+        RememberCurrentScanState();
         AddRecentPath(path);
-        StartLoadingAnimation();
+        RefreshTargetStatus(path);
+
+        if (TryGetCachedScan(path, out var cached))
+        {
+            await RestoreCachedScanAsync(cached, showToast: false);
+            UpdateFooterStatus("Scanning", $"Refreshing {path}...");
+        }
+        else
+        {
+            ClearViewsForNewScan(path, scanKey);
+            StartLoadingAnimation();
+        }
 
         try
         {
@@ -574,7 +616,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _scanBytesSeen = p.BytesSeen;
                 _scanCurrentPath = string.IsNullOrWhiteSpace(p.CurrentPath) ? path : p.CurrentPath;
                 LoadingPathText.Text = _scanCurrentPath;
+                if (IsShowingActiveScan(scan))
+                {
                 UpdateFooterStatus(p.Message, $"{p.FilesSeen:n0} files · {p.DirectoriesSeen:n0} folders · {SizeFormatter.Format(p.BytesSeen)}");
+                }
             });
 
             var mode = ModeBox.SelectedIndex switch
@@ -584,32 +629,65 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _ => ScanMode.Auto
             };
 
-            _currentScan = await _scanner.ScanAsync(
+            var result = await _scanner.ScanAsync(
                 new ScanOptions(path, mode, CollectAllocatedSize: AllocatedSizeBox.IsChecked == true),
                 progress,
-                _scanCts.Token);
+                cts.Token);
 
-            await LoadScanIntoUiAsync(_currentScan);
-            ShowToast($"Scan complete: {SizeFormatter.Format(_currentScan.Root.LogicalSizeBytes)} in {_currentScan.Duration:m\\:ss}");
+            var completed = await CacheScanResultAsync(result, scanKey);
+            var shouldShowCompletedScan = ShouldShowCompletedScan(scanKey);
+            if (shouldShowCompletedScan)
+            {
+                await RestoreCachedScanAsync(completed, showToast: false);
+            }
+            else if (_currentScan is not null)
+            {
+                UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+            }
+
+            ShowToast($"Scan complete: {SizeFormatter.Format(result.Root.LogicalSizeBytes)} in {result.Duration:m\\:ss}");
         }
         catch (OperationCanceledException)
         {
-            UpdateFooterStatus("Cancelled", string.Empty);
-            EngineBadge.Text = "Cancelled";
-            EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("WarningBrush") ?? WpfBrushes.Orange;
+            if (_currentScan is not null)
+            {
+                UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+                EngineBadge.Text = _currentScan.Engine;
+                EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("SuccessBrush") ?? WpfBrushes.Green;
+            }
+            else
+            {
+                UpdateFooterStatus("Cancelled", string.Empty);
+                EngineBadge.Text = "Cancelled";
+                EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("WarningBrush") ?? WpfBrushes.Orange;
+            }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Scan failed.");
-            WpfMessageBox.Show(this, ex.Message, "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            UpdateFooterStatus("Scan failed", ex.Message);
-            EngineBadge.Text = "Failed";
-            EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("DangerBrush") ?? WpfBrushes.Red;
+            if (ShouldShowCompletedScan(scanKey) || _currentScan is null)
+            {
+                WpfMessageBox.Show(this, ex.Message, "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                UpdateFooterStatus("Scan failed", ex.Message);
+                EngineBadge.Text = "Failed";
+                EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("DangerBrush") ?? WpfBrushes.Red;
+            }
+            else
+            {
+                ShowToast($"Scan failed: {path}");
+                UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+                EngineBadge.Text = _currentScan.Engine;
+                EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("SuccessBrush") ?? WpfBrushes.Green;
+            }
         }
         finally
         {
-            _scanCts?.Dispose();
-            _scanCts = null;
+            cts.Dispose();
+            if (ReferenceEquals(_activeScan, scan))
+            {
+                _activeScan = null;
+            }
+            RefreshTargetStatus(path);
             SetScanningState(false);
             StopLoadingAnimation();
         }
@@ -695,10 +773,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             try
             {
-                _currentScan = await _store.LoadAsync(dialog.FileName);
-                PathBox.Text = _currentScan.RootPath;
-                AddRecentPath(_currentScan.RootPath);
-                await LoadScanIntoUiAsync(_currentScan);
+                var loaded = await _store.LoadAsync(dialog.FileName);
+                RememberCurrentScanState();
+                var cached = await CacheScanResultAsync(loaded);
+                PathBox.Text = loaded.RootPath;
+                AddRecentPath(loaded.RootPath);
+                await RestoreCachedScanAsync(cached, showToast: false);
                 ShowToast($"Opened {Path.GetFileName(dialog.FileName)}");
             }
             catch (Exception ex)
@@ -737,19 +817,32 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private void DriveList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressTargetSelection)
+        {
+            return;
+        }
+
         if (DriveList.SelectedItem is not TargetRow row)
         {
             return;
         }
 
+        RunUiAction(() => SelectTargetAsync(row), "Target selection failed");
+    }
+
+    private async Task SelectTargetAsync(TargetRow row)
+    {
         if (row.Kind == TargetKind.RecycleBin)
         {
-            _ = ShowRecycleBinAsync();
+            RememberCurrentScanState();
+            await ShowRecycleBinAsync();
             return;
         }
 
         if (!string.IsNullOrWhiteSpace(row.RootPath))
         {
+            RememberCurrentScanState();
+
             if (_isRecycleBinViewActive)
             {
                 LeaveRecycleBinView();
@@ -757,6 +850,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             PathBox.Text = row.RootPath;
             AddRecentPath(row.RootPath);
+
+            if (_activeScan is { } activeScan && IsScanActive(row.RootPath))
+            {
+                ShowActiveScanPage(activeScan);
+                return;
+            }
+
+            if (TryGetCachedScan(row.RootPath, out var cached))
+            {
+                await RestoreCachedScanAsync(cached, showToast: false);
+                return;
+            }
+
+            ShowStartScanPrompt(row.RootPath);
         }
     }
 
@@ -856,8 +963,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RunUiAction(async () =>
         {
             if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
-            _viewMode = mode;
+            SetViewMode(mode);
             await RefreshDetailsAsync(refreshContext: false);
+            RememberCurrentScanState();
         }, "Failed to change view");
     }
 
@@ -866,10 +974,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private void ChartScope_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressChartScopeSelection) return;
         if (ChartScopeBox.SelectedItem is not ComboBoxItem { Tag: string tag } || !Enum.TryParse(tag, out ChartScope scope)) return;
         _chartScope = scope;
         _selectedChartSourceKey = null;
         RunUiAction(RefreshChartAsync, "Chart refresh failed");
+        RememberCurrentScanState();
     }
 
     private void ChartMode_Click(object sender, RoutedEventArgs e)
@@ -1086,6 +1196,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
+    private void AutoRelaunchAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        var enabled = AutoRelaunchAdminMenuItem.IsChecked;
+        try
+        {
+            ElevationService.SetRunAsAdministratorOnLaunch(enabled);
+            _settings.AutoRelaunchAsAdministrator = enabled;
+            ScheduleSettingsSave();
+            AutoRelaunchAdminMenuItem.IsChecked = IsRunAsAdministratorOnLaunchEnabled();
+            ShowToast(enabled
+                ? "Custodian will open as administrator next time."
+                : "Custodian will no longer always open as administrator.");
+        }
+        catch (Exception ex)
+        {
+            AutoRelaunchAdminMenuItem.IsChecked = IsRunAsAdministratorOnLaunchEnabled();
+            ShowOperationError("Administrator launch setting failed", ex);
+        }
+    }
+
     private void ThemeMenu_Click(object sender, RoutedEventArgs e)
     {
         if (sender is System.Windows.Controls.MenuItem { Tag: AppTheme theme })
@@ -1179,6 +1309,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task ShowRecycleBinAsync()
     {
+        RememberCurrentScanState();
         _isRecycleBinViewActive = true;
         LoadingHost.Visibility = Visibility.Collapsed;
         UpdateEmptyStateVisibility();
@@ -1755,26 +1886,238 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     // ============================================================
-    //  UI population
+    //  Session scan cache
     // ============================================================
-    private async Task LoadScanIntoUiAsync(ScanResult result)
+    private void RememberCurrentScanState()
     {
-        ClearGlobalDetailRowsCache();
+        if (_currentScan is null || _visibleCachedScan is null)
+        {
+            return;
+        }
 
-        var analysisWatch = Stopwatch.StartNew();
-        var prepared = await Task.Run(() => new ScanUiPreparation(
+        _visibleCachedScan.State = CaptureCurrentScanState(_currentScan);
+        RefreshTargetStatus(_currentScan.RootPath);
+    }
+
+    private CachedScanState CaptureCurrentScanState(ScanResult result)
+    {
+        return new CachedScanState(
+            (_selectedEntry ?? result.Root).FullPath,
+            _viewMode,
+            _chartScope);
+    }
+
+    private async Task<CachedScan> CacheScanResultAsync(ScanResult result, string? preferredKey = null)
+    {
+        var key = preferredKey
+            ?? (TryGetScanCacheKey(result.RootPath, out var resultKey) ? resultKey : result.RootPath);
+        _sessionScanCache.TryGetValue(key, out var previous);
+
+        var state = string.Equals(_visibleScanKey, key, StringComparison.OrdinalIgnoreCase) && _currentScan is not null
+            ? CaptureCurrentScanState(_currentScan)
+            : previous?.State ?? new CachedScanState(result.Root.FullPath, DetailViewMode.Contents, ChartScope.SelectedFolder);
+        var preparation = await PrepareScanUiAsync(result);
+        var cached = new CachedScan(key, result, state, preparation);
+        _sessionScanCache[key] = cached;
+        RefreshTargetStatus(result.RootPath);
+        return cached;
+    }
+
+    private bool TryGetCachedScan(string rootPath, out CachedScan cached)
+    {
+        if (TryGetScanCacheKey(rootPath, out var key) &&
+            _sessionScanCache.TryGetValue(key, out cached!))
+        {
+            return true;
+        }
+
+        cached = default!;
+        return false;
+    }
+
+    private bool IsScanCached(string rootPath)
+        => TryGetScanCacheKey(rootPath, out var key) && _sessionScanCache.ContainsKey(key);
+
+    private bool IsScanActive(string rootPath)
+        => TryGetScanCacheKey(rootPath, out var key) &&
+            string.Equals(_activeScan?.RootKey, key, StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryGetScanCacheKey(string rootPath, out string key)
+    {
+        try
+        {
+            key = ScanPathUtility.NormalizeRoot(rootPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or PathTooLongException)
+        {
+            key = string.Empty;
+            return false;
+        }
+    }
+
+    private static FileSystemEntry ResolveCachedSelection(ScanResult result, CachedScanState? restoreState)
+    {
+        if (!string.IsNullOrWhiteSpace(restoreState?.SelectedPath) &&
+            ScanViewProjector.TryFindDirectoryByPath(result.Root, restoreState.SelectedPath, out var selected))
+        {
+            return selected;
+        }
+
+        return result.Root;
+    }
+
+    private async Task<ScanUiPreparation> PrepareScanUiAsync(ScanResult result)
+    {
+        return await Task.Run(() => new ScanUiPreparation(
             FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)),
             ScanViewProjector.FolderJumpIndex(result.Root)));
+    }
+
+    private bool ShouldShowCompletedScan(string scanKey)
+    {
+        return !_isRecycleBinViewActive &&
+            (string.IsNullOrWhiteSpace(_visibleScanKey) ||
+            string.Equals(_visibleScanKey, scanKey, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool IsShowingActiveScan(ActiveScanJob scan)
+    {
+        return _currentScan is null &&
+            !_isRecycleBinViewActive &&
+            string.Equals(_visibleScanKey, scan.RootKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task RestoreCachedScanAsync(CachedScan cached, bool showToast = true)
+    {
+        await LoadScanIntoUiAsync(cached);
+        if (showToast)
+        {
+            ShowToast($"Restored cached scan: {cached.Result.RootPath}");
+        }
+    }
+
+    private void RefreshTargetStatus(string rootPath)
+    {
+        if (!TryGetScanCacheKey(rootPath, out var key))
+        {
+            return;
+        }
+
+        var selectedRootPath = (DriveList.SelectedItem as TargetRow)?.RootPath;
+        TargetRow? selectedReplacement = null;
+
+        _suppressTargetSelection = true;
+        try
+        {
+            for (var i = 0; i < TargetRows.Count; i++)
+            {
+                var target = TargetRows[i];
+                if (target.Kind != TargetKind.Drive ||
+                    !TryGetScanCacheKey(target.RootPath, out var targetKey) ||
+                    !string.Equals(key, targetKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var drive = DriveRows.FirstOrDefault(row => string.Equals(row.RootPath, target.RootPath, StringComparison.OrdinalIgnoreCase));
+                if (drive is null)
+                {
+                    continue;
+                }
+
+                var replacement = TargetRow.FromDrive(
+                    drive,
+                    scanCached: IsScanCached(drive.RootPath),
+                    scanActive: IsScanActive(drive.RootPath));
+                if (!EqualityComparer<TargetRow>.Default.Equals(target, replacement))
+                {
+                    TargetRows[i] = replacement;
+                }
+
+                if (!string.IsNullOrWhiteSpace(selectedRootPath) &&
+                    string.Equals(selectedRootPath, replacement.RootPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedReplacement = replacement;
+                }
+
+                break;
+            }
+
+            if (selectedReplacement is not null)
+            {
+                DriveList.SelectedItem = selectedReplacement;
+            }
+        }
+        finally
+        {
+            _suppressTargetSelection = false;
+        }
+    }
+
+    private void SetViewMode(DetailViewMode mode)
+    {
+        _viewMode = mode;
+        switch (mode)
+        {
+            case DetailViewMode.LargestFiles:
+                ViewLargestFiles.IsChecked = true;
+                break;
+            case DetailViewMode.LargestFolders:
+                ViewLargestFolders.IsChecked = true;
+                break;
+            case DetailViewMode.Extensions:
+                ViewExtensions.IsChecked = true;
+                break;
+            default:
+                ViewContents.IsChecked = true;
+                break;
+        }
+    }
+
+    private void SetChartScope(ChartScope scope)
+    {
+        _chartScope = scope;
+        _suppressChartScopeSelection = true;
+        try
+        {
+            ChartScopeBox.SelectedIndex = scope switch
+            {
+                ChartScope.LargestFolders => 1,
+                ChartScope.LargestFiles => 2,
+                ChartScope.Extensions => 3,
+                _ => 0
+            };
+        }
+        finally
+        {
+            _suppressChartScopeSelection = false;
+        }
+    }
+
+    // ============================================================
+    //  UI population
+    // ============================================================
+    private async Task LoadScanIntoUiAsync(CachedScan cached)
+    {
+        ResetProjectionRequests();
+
+        var analysisWatch = Stopwatch.StartNew();
+        var result = cached.Result;
+        _currentScan = result;
+        _visibleScanKey = cached.RootKey;
+        _visibleCachedScan = cached;
+        LoadingHost.Visibility = Visibility.Collapsed;
 
         FolderNodes.Clear();
-        FolderNodes.Add(prepared.RootNode);
-        _folderJumpIndex = prepared.FolderJumpIndex;
+        FolderNodes.Add(cached.Preparation.RootNode);
+        _folderJumpIndex = cached.Preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
 
-        _selectedEntry = result.Root;
-        _viewMode = DetailViewMode.Contents;
-        ViewContents.IsChecked = true;
+        _selectedEntry = ResolveCachedSelection(result, cached.State);
+        SetViewMode(cached.State.ViewMode);
+        SetChartScope(cached.State.ChartScope);
         _selectedChartSourceKey = null;
         RefreshFolderJumpRows(string.Empty);
         await RefreshDetailsAsync();
@@ -1867,9 +2210,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(ScanResult result, DetailViewMode mode)
     {
+        var cache = VisibleGlobalDetailRowsCache();
         lock (_globalDetailRowsCacheGate)
         {
-            if (_globalDetailRowsCache.TryGetValue(mode, out var cachedRows))
+            if (cache.TryGetValue(mode, out var cachedRows))
             {
                 return cachedRows;
             }
@@ -1878,15 +2222,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var rows = ProjectGlobalDetailRows(result, mode);
         lock (_globalDetailRowsCacheGate)
         {
-            if (_globalDetailRowsCache.TryGetValue(mode, out var cachedRows))
+            if (cache.TryGetValue(mode, out var cachedRows))
             {
                 return cachedRows;
             }
 
-            _globalDetailRowsCache[mode] = rows;
+            cache[mode] = rows;
             return rows;
         }
     }
+
+    private Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> VisibleGlobalDetailRowsCache()
+        => _visibleCachedScan?.GlobalDetailRowsCache ?? _globalDetailRowsCache;
 
     private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)
     {
@@ -1925,6 +2272,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _globalDetailRowsCache.Clear();
         }
 
+        ResetProjectionRequests();
+    }
+
+    private void ResetProjectionRequests()
+    {
         _detailRefreshVersion++;
         _chartRefreshVersion++;
     }
@@ -2041,21 +2393,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (drillIntoFolders && slice.Entry is { IsDirectory: true } folder)
         {
-            _chartScope = ChartScope.SelectedFolder;
-            ChartScopeBox.SelectedIndex = 0;
+            SetChartScope(ChartScope.SelectedFolder);
             await NavigateToFolderAsync(folder);
             return;
         }
 
         await SelectDetailRowForSliceAsync(slice);
+        RememberCurrentScanState();
     }
 
     private async Task SelectDetailRowForSliceAsync(ChartSlice slice)
     {
         if (slice.Kind == ChartSliceKind.Extension)
         {
-            _viewMode = DetailViewMode.Extensions;
-            ViewExtensions.IsChecked = true;
+            SetViewMode(DetailViewMode.Extensions);
             await RefreshDetailsAsync(refreshContext: false);
             SelectDetailRow(row => string.Equals(row.Extension, slice.SourceKey, StringComparison.OrdinalIgnoreCase));
             return;
@@ -2070,13 +2421,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         if (_viewMode != desiredView)
         {
-            _viewMode = desiredView;
-            switch (desiredView)
-            {
-                case DetailViewMode.LargestFiles: ViewLargestFiles.IsChecked = true; break;
-                case DetailViewMode.LargestFolders: ViewLargestFolders.IsChecked = true; break;
-                default: ViewContents.IsChecked = true; break;
-            }
+            SetViewMode(desiredView);
             await RefreshDetailsAsync(refreshContext: false);
         }
         SelectDetailRow(row => string.Equals(row.FullPath, slice.Entry.FullPath, StringComparison.OrdinalIgnoreCase));
@@ -2114,10 +2459,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (clearForward) _forwardStack.Clear();
 
         _selectedEntry = entry;
-        _viewMode = DetailViewMode.Contents;
-        ViewContents.IsChecked = true;
+        SetViewMode(DetailViewMode.Contents);
         _selectedChartSourceKey = null;
         await RefreshDetailsAsync();
+        RememberCurrentScanState();
         AnimateGridFadeIn();
     }
 
@@ -2191,10 +2536,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _folderJumpDebounceTimer.Start();
     }
 
-    private void ClearViewsForNewScan(string path)
+    private void ClearViewsForNewScan(string path, string scanKey)
     {
         _isRecycleBinViewActive = false;
         RecycleBinHost.Visibility = Visibility.Collapsed;
+        _visibleCachedScan = null;
+        _visibleScanKey = scanKey;
         ClearGlobalDetailRowsCache();
         _currentScan = null;
         FolderNodes.Clear();
@@ -2221,6 +2568,63 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateEmptyStateVisibility();
     }
 
+    private void ShowActiveScanPage(ActiveScanJob scan)
+    {
+        ClearViewsForNewScan(scan.DisplayPath, scan.RootKey);
+        LoadingPathText.Text = string.IsNullOrWhiteSpace(_scanCurrentPath)
+            ? scan.DisplayPath
+            : _scanCurrentPath;
+        StartLoadingAnimation(resetProgress: false);
+        UpdateFooterStatus("Scanning", BuildActiveScanDetail());
+    }
+
+    private string BuildActiveScanDetail()
+    {
+        if (_scanFilesSeen <= 0 && _scanBytesSeen <= 0)
+        {
+            return "Preparing...";
+        }
+
+        return $"{_scanFilesSeen:n0} files, {SizeFormatter.Format(_scanBytesSeen)}";
+    }
+
+    private void ShowStartScanPrompt(string path)
+    {
+        _isRecycleBinViewActive = false;
+        RecycleBinHost.Visibility = Visibility.Collapsed;
+        LoadingHost.Visibility = Visibility.Collapsed;
+        _visibleCachedScan = null;
+        _visibleScanKey = null;
+        ClearGlobalDetailRowsCache();
+        _currentScan = null;
+        _selectedEntry = null;
+        _selectedChartSourceKey = null;
+        _folderJumpIndex = [];
+        _backStack.Clear();
+        _forwardStack.Clear();
+
+        FolderNodes.Clear();
+        DetailRows.Clear();
+        _boundDetailRows = null;
+        ChartSlices.Clear();
+        SummaryMetrics.Clear();
+        BreadcrumbItems.Clear();
+        FolderJumpRows.Clear();
+
+        EmptyStateTitleText.Text = "Start Scan";
+        EmptyStateDetailText.Text = $"No session scan is loaded for {path}. Start a scan to inspect this drive.";
+        SelectedTitleText.Text = "No scan loaded";
+        SelectedSubText.Text = path;
+        ChartTitleText.Text = "Disk distribution";
+        ChartTotalText.Text = "Start a scan to render chart data.";
+        ChartSelectionText.Text = "Select a slice to locate it in the grid.";
+        UpdateFooterStatus("Ready", $"Start a scan for {path}");
+        EngineBadge.Text = "Ready";
+        EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("MutedBrush") ?? WpfBrushes.Gray;
+        RefreshNavigationState(null, null);
+        UpdateEmptyStateVisibility();
+    }
+
     private async Task LoadDriveRowsAsync()
     {
         try
@@ -2232,7 +2636,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             foreach (var row in rows)
             {
                 DriveRows.Add(row);
-                TargetRows.Add(TargetRow.FromDrive(row));
+                TargetRows.Add(TargetRow.FromDrive(
+                    row,
+                    scanCached: IsScanCached(row.RootPath),
+                    scanActive: IsScanActive(row.RootPath)));
                 AddRecentPath(row.RootPath);
             }
 
@@ -2357,6 +2764,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void SetScanningState(bool scanning)
     {
         StartButton.IsEnabled = !scanning;
+        EmptyStateStartButton.IsEnabled = !scanning;
         StopButton.IsEnabled = scanning;
         RefreshButton.IsEnabled = !scanning && _currentScan is not null;
         ProgressBar.IsIndeterminate = scanning;
@@ -2390,19 +2798,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     //  Loading skeleton + footer
     // ============================================================
-    private void StartLoadingAnimation()
+    private void StartLoadingAnimation(bool resetProgress = true)
     {
         RecycleBinHost.Visibility = Visibility.Collapsed;
         WorkspaceHost.Visibility = Visibility.Collapsed;
         EmptyStateHost.Visibility = Visibility.Collapsed;
         LoadingHost.Visibility = Visibility.Visible;
         SkeletonRows.ItemsSource = Enumerable.Range(0, 12).Select(i => 0.45 - i * 0.025).ToArray();
-        _scanStarted = DateTime.UtcNow;
-        _scanFilesSeen = 0;
-        _scanBytesSeen = 0;
-        _scanProgressTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(750) };
-        _scanProgressTimer.Tick += (_, _) => UpdateScanRate();
-        _scanProgressTimer.Start();
+        LoadingPathText.Text = string.IsNullOrWhiteSpace(_scanCurrentPath) ? "Preparing..." : _scanCurrentPath;
+        if (resetProgress)
+        {
+            _scanStarted = DateTime.UtcNow;
+            _scanFilesSeen = 0;
+            _scanBytesSeen = 0;
+            _scanProgressTimer?.Stop();
+            _scanProgressTimer = null;
+        }
+
+        if (_scanProgressTimer is null)
+        {
+            _scanProgressTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(750) };
+            _scanProgressTimer.Tick += (_, _) => UpdateScanRate();
+            _scanProgressTimer.Start();
+        }
     }
 
     private void StopLoadingAnimation()
@@ -2585,6 +3003,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
+    private sealed class CachedScan(
+        string rootKey,
+        ScanResult result,
+        CachedScanState state,
+        ScanUiPreparation preparation)
+    {
+        public string RootKey { get; } = rootKey;
+        public ScanResult Result { get; } = result;
+        public CachedScanState State { get; set; } = state;
+        public ScanUiPreparation Preparation { get; } = preparation;
+        public Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> GlobalDetailRowsCache { get; } = [];
+    }
+
+    private sealed record CachedScanState(string SelectedPath, DetailViewMode ViewMode, ChartScope ChartScope);
+
+    private sealed record ActiveScanJob(string RootKey, string DisplayPath, CancellationTokenSource Cancellation);
+
     private sealed class DetailRowComparer(DetailSortColumn column, ListSortDirection direction) : IComparer
     {
         public int Compare(object? x, object? y)
@@ -2740,7 +3175,11 @@ public sealed record TargetRow(
     string Icon,
     string IconBrush,
     Visibility UsageVisibility,
-    Visibility DetailVisibility)
+    Visibility DetailVisibility,
+    string ScanStatusIcon,
+    string ScanStatusText,
+    string ScanStatusBrush,
+    Visibility ScanStatusVisibility)
 {
     public static TargetRow RecycleBin()
         => new(
@@ -2753,7 +3192,11 @@ public sealed record TargetRow(
             "\uE74D",
             "#F59E0B",
             Visibility.Collapsed,
-            Visibility.Visible);
+            Visibility.Visible,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            Visibility.Collapsed);
 
     public static TargetRow RecycleBin(long sizeBytes, long itemCount)
         => new(
@@ -2766,7 +3209,11 @@ public sealed record TargetRow(
             "\uE74D",
             "#F59E0B",
             Visibility.Collapsed,
-            Visibility.Visible);
+            Visibility.Visible,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            Visibility.Collapsed);
 
     public static TargetRow RecycleBinUnavailable()
         => new(
@@ -2779,9 +3226,13 @@ public sealed record TargetRow(
             "\uE74D",
             "#F59E0B",
             Visibility.Collapsed,
-            Visibility.Visible);
+            Visibility.Visible,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            Visibility.Collapsed);
 
-    public static TargetRow FromDrive(DriveRow row)
+    public static TargetRow FromDrive(DriveRow row, bool scanCached = false, bool scanActive = false)
         => new(
             TargetKind.Drive,
             row.Label,
@@ -2792,7 +3243,11 @@ public sealed record TargetRow(
             "\uEDA2",
             "#3B82F6",
             Visibility.Visible,
-            Visibility.Collapsed);
+            Visibility.Collapsed,
+            scanActive ? "\uE895" : scanCached ? "\uE930" : string.Empty,
+            scanActive ? "Scanning" : scanCached ? "Scanned" : string.Empty,
+            scanActive ? "#3B82F6" : scanCached ? "#10B981" : string.Empty,
+            scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed);
 
     private static string ItemCountText(long count)
         => count == 1 ? "1 item" : $"{count:n0} items";

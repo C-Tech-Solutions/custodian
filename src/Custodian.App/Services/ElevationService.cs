@@ -2,12 +2,16 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Principal;
 using Custodian.Core.Scanning;
+using Microsoft.Win32;
 
 namespace Custodian.App.Services;
 
 internal static class ElevationService
 {
     private const string LaunchPathArgument = "--custodian-path";
+    private const string CompatibilityLayersSubKey = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+    private const string RunAsAdministratorLayer = "RUNASADMIN";
+    private const string CompatibilityLayerPrefix = "~";
 
     public static bool IsRunningAsAdministrator()
     {
@@ -25,21 +29,9 @@ internal static class ElevationService
 
     public static void RelaunchAsAdministrator(IEnumerable<string> arguments, string? currentPath)
     {
-        var executablePath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(executablePath))
-        {
-            using var currentProcess = Process.GetCurrentProcess();
-            executablePath = currentProcess.MainModule?.FileName;
-        }
-
-        if (string.IsNullOrWhiteSpace(executablePath))
-        {
-            throw new InvalidOperationException("Custodian could not determine the current executable path.");
-        }
-
         var startInfo = new ProcessStartInfo
         {
-            FileName = executablePath,
+            FileName = CurrentExecutablePath(),
             UseShellExecute = true,
             Verb = "runas",
             WorkingDirectory = Environment.CurrentDirectory,
@@ -50,6 +42,34 @@ internal static class ElevationService
         if (process is null)
         {
             throw new InvalidOperationException("Windows did not start the elevated Custodian process.");
+        }
+    }
+
+    public static bool IsRunAsAdministratorOnLaunchEnabled()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(CompatibilityLayersSubKey, writable: false);
+        var layers = key?.GetValue(CurrentExecutablePath()) as string;
+        return HasRunAsAdministratorLayer(layers);
+    }
+
+    public static void SetRunAsAdministratorOnLaunch(bool enabled)
+    {
+        var executablePath = CurrentExecutablePath();
+        using var key = Registry.CurrentUser.CreateSubKey(CompatibilityLayersSubKey, writable: true)
+            ?? throw new InvalidOperationException("Custodian could not open Windows compatibility settings.");
+
+        var existing = key.GetValue(executablePath) as string;
+        var updated = enabled
+            ? AddRunAsAdministratorLayer(existing)
+            : RemoveRunAsAdministratorLayer(existing);
+
+        if (string.IsNullOrWhiteSpace(updated))
+        {
+            key.DeleteValue(executablePath, throwOnMissingValue: false);
+        }
+        else
+        {
+            key.SetValue(executablePath, updated, RegistryValueKind.String);
         }
     }
 
@@ -110,6 +130,60 @@ internal static class ElevationService
 
         return relaunchArguments;
     }
+
+    private static string CurrentExecutablePath()
+    {
+        var executablePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            using var currentProcess = Process.GetCurrentProcess();
+            executablePath = currentProcess.MainModule?.FileName;
+        }
+
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            throw new InvalidOperationException("Custodian could not determine the current executable path.");
+        }
+
+        return executablePath;
+    }
+
+    private static bool HasRunAsAdministratorLayer(string? layers)
+        => LayerTokens(layers).Any(token => string.Equals(token, RunAsAdministratorLayer, StringComparison.OrdinalIgnoreCase));
+
+    private static string AddRunAsAdministratorLayer(string? layers)
+    {
+        var tokens = LayerTokens(layers).ToList();
+        if (!tokens.Any(token => string.Equals(token, CompatibilityLayerPrefix, StringComparison.Ordinal)))
+        {
+            tokens.Insert(0, CompatibilityLayerPrefix);
+        }
+
+        if (!tokens.Any(token => string.Equals(token, RunAsAdministratorLayer, StringComparison.OrdinalIgnoreCase)))
+        {
+            tokens.Add(RunAsAdministratorLayer);
+        }
+
+        return string.Join(' ', tokens);
+    }
+
+    private static string? RemoveRunAsAdministratorLayer(string? layers)
+    {
+        var tokens = LayerTokens(layers)
+            .Where(token => !string.Equals(token, RunAsAdministratorLayer, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (tokens.Count == 0 ||
+            tokens.All(token => string.Equals(token, CompatibilityLayerPrefix, StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        return string.Join(' ', tokens);
+    }
+
+    private static IEnumerable<string> LayerTokens(string? layers)
+        => (layers ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static string EscapeCommandLineArgument(string argument)
     {
