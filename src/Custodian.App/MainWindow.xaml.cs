@@ -84,6 +84,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private CachedScan? _visibleCachedScan;
     private int _detailRefreshVersion;
     private int _chartRefreshVersion;
+    private int _targetSelectionVersion;
     private IReadOnlyList<DetailRow>? _boundDetailRows;
     private DetailSortColumn? _detailSortColumn;
     private ListSortDirection _detailSortDirection = ListSortDirection.Ascending;
@@ -835,10 +836,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        RunUiAction(() => SelectTargetAsync(row), "Target selection failed");
+        var targetSelectionVersion = ++_targetSelectionVersion;
+        RunUiAction(() => SelectTargetAsync(row, targetSelectionVersion), "Target selection failed");
     }
 
-    private async Task SelectTargetAsync(TargetRow row)
+    private async Task SelectTargetAsync(TargetRow row, int targetSelectionVersion)
     {
         if (row.Kind == TargetKind.RecycleBin)
         {
@@ -867,7 +869,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (TryGetCachedScan(row.RootPath, out var cached))
             {
-                await RestoreCachedScanAsync(cached, showToast: false);
+                await RestoreCachedScanAsync(cached, showToast: false, targetSelectionVersion);
                 return;
             }
 
@@ -1996,13 +1998,32 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string.Equals(_visibleScanKey, scan.RootKey, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task RestoreCachedScanAsync(CachedScan cached, bool showToast = true)
+    private async Task RestoreCachedScanAsync(CachedScan cached, bool showToast = true, int? targetSelectionVersion = null)
     {
-        await LoadScanIntoUiAsync(cached);
+        var restored = await LoadScanIntoUiAsync(cached, targetSelectionVersion);
+        if (!restored)
+        {
+            return;
+        }
+
         if (showToast)
         {
             ShowToast($"Restored cached scan: {cached.Result.RootPath}");
         }
+    }
+
+    private bool IsCurrentTargetRestore(string rootKey, int targetSelectionVersion)
+    {
+        if (targetSelectionVersion != _targetSelectionVersion ||
+            _isRecycleBinViewActive ||
+            !string.Equals(_visibleScanKey, rootKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return DriveList.SelectedItem is TargetRow { Kind: TargetKind.Drive } selected &&
+            TryGetScanCacheKey(selected.RootPath, out var selectedKey) &&
+            string.Equals(selectedKey, rootKey, StringComparison.OrdinalIgnoreCase);
     }
 
     private void RefreshTargetStatus(string rootPath)
@@ -2106,7 +2127,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     //  UI population
     // ============================================================
-    private async Task LoadScanIntoUiAsync(CachedScan cached)
+    private async Task<bool> LoadScanIntoUiAsync(CachedScan cached, int? targetSelectionVersion = null)
     {
         ResetProjectionRequests();
 
@@ -2129,6 +2150,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _selectedChartSourceKey = null;
         RefreshFolderJumpRows(string.Empty);
         await RefreshDetailsAsync();
+        if (targetSelectionVersion is int version && !IsCurrentTargetRestore(cached.RootKey, version))
+        {
+            return false;
+        }
 
         analysisWatch.Stop();
         result.PhaseTimings.RemoveAll(t => t.Name == "UI analysis preparation");
@@ -2140,6 +2165,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateEmptyStateVisibility();
         AnimateGridFadeIn();
         ScheduleSettingsSave();
+        return true;
     }
 
     private async Task RefreshDetailsAsync(bool refreshContext = true)
