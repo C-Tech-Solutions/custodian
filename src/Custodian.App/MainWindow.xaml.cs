@@ -703,10 +703,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (ReferenceEquals(_activeScan, scan))
             {
                 _activeScan = null;
+                SetScanningState(false);
+                StopLoadingAnimation();
             }
             RefreshTargetStatus(path);
-            SetScanningState(false);
-            StopLoadingAnimation();
         }
     }
 
@@ -2259,6 +2259,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private async Task<bool> LoadScanIntoUiAsync(CachedScan cached, int navigationVersion)
     {
+        if (!IsCurrentNavigation(navigationVersion) || _isRecycleBinViewActive)
+        {
+            return false;
+        }
+
         ResetProjectionRequests();
 
         var analysisWatch = Stopwatch.StartNew();
