@@ -47,6 +47,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int DwmwaTextColor = 36;
     private const double DefaultRightPanelWidth = 350;
     private const double CollapsedRightPanelWidth = 36;
+    private const int MaxSessionScanCacheEntries = 8;
     private static readonly TimeSpan AutomaticUpdateCheckInterval = TimeSpan.FromHours(12);
 
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
@@ -70,6 +71,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Stack<FileSystemEntry> _forwardStack = new();
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
     private readonly Dictionary<string, CachedScan> _sessionScanCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _sessionScanCacheOrder = new();
     private readonly UiSettings _settings;
     private readonly string? _launchPath;
     private DispatcherTimer? _scanProgressTimer;
@@ -1351,9 +1353,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _recycleBinCts?.Cancel();
         UpdateEmptyStateVisibility();
         if (restoreVisibleCachedScan &&
-            _currentScan is null &&
-            !string.IsNullOrWhiteSpace(_visibleScanKey) &&
-            _sessionScanCache.TryGetValue(_visibleScanKey, out var cached) &&
+            TryGetVisibleCachedScan(out var cached) &&
+            !ReferenceEquals(_currentScan, cached.Result) &&
             await RestoreCachedScanAsync(cached, navigationVersion, showToast: false))
         {
             return;
@@ -1983,6 +1984,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var preparation = await PrepareScanUiAsync(result);
         var cached = new CachedScan(key, result, state, preparation);
         _sessionScanCache[key] = cached;
+        MarkSessionScanCacheKeyUsed(key, enforceLimit: true);
         RefreshTargetStatus(result.RootPath);
         return cached;
     }
@@ -1992,11 +1994,69 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (TryGetScanCacheKey(rootPath, out var key) &&
             _sessionScanCache.TryGetValue(key, out cached!))
         {
+            MarkSessionScanCacheKeyUsed(key, enforceLimit: false);
             return true;
         }
 
         cached = default!;
         return false;
+    }
+
+    private bool TryGetVisibleCachedScan(out CachedScan cached)
+    {
+        if (!string.IsNullOrWhiteSpace(_visibleScanKey) &&
+            _sessionScanCache.TryGetValue(_visibleScanKey, out cached!))
+        {
+            MarkSessionScanCacheKeyUsed(_visibleScanKey, enforceLimit: false);
+            return true;
+        }
+
+        cached = default!;
+        return false;
+    }
+
+    private void MarkSessionScanCacheKeyUsed(string key, bool enforceLimit)
+    {
+        for (var node = _sessionScanCacheOrder.First; node is not null; node = node.Next)
+        {
+            if (string.Equals(node.Value, key, StringComparison.OrdinalIgnoreCase))
+            {
+                _sessionScanCacheOrder.Remove(node);
+                break;
+            }
+        }
+
+        _sessionScanCacheOrder.AddLast(key);
+
+        if (enforceLimit)
+        {
+            TrimSessionScanCache();
+        }
+    }
+
+    private void TrimSessionScanCache()
+    {
+        while (_sessionScanCacheOrder.Count > MaxSessionScanCacheEntries)
+        {
+            var evictedNode = _sessionScanCacheOrder.First;
+            if (evictedNode is null)
+            {
+                return;
+            }
+
+            var evictedKey = evictedNode.Value;
+            _sessionScanCacheOrder.RemoveFirst();
+            if (string.Equals(evictedKey, _visibleScanKey, StringComparison.OrdinalIgnoreCase))
+            {
+                _sessionScanCacheOrder.AddLast(evictedKey);
+                continue;
+            }
+
+            if (_sessionScanCache.Remove(evictedKey, out var evicted))
+            {
+                RefreshTargetStatus(evicted.Result.RootPath);
+            }
+        }
     }
 
     private bool IsScanCached(string rootPath)
