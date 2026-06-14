@@ -649,7 +649,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 await RestoreCachedScanAsync(completed, _targetSelectionVersion, showToast: false);
             }
-            else if (_currentScan is not null)
+            else if (_currentScan is not null && !_isRecycleBinViewActive)
             {
                 UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
             }
@@ -664,7 +664,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 EngineBadge.Text = "Cancelled";
                 EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("WarningBrush") ?? WpfBrushes.Orange;
             }
-            else if (_currentScan is not null)
+            else if (_currentScan is not null && !_isRecycleBinViewActive)
             {
                 UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
                 EngineBadge.Text = _currentScan.Engine;
@@ -685,7 +685,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 EngineBadge.Text = "Failed";
                 EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("DangerBrush") ?? WpfBrushes.Red;
             }
-            else if (_currentScan is not null)
+            else if (_currentScan is not null && !_isRecycleBinViewActive)
             {
                 ShowToast($"Scan failed: {path}");
                 UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
