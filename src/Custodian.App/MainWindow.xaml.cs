@@ -56,6 +56,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _updateCts;
     private CancellationTokenSource? _recycleBinCts;
+    private bool _recycleBinCtsIsRefresh;
     private ScanResult? _currentScan;
     private string? _visibleScanKey;
     private FileSystemEntry? _selectedEntry;
@@ -1369,17 +1370,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RefreshRecycleBinAsync(int navigationVersion)
     {
-        _recycleBinCts?.Cancel();
+        if (_recycleBinCts is not null)
+        {
+            if (!_recycleBinCtsIsRefresh)
+            {
+                return;
+            }
+
+            _recycleBinCts.Cancel();
+        }
 
         using var cts = new CancellationTokenSource();
         _recycleBinCts = cts;
+        _recycleBinCtsIsRefresh = true;
         SetRecycleBinBusy(true, "Loading Recycle Bin items...");
         try
         {
             var entriesTask = RecycleBinService.GetItemsAsync(cts.Token);
             var usageTask = RecycleBinService.GetUsageAsync(cts.Token);
             await Task.WhenAll(entriesTask, usageTask);
-            if (!IsCurrentRecycleBinNavigation(navigationVersion))
+            if (!IsActiveRecycleBinRefresh(navigationVersion, cts))
             {
                 return;
             }
@@ -1411,14 +1421,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException)
         {
-            if (IsCurrentRecycleBinNavigation(navigationVersion))
+            if (IsActiveRecycleBinRefresh(navigationVersion, cts))
             {
                 UpdateFooterStatus("Recycle Bin", "Recycle Bin refresh cancelled.");
             }
         }
         catch (Exception ex)
         {
-            if (!IsCurrentRecycleBinNavigation(navigationVersion))
+            if (!IsActiveRecycleBinRefresh(navigationVersion, cts))
             {
                 return;
             }
@@ -1437,6 +1447,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (ReferenceEquals(_recycleBinCts, cts))
             {
                 _recycleBinCts = null;
+                _recycleBinCtsIsRefresh = false;
                 if (IsCurrentRecycleBinNavigation(navigationVersion))
                 {
                     SetRecycleBinBusy(false);
@@ -1559,6 +1570,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         using var cts = new CancellationTokenSource();
         _recycleBinCts = cts;
+        _recycleBinCtsIsRefresh = false;
         SetRecycleBinBusy(true, busyMessage);
         var refreshAfterOperation = true;
         try
@@ -1578,8 +1590,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            _recycleBinCts = null;
-            SetRecycleBinBusy(false);
+            if (ReferenceEquals(_recycleBinCts, cts))
+            {
+                _recycleBinCts = null;
+                _recycleBinCtsIsRefresh = false;
+                SetRecycleBinBusy(false);
+            }
         }
 
         if (refreshAfterOperation)
@@ -1991,7 +2007,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             key = ScanPathUtility.NormalizeRoot(rootPath);
             return true;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or PathTooLongException)
+        catch (Exception)
         {
             key = string.Empty;
             return false;
@@ -2054,6 +2070,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private bool IsCurrentRecycleBinNavigation(int navigationVersion)
         => IsCurrentNavigation(navigationVersion) && _isRecycleBinViewActive;
+
+    private bool IsActiveRecycleBinRefresh(int navigationVersion, CancellationTokenSource cts)
+        => IsCurrentRecycleBinNavigation(navigationVersion) &&
+            _recycleBinCtsIsRefresh &&
+            ReferenceEquals(_recycleBinCts, cts);
 
     private bool IsCurrentScanRestore(string rootKey, int navigationVersion)
     {
