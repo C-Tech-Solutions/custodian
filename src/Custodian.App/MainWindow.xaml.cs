@@ -1369,10 +1369,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RefreshRecycleBinAsync(int navigationVersion)
     {
-        if (_recycleBinCts is not null)
-        {
-            return;
-        }
+        _recycleBinCts?.Cancel();
 
         using var cts = new CancellationTokenSource();
         _recycleBinCts = cts;
@@ -1437,10 +1434,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            _recycleBinCts = null;
-            if (IsCurrentRecycleBinNavigation(navigationVersion))
+            if (ReferenceEquals(_recycleBinCts, cts))
             {
-                SetRecycleBinBusy(false);
+                _recycleBinCts = null;
+                if (IsCurrentRecycleBinNavigation(navigationVersion))
+                {
+                    SetRecycleBinBusy(false);
+                }
             }
         }
     }
@@ -2322,12 +2322,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return visible.GlobalDetailRowsCache;
         }
 
-        foreach (var cached in _sessionScanCache.Values)
+        if (TryGetScanCacheKey(result.RootPath, out var key) &&
+            _sessionScanCache.TryGetValue(key, out var cached) &&
+            ReferenceEquals(cached.Result, result))
         {
-            if (ReferenceEquals(cached.Result, result))
-            {
-                return cached.GlobalDetailRowsCache;
-            }
+            return cached.GlobalDetailRowsCache;
         }
 
         return _globalDetailRowsCache;
