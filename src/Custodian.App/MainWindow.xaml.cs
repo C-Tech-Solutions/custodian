@@ -454,7 +454,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         CheckUpdatesMenuItem.IsEnabled = false;
-        ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
+        if (mode == UpdateCheckMode.Manual)
+        {
+            ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
+        }
 
         try
         {
