@@ -544,7 +544,7 @@
         </Setter>
     </Style>
 
-    <Style TargetType="{x:Type Slider}">
+    <Style x:Key="ModernSliderStyle" TargetType="{x:Type Slider}">
         <Setter Property="Height" Value="22"/>
         <Setter Property="MinWidth" Value="120"/>
         <Setter Property="Background" Value="{DynamicResource Border}"/>

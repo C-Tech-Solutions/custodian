@@ -212,7 +212,7 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var radius = CalculateOuterRadius();
-        if (radius <= 0)
+        if (radius < 3.5)
         {
             return;
         }
@@ -302,6 +302,11 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var radius = CalculateOuterRadius();
+        if (radius < 3.5)
+        {
+            return null;
+        }
+
         var innerRadius = CalculateInnerRadius(radius);
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var dx = point.X - center.X;

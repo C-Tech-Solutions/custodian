@@ -1112,6 +1112,7 @@
                                            FontSize="11" FontWeight="SemiBold"
                                            VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <Slider x:Name="PieZoomSlider" Grid.Column="1"
+                                        Style="{StaticResource ModernSliderStyle}"
                                         Minimum="0.75" Maximum="2.0" Value="1"
                                         TickFrequency="0.05" SmallChange="0.05" LargeChange="0.1"
                                         IsSnapToTickEnabled="True"
