@@ -19,6 +19,7 @@ public sealed class UiSettings
     public string ChartMode { get; set; } = "Treemap";
     public string LastPath { get; set; } = string.Empty;
     public bool AutoRelaunchAsAdministrator { get; set; }
+    public bool AutoUpdateOnStartup { get; set; } = true;
     public DateTime LastAutomaticUpdateCheckUtc { get; set; } = DateTime.MinValue;
     public List<string> RecentPaths { get; set; } = [];
 }

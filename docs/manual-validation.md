@@ -9,8 +9,10 @@
 - Toggle View > Always open as administrator, close Custodian, and confirm the next launch requests elevation before opening.
 - Save a `.custodian-scan`, close the app, reopen it, and load the file.
 - Export CSV and JSON from both GUI and CLI.
-- In a dev/raw run, use Help > Check for Updates and confirm it reports that updates require the installed Custodian app.
+- In a dev/raw run, confirm startup auto-update does not show a modal, then use Help > Check for Updates and confirm it reports that updates require the installed Custodian app.
 - Build an update package with `scripts\publish-velopack.ps1 -Version 1.2.0` and confirm Velopack emits release assets under `artifacts\velopack`.
 - For unsigned local update validation, run `scripts\prepare-local-update-test.ps1`, install the preserved baseline setup, set `CUSTODIAN_UPDATE_SOURCE` to the local release folder, and confirm Help > Check for Updates prompts for the update.
+- Enable Help > Automatically download updates on startup, relaunch, and confirm the available update downloads without a download prompt but still asks before restart/install.
+- Disable Help > Automatically download updates on startup, relaunch, and confirm no automatic update check/download starts; manual Help > Check for Updates still works.
 - Publish with `scripts\publish-portable.ps1`, move `artifacts\portable\Custodian` to another folder, and launch the app and CLI from there.
 - Build the EXE installer with Inno Setup 6 using `installer\Custodian.iss`, install it, launch from Start Menu, then uninstall.

@@ -116,6 +116,10 @@ Custodian follows the update channel embedded in the installed Velopack package.
 The scripts default to the `win` channel; pass `-Channel <name>` when producing
 or uploading another channel.
 
+Installed apps check for updates on startup by default. Use Help > Automatically
+download updates on startup to turn the launch-time check/download on or off;
+Custodian still asks before restarting to install a downloaded update.
+
 Optional environment overrides:
 
 - `CUSTODIAN_UPDATE_CHANNEL` - deliberate local or managed channel override.
