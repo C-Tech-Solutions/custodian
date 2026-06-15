@@ -1114,6 +1114,7 @@
                                 <Slider x:Name="PieZoomSlider" Grid.Column="1"
                                         Minimum="0.75" Maximum="2.0" Value="1"
                                         TickFrequency="0.05" SmallChange="0.05" LargeChange="0.1"
+                                        IsSnapToTickEnabled="True"
                                         IsMoveToPointEnabled="True"
                                         VerticalAlignment="Center"
                                         ToolTip="Pie chart zoom"/>
@@ -1157,6 +1158,7 @@
                             <controls:PieChartControl x:Name="PieChart"
                                                       Slices="{Binding ChartSlices}"
                                                       ZoomFactor="{Binding ElementName=PieZoomSlider, Path=Value}"
+                                                      ClipToBounds="True"
                                                       SliceSelected="Chart_SliceSelected"
                                                       SliceDoubleClicked="Chart_SliceDoubleClicked"/>
                             <ItemsControl Grid.Row="1" Margin="0,6,0,0" ItemsSource="{Binding ChartSlices}">
