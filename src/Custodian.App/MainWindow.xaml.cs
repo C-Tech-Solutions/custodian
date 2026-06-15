@@ -1028,6 +1028,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ResetPieZoom_Click(object sender, RoutedEventArgs e)
     {
+        ResetPieZoom();
+    }
+
+    private void ResetPieZoom()
+    {
         PieZoomSlider.Value = 1;
     }
 
@@ -2286,6 +2291,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _visibleScanKey = cached.RootKey;
         _visibleCachedScan = cached;
         StopLoadingAnimation();
+        ResetPieZoom();
 
         FolderNodes.Clear();
         FolderNodes.Add(cached.Preparation.RootNode);
@@ -2754,6 +2760,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailRows.Clear();
         _boundDetailRows = null;
         ChartSlices.Clear();
+        ResetPieZoom();
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
@@ -2821,6 +2828,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailRows.Clear();
         _boundDetailRows = null;
         ChartSlices.Clear();
+        ResetPieZoom();
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();

@@ -151,10 +151,12 @@ public sealed class PieChartControl : FrameworkElement
                 control.ReleaseMouseCapture();
             }
 
+            control.UpdateHover(Mouse.GetPosition(control));
             return;
         }
 
         control.ClampPanOffset(control.CalculateOuterRadius());
+        control.UpdateHover(Mouse.GetPosition(control));
     }
 
     private static object CoerceZoomFactor(DependencyObject _, object baseValue)
@@ -352,6 +354,7 @@ public sealed class PieChartControl : FrameworkElement
     {
         base.OnLostMouseCapture(e);
         CancelPanInteraction();
+        UpdateHover(e.GetPosition(this));
     }
 
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
