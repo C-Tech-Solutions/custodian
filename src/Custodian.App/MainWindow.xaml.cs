@@ -51,6 +51,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string DefaultEmptyStateTitle = "Scan a folder to get started";
     private const string DefaultEmptyStateDetail = "Pick a drive or folder, then press Scan. You can also drag a folder onto this window.";
 
+    private static readonly TimeSpan StartupUpdateCheckTimeout = TimeSpan.FromSeconds(15);
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
@@ -447,16 +448,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var previousFooterStatus = FooterStatus.Text;
         var previousFooterDetail = FooterDetail.Text;
         _updateCts = new CancellationTokenSource();
+        if (mode == UpdateCheckMode.StartupAutoDownload)
+        {
+            _updateCts.CancelAfter(StartupUpdateCheckTimeout);
+        }
+
         CheckUpdatesMenuItem.IsEnabled = false;
         ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
 
         try
         {
-            var result = await _updates.CheckForUpdatesAsync();
-            if (mode == UpdateCheckMode.StartupAutoDownload)
-            {
-                MarkAutomaticUpdateCheckCompleted();
-            }
+            var result = await _updates.CheckForUpdatesAsync().WaitAsync(_updateCts.Token);
 
             if (ShouldShowUpdateStatus(mode, result.Status.Kind))
             {
@@ -541,14 +543,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RestoreFooterStatus(string status, string detail)
     {
+        if (_activeScan is not null || _isRecycleBinViewActive || FooterStatus.Text != "Updates")
+        {
+            return;
+        }
+
         FooterStatus.Text = status;
         FooterDetail.Text = detail;
-    }
-
-    private void MarkAutomaticUpdateCheckCompleted()
-    {
-        _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
-        ScheduleSettingsSave();
     }
 
     private async Task PromptDownloadAndInstallAsync(AppUpdateCheckResult result, CancellationToken cancellationToken)
