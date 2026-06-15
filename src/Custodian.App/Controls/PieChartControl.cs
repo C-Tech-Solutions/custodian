@@ -19,6 +19,10 @@ namespace Custodian.App.Controls;
 
 public sealed class PieChartControl : FrameworkElement
 {
+    private const double DefaultZoomFactor = 1.0;
+    private const double MinimumZoomFactor = 0.75;
+    private const double MaximumZoomFactor = 2.0;
+
     public static readonly DependencyProperty SlicesProperty = DependencyProperty.Register(
         nameof(Slices),
         typeof(IEnumerable),
@@ -30,6 +34,16 @@ public sealed class PieChartControl : FrameworkElement
         typeof(ChartSlice),
         typeof(PieChartControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ZoomFactorProperty = DependencyProperty.Register(
+        nameof(ZoomFactor),
+        typeof(double),
+        typeof(PieChartControl),
+        new FrameworkPropertyMetadata(
+            DefaultZoomFactor,
+            FrameworkPropertyMetadataOptions.AffectsRender,
+            null,
+            CoerceZoomFactor));
 
     private static readonly Typeface NormalTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
@@ -58,6 +72,12 @@ public sealed class PieChartControl : FrameworkElement
     {
         get => (ChartSlice?)GetValue(SelectedSliceProperty);
         set => SetValue(SelectedSliceProperty, value);
+    }
+
+    public double ZoomFactor
+    {
+        get => (double)GetValue(ZoomFactorProperty);
+        set => SetValue(ZoomFactorProperty, value);
     }
 
     public event EventHandler<ChartSliceEventArgs>? SliceSelected;
@@ -106,6 +126,16 @@ public sealed class PieChartControl : FrameworkElement
     private static void OnSlicesChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
     {
         ((PieChartControl)source).SetSliceSource(e.NewValue as IEnumerable);
+    }
+
+    private static object CoerceZoomFactor(DependencyObject _, object baseValue)
+    {
+        if (baseValue is not double value || double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return DefaultZoomFactor;
+        }
+
+        return Math.Clamp(value, MinimumZoomFactor, MaximumZoomFactor);
     }
 
     private void SetSliceSource(IEnumerable? slices)
@@ -181,14 +211,13 @@ public sealed class PieChartControl : FrameworkElement
             return;
         }
 
-        var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 52);
+        var radius = CalculateOuterRadius();
         if (radius <= 0)
         {
             return;
         }
 
-        var innerRadius = radius * 0.58;
+        var innerRadius = CalculateInnerRadius(radius);
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var startAngle = 0.0;
         foreach (var slice in _slices)
@@ -272,9 +301,8 @@ public sealed class PieChartControl : FrameworkElement
             return null;
         }
 
-        var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 52);
-        var innerRadius = radius * 0.58;
+        var radius = CalculateOuterRadius();
+        var innerRadius = CalculateInnerRadius(radius);
         var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
         var dx = point.X - center.X;
         var dy = point.Y - center.Y;
@@ -288,6 +316,15 @@ public sealed class PieChartControl : FrameworkElement
         var angle = (Math.Atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
         return _renderedSlices.FirstOrDefault(rendered => angle >= rendered.StartAngle && angle < rendered.EndAngle)?.Slice;
     }
+
+    private double CalculateOuterRadius()
+    {
+        var size = Math.Min(ActualWidth, ActualHeight);
+        var baseRadius = Math.Max(0, size / 2 - 52);
+        return baseRadius * ZoomFactor;
+    }
+
+    private static double CalculateInnerRadius(double outerRadius) => outerRadius * 0.58;
 
     private static WpfPoint PointAt(WpfPoint center, double radius, double degrees)
     {

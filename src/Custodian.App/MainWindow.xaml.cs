@@ -1026,6 +1026,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScheduleSettingsSave();
     }
 
+    private void ResetPieZoom_Click(object sender, RoutedEventArgs e)
+    {
+        PieZoomSlider.Value = 1;
+    }
+
     private void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
         => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false), "Chart selection failed");
 
@@ -2983,6 +2988,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         TreemapHost.Visibility = _chartDisplayMode == ChartDisplayMode.Treemap ? Visibility.Visible : Visibility.Collapsed;
         PieHost.Visibility = _chartDisplayMode == ChartDisplayMode.Pie ? Visibility.Visible : Visibility.Collapsed;
+        PieZoomControls.Visibility = _chartDisplayMode == ChartDisplayMode.Pie ? Visibility.Visible : Visibility.Collapsed;
         BarHost.Visibility = _chartDisplayMode == ChartDisplayMode.Bars ? Visibility.Visible : Visibility.Collapsed;
         Treemap.InvalidateVisual();
         PieChart.InvalidateVisual();
