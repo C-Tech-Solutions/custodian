@@ -23,6 +23,7 @@ public sealed class PieChartControl : FrameworkElement
     private const double MinimumZoomFactor = 0.75;
     private const double MaximumZoomFactor = 2.0;
     private const double PanClickTolerance = 3.0;
+    private const double PanClickToleranceSquared = PanClickTolerance * PanClickTolerance;
     private const double PanEdgeMargin = 32.0;
 
     public static readonly DependencyProperty SlicesProperty = DependencyProperty.Register(
@@ -240,13 +241,13 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var radius = CalculateOuterRadius();
-        if (radius < 3.5)
+        var innerRadius = CalculateInnerRadius(radius);
+        if (innerRadius <= 2)
         {
             return;
         }
 
-        var center = CalculateChartCenter(radius);
-        var innerRadius = CalculateInnerRadius(radius);
+        var center = CalculateChartCenter();
         var startAngle = 0.0;
         foreach (var slice in _slices)
         {
@@ -389,13 +390,13 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var radius = CalculateOuterRadius();
-        if (radius < 3.5)
+        var innerRadius = CalculateInnerRadius(radius);
+        if (innerRadius <= 2)
         {
             return null;
         }
 
-        var innerRadius = CalculateInnerRadius(radius);
-        var center = CalculateChartCenter(radius);
+        var center = CalculateChartCenter();
         var dx = point.X - center.X;
         var dy = point.Y - center.Y;
         var distance = Math.Sqrt(dx * dx + dy * dy);
@@ -416,9 +417,8 @@ public sealed class PieChartControl : FrameworkElement
         return baseRadius * ZoomFactor;
     }
 
-    private WpfPoint CalculateChartCenter(double radius)
+    private WpfPoint CalculateChartCenter()
     {
-        ClampPanOffset(radius);
         return new WpfPoint(ActualWidth / 2 + _panOffsetX, ActualHeight / 2 + _panOffsetY);
     }
 
@@ -428,7 +428,7 @@ public sealed class PieChartControl : FrameworkElement
     {
         var deltaX = point.X - _panStartPoint.X;
         var deltaY = point.Y - _panStartPoint.Y;
-        if (!_isPanning && Math.Sqrt(deltaX * deltaX + deltaY * deltaY) < PanClickTolerance)
+        if (!_isPanning && deltaX * deltaX + deltaY * deltaY < PanClickToleranceSquared)
         {
             Cursor = WpfCursors.SizeAll;
             ToolTip = null;
