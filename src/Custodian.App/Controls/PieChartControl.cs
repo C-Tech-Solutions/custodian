@@ -151,12 +151,12 @@ public sealed class PieChartControl : FrameworkElement
                 control.ReleaseMouseCapture();
             }
 
-            control.UpdateHover(Mouse.GetPosition(control));
+            control.UpdateHoverFromCurrentMousePosition();
             return;
         }
 
         control.ClampPanOffset(control.CalculateOuterRadius());
-        control.UpdateHover(Mouse.GetPosition(control));
+        control.UpdateHoverFromCurrentMousePosition();
     }
 
     private static object CoerceZoomFactor(DependencyObject _, object baseValue)
@@ -287,13 +287,17 @@ public sealed class PieChartControl : FrameworkElement
 
         if (IsZoomed)
         {
+            if (!CaptureMouse())
+            {
+                return;
+            }
+
             _panStartPoint = e.GetPosition(this);
             _panStartOffsetX = _panOffsetX;
             _panStartOffsetY = _panOffsetY;
             _pendingClickCount = e.ClickCount;
             _isPotentialPanning = true;
             _isPanning = false;
-            CaptureMouse();
             Cursor = WpfCursors.SizeAll;
             e.Handled = true;
             return;
@@ -452,6 +456,14 @@ public sealed class PieChartControl : FrameworkElement
         var slice = SliceAt(point);
         Cursor = slice is not null ? WpfCursors.Hand : IsZoomed ? WpfCursors.SizeAll : WpfCursors.Arrow;
         ToolTip = slice is null ? null : $"{slice.Label}\n{slice.FormattedSize} ({slice.PercentText})";
+    }
+
+    private void UpdateHoverFromCurrentMousePosition()
+    {
+        if (PresentationSource.FromVisual(this) is not null)
+        {
+            UpdateHover(Mouse.GetPosition(this));
+        }
     }
 
     private void SelectSliceAt(WpfPoint point, int clickCount)

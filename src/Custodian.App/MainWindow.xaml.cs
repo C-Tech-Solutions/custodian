@@ -1033,7 +1033,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ResetPieZoom()
     {
-        PieZoomSlider.Value = 1;
+        if (PieZoomSlider is not null)
+        {
+            PieZoomSlider.Value = 1;
+        }
     }
 
     private void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
