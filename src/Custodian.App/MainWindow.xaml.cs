@@ -440,7 +440,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task CheckForUpdatesAsync(UpdateCheckMode mode)
     {
-        if (_updateCts is not null)
+        if (_isClosing || _updateCts is not null)
         {
             return;
         }
@@ -459,6 +459,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             var result = await _updates.CheckForUpdatesAsync().WaitAsync(_updateCts.Token);
+            if (mode == UpdateCheckMode.StartupAutoDownload)
+            {
+                _updateCts.CancelAfter(Timeout.InfiniteTimeSpan);
+            }
 
             if (ShouldShowUpdateStatus(mode, result.Status.Kind))
             {
