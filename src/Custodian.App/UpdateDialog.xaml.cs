@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 namespace Custodian.App;
 
 public partial class UpdateDialog : Window
@@ -83,18 +84,22 @@ public partial class UpdateDialog : Window
             _ => "AccentBrush"
         };
 
-        var icon = tone switch
+        var iconKey = tone switch
         {
-            UpdateDialogTone.Success => "\uE930",
-            UpdateDialogTone.Warning => "\uE7BA",
-            UpdateDialogTone.Error => "\uE783",
-            _ => "\uE895"
+            UpdateDialogTone.Success => "IconSuccessGeometry",
+            UpdateDialogTone.Warning => "IconWarningGeometry",
+            UpdateDialogTone.Error => "IconErrorGeometry",
+            _ => "IconInfoGeometry"
         };
 
-        IconText.Text = icon;
+        if (TryFindResource(iconKey) is Geometry geometry)
+        {
+            IconPath.Data = geometry;
+        }
+
         if (TryFindResource(brushKey) is System.Windows.Media.Brush brush)
         {
-            IconText.Foreground = brush;
+            IconPath.Stroke = brush;
             IconBadge.BorderBrush = brush;
         }
     }

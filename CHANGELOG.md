@@ -2,6 +2,21 @@
 
 All notable changes to Custodian are tracked here.
 
+## 1.3.0 - 2026-06-16
+
+### Added
+
+- Added pie chart zoom and panning controls with reset support.
+- Added a Help menu toggle to automatically check for and download updates on startup while still asking before restart/install.
+
+### Changed
+
+- Replaced static UI glyphs with vector icon resources for more reliable rendering.
+
+### Fixed
+
+- Prevented startup update status changes from overwriting active scan or Recycle Bin footer status.
+
 ## 1.2.0 - 2026-06-14
 
 ### Added

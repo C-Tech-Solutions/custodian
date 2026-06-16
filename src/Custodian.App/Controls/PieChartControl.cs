@@ -19,6 +19,13 @@ namespace Custodian.App.Controls;
 
 public sealed class PieChartControl : FrameworkElement
 {
+    private const double DefaultZoomFactor = 1.0;
+    private const double MinimumZoomFactor = 0.75;
+    private const double MaximumZoomFactor = 2.0;
+    private const double PanClickTolerance = 3.0;
+    private const double PanClickToleranceSquared = PanClickTolerance * PanClickTolerance;
+    private const double PanEdgeMargin = 32.0;
+
     public static readonly DependencyProperty SlicesProperty = DependencyProperty.Register(
         nameof(Slices),
         typeof(IEnumerable),
@@ -30,6 +37,16 @@ public sealed class PieChartControl : FrameworkElement
         typeof(ChartSlice),
         typeof(PieChartControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ZoomFactorProperty = DependencyProperty.Register(
+        nameof(ZoomFactor),
+        typeof(double),
+        typeof(PieChartControl),
+        new FrameworkPropertyMetadata(
+            DefaultZoomFactor,
+            FrameworkPropertyMetadataOptions.AffectsRender,
+            OnZoomFactorChanged,
+            CoerceZoomFactor));
 
     private static readonly Typeface NormalTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
@@ -47,6 +64,14 @@ public sealed class PieChartControl : FrameworkElement
     private WpfBrush _centerMutedBrush = CreateBrush(WpfColor.FromRgb(100, 116, 139));
     private WpfPen _separatorPen = CreatePen(System.Windows.Media.Brushes.White, 1);
     private WpfPen _selectedPen = CreatePen(System.Windows.Media.Brushes.White, 3);
+    private double _panOffsetX;
+    private double _panOffsetY;
+    private WpfPoint _panStartPoint;
+    private double _panStartOffsetX;
+    private double _panStartOffsetY;
+    private int _pendingClickCount;
+    private bool _isPotentialPanning;
+    private bool _isPanning;
 
     public IEnumerable? Slices
     {
@@ -58,6 +83,12 @@ public sealed class PieChartControl : FrameworkElement
     {
         get => (ChartSlice?)GetValue(SelectedSliceProperty);
         set => SetValue(SelectedSliceProperty, value);
+    }
+
+    public double ZoomFactor
+    {
+        get => (double)GetValue(ZoomFactorProperty);
+        set => SetValue(ZoomFactorProperty, value);
     }
 
     public event EventHandler<ChartSliceEventArgs>? SliceSelected;
@@ -106,6 +137,36 @@ public sealed class PieChartControl : FrameworkElement
     private static void OnSlicesChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
     {
         ((PieChartControl)source).SetSliceSource(e.NewValue as IEnumerable);
+    }
+
+    private static void OnZoomFactorChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (PieChartControl)source;
+        if (!control.IsZoomed)
+        {
+            control.ResetPanOffset();
+            control.CancelPanInteraction();
+            if (control.IsMouseCaptured)
+            {
+                control.ReleaseMouseCapture();
+            }
+
+            control.UpdateHoverFromCurrentMousePosition();
+            return;
+        }
+
+        control.ClampPanOffset(control.CalculateOuterRadius());
+        control.UpdateHoverFromCurrentMousePosition();
+    }
+
+    private static object CoerceZoomFactor(DependencyObject _, object baseValue)
+    {
+        if (baseValue is not double value || double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return DefaultZoomFactor;
+        }
+
+        return Math.Clamp(value, MinimumZoomFactor, MaximumZoomFactor);
     }
 
     private void SetSliceSource(IEnumerable? slices)
@@ -181,15 +242,14 @@ public sealed class PieChartControl : FrameworkElement
             return;
         }
 
-        var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 52);
-        if (radius <= 0)
+        var radius = CalculateOuterRadius();
+        var innerRadius = CalculateInnerRadius(radius);
+        if (innerRadius <= 2)
         {
             return;
         }
 
-        var innerRadius = radius * 0.58;
-        var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
+        var center = CalculateChartCenter();
         var startAngle = 0.0;
         foreach (var slice in _slices)
         {
@@ -220,27 +280,91 @@ public sealed class PieChartControl : FrameworkElement
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
         base.OnMouseDown(e);
-        var slice = SliceAt(e.GetPosition(this));
-        if (slice is null)
+        if (e.ChangedButton != MouseButton.Left)
         {
             return;
         }
 
-        SelectedSlice = slice;
-        SliceSelected?.Invoke(this, new ChartSliceEventArgs(slice));
-        if (e.ClickCount > 1)
+        if (IsZoomed)
         {
-            SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice));
+            if (!CaptureMouse())
+            {
+                return;
+            }
+
+            _panStartPoint = e.GetPosition(this);
+            _panStartOffsetX = _panOffsetX;
+            _panStartOffsetY = _panOffsetY;
+            _pendingClickCount = e.ClickCount;
+            _isPotentialPanning = true;
+            _isPanning = false;
+            Cursor = WpfCursors.SizeAll;
+            e.Handled = true;
+            return;
         }
 
+        SelectSliceAt(e.GetPosition(this), e.ClickCount);
     }
 
     protected override void OnMouseMove(WpfMouseEventArgs e)
     {
         base.OnMouseMove(e);
-        var slice = SliceAt(e.GetPosition(this));
-        Cursor = slice is null ? WpfCursors.Arrow : WpfCursors.Hand;
-        ToolTip = slice is null ? null : $"{slice.Label}\n{slice.FormattedSize} ({slice.PercentText})";
+        var point = e.GetPosition(this);
+        if (_isPotentialPanning)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                UpdatePan(point);
+                return;
+            }
+
+            CancelPanInteraction();
+            if (IsMouseCaptured)
+            {
+                ReleaseMouseCapture();
+            }
+        }
+
+        UpdateHover(point);
+    }
+
+    protected override void OnMouseUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (e.ChangedButton != MouseButton.Left || !_isPotentialPanning)
+        {
+            return;
+        }
+
+        var point = e.GetPosition(this);
+        var wasPanning = _isPanning;
+        var clickCount = _pendingClickCount;
+        CancelPanInteraction();
+        if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
+
+        if (!wasPanning)
+        {
+            SelectSliceAt(point, clickCount);
+        }
+
+        UpdateHover(point);
+        e.Handled = true;
+    }
+
+    protected override void OnLostMouseCapture(WpfMouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        CancelPanInteraction();
+        UpdateHover(e.GetPosition(this));
+    }
+
+    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
+    {
+        base.OnRenderSizeChanged(sizeInfo);
+        ClampPanOffset(CalculateOuterRadius());
     }
 
     private static Geometry BuildSliceGeometry(WpfPoint center, double outerRadius, double innerRadius, double startAngle, double endAngle)
@@ -272,10 +396,14 @@ public sealed class PieChartControl : FrameworkElement
             return null;
         }
 
-        var size = Math.Min(ActualWidth, ActualHeight);
-        var radius = Math.Max(0, size / 2 - 52);
-        var innerRadius = radius * 0.58;
-        var center = new WpfPoint(ActualWidth / 2, ActualHeight / 2);
+        var radius = CalculateOuterRadius();
+        var innerRadius = CalculateInnerRadius(radius);
+        if (innerRadius <= 2)
+        {
+            return null;
+        }
+
+        var center = CalculateChartCenter();
         var dx = point.X - center.X;
         var dy = point.Y - center.Y;
         var distance = Math.Sqrt(dx * dx + dy * dy);
@@ -288,6 +416,100 @@ public sealed class PieChartControl : FrameworkElement
         var angle = (Math.Atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
         return _renderedSlices.FirstOrDefault(rendered => angle >= rendered.StartAngle && angle < rendered.EndAngle)?.Slice;
     }
+
+    private double CalculateOuterRadius()
+    {
+        var size = Math.Min(ActualWidth, ActualHeight);
+        var baseRadius = Math.Max(0, size / 2 - 52);
+        return baseRadius * ZoomFactor;
+    }
+
+    private WpfPoint CalculateChartCenter()
+    {
+        return new WpfPoint(ActualWidth / 2 + _panOffsetX, ActualHeight / 2 + _panOffsetY);
+    }
+
+    private bool IsZoomed => ZoomFactor > DefaultZoomFactor + 0.001;
+
+    private void UpdatePan(WpfPoint point)
+    {
+        var deltaX = point.X - _panStartPoint.X;
+        var deltaY = point.Y - _panStartPoint.Y;
+        if (!_isPanning && deltaX * deltaX + deltaY * deltaY < PanClickToleranceSquared)
+        {
+            Cursor = WpfCursors.SizeAll;
+            ToolTip = null;
+            return;
+        }
+
+        _isPanning = true;
+        _panOffsetX = _panStartOffsetX + deltaX;
+        _panOffsetY = _panStartOffsetY + deltaY;
+        ClampPanOffset(CalculateOuterRadius());
+        Cursor = WpfCursors.SizeAll;
+        ToolTip = null;
+        InvalidateVisual();
+    }
+
+    private void UpdateHover(WpfPoint point)
+    {
+        var slice = SliceAt(point);
+        Cursor = slice is not null ? WpfCursors.Hand : IsZoomed ? WpfCursors.SizeAll : WpfCursors.Arrow;
+        ToolTip = slice is null ? null : $"{slice.Label}\n{slice.FormattedSize} ({slice.PercentText})";
+    }
+
+    private void UpdateHoverFromCurrentMousePosition()
+    {
+        if (PresentationSource.FromVisual(this) is not null)
+        {
+            UpdateHover(Mouse.GetPosition(this));
+        }
+    }
+
+    private void SelectSliceAt(WpfPoint point, int clickCount)
+    {
+        var slice = SliceAt(point);
+        if (slice is null)
+        {
+            return;
+        }
+
+        SelectedSlice = slice;
+        SliceSelected?.Invoke(this, new ChartSliceEventArgs(slice));
+        if (clickCount > 1)
+        {
+            SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice));
+        }
+    }
+
+    private void ClampPanOffset(double radius)
+    {
+        if (!IsZoomed || radius <= 0 || ActualWidth <= 0 || ActualHeight <= 0)
+        {
+            ResetPanOffset();
+            return;
+        }
+
+        var maxPanX = Math.Max(0, radius - ActualWidth / 2 + PanEdgeMargin);
+        var maxPanY = Math.Max(0, radius - ActualHeight / 2 + PanEdgeMargin);
+        _panOffsetX = Math.Clamp(_panOffsetX, -maxPanX, maxPanX);
+        _panOffsetY = Math.Clamp(_panOffsetY, -maxPanY, maxPanY);
+    }
+
+    private void ResetPanOffset()
+    {
+        _panOffsetX = 0;
+        _panOffsetY = 0;
+    }
+
+    private void CancelPanInteraction()
+    {
+        _isPotentialPanning = false;
+        _isPanning = false;
+        _pendingClickCount = 0;
+    }
+
+    private static double CalculateInnerRadius(double outerRadius) => outerRadius * 0.58;
 
     private static WpfPoint PointAt(WpfPoint center, double radius, double degrees)
     {

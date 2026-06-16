@@ -50,8 +50,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int MaxSessionScanCacheEntries = 8;
     private const string DefaultEmptyStateTitle = "Scan a folder to get started";
     private const string DefaultEmptyStateDetail = "Pick a drive or folder, then press Scan. You can also drag a folder onto this window.";
-    private static readonly TimeSpan AutomaticUpdateCheckInterval = TimeSpan.FromHours(12);
 
+    private static readonly TimeSpan StartupUpdateCheckTimeout = TimeSpan.FromSeconds(15);
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
     private readonly DiskScanner _scanner = new();
     private readonly ScanStore _store = new();
@@ -182,9 +182,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         Loaded -= MainWindow_Loaded;
         await LoadDriveRowsAsync();
-        if (ShouldRunAutomaticUpdateCheck())
+        if (_settings.AutoUpdateOnStartup)
         {
-            await CheckForUpdatesAsync(isAutomatic: true);
+            await CheckForUpdatesAsync(UpdateCheckMode.StartupAutoDownload);
         }
     }
 
@@ -316,6 +316,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         AutoRelaunchAdminMenuItem.IsChecked = IsRunAsAdministratorOnLaunchEnabled();
+        AutoUpdateOnStartupMenuItem.IsChecked = _settings.AutoUpdateOnStartup;
 
         _chartDisplayMode = _settings.ChartMode switch
         {
@@ -378,6 +379,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settings.ChartMode = _chartDisplayMode.ToString();
         _settings.LastPath = PathBox.Text ?? string.Empty;
         _settings.AutoRelaunchAsAdministrator = AutoRelaunchAdminMenuItem.IsChecked;
+        _settings.AutoUpdateOnStartup = AutoUpdateOnStartupMenuItem.IsChecked;
         _settings.RecentPaths = RecentPaths.Take(15).ToList();
     }
 
@@ -427,60 +429,109 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
     {
-        await CheckForUpdatesAsync(isAutomatic: false);
+        await CheckForUpdatesAsync(UpdateCheckMode.Manual);
     }
 
-    private async Task CheckForUpdatesAsync(bool isAutomatic)
+    private void AutoUpdateOnStartup_Click(object sender, RoutedEventArgs e)
     {
-        if (_updateCts is not null)
+        _settings.AutoUpdateOnStartup = AutoUpdateOnStartupMenuItem.IsChecked;
+        ScheduleSettingsSave();
+    }
+
+    private async Task CheckForUpdatesAsync(UpdateCheckMode mode)
+    {
+        if (_isClosing || _updateCts is not null)
         {
             return;
         }
 
+        var previousFooterStatus = FooterStatus.Text;
+        var previousFooterDetail = FooterDetail.Text;
         _updateCts = new CancellationTokenSource();
+        if (mode == UpdateCheckMode.StartupAutoDownload)
+        {
+            _updateCts.CancelAfter(StartupUpdateCheckTimeout);
+        }
+
         CheckUpdatesMenuItem.IsEnabled = false;
-        ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
+        if (mode == UpdateCheckMode.Manual)
+        {
+            ApplyUpdateStatus(AppUpdateStatusFactory.Checking());
+        }
 
         try
         {
-            var result = await _updates.CheckForUpdatesAsync();
-            MarkUpdateCheckCompleted();
-            ApplyUpdateStatus(result.Status);
+            var result = await _updates.CheckForUpdatesAsync().WaitAsync(_updateCts.Token);
+            if (mode == UpdateCheckMode.StartupAutoDownload)
+            {
+                _updateCts.CancelAfter(Timeout.InfiniteTimeSpan);
+            }
+
+            if (ShouldShowUpdateStatus(mode, result.Status.Kind))
+            {
+                ApplyUpdateStatus(result.Status);
+            }
 
             switch (result.Status.Kind)
             {
                 case AppUpdateStatusKind.NotInstalled:
-                    if (!isAutomatic)
+                    if (mode == UpdateCheckMode.Manual)
                     {
                         UpdateDialog.ShowInformation(this, "Updates unavailable", result.Status.Message, UpdateDialogTone.Warning);
                     }
+                    else
+                    {
+                        RestoreFooterStatus(previousFooterStatus, previousFooterDetail);
+                    }
                     break;
                 case AppUpdateStatusKind.UpToDate:
-                    if (!isAutomatic)
+                    if (mode == UpdateCheckMode.Manual)
                     {
                         UpdateDialog.ShowInformation(this, "Custodian is up to date", result.Status.Message, UpdateDialogTone.Success);
                     }
+                    else
+                    {
+                        RestoreFooterStatus(previousFooterStatus, previousFooterDetail);
+                    }
                     break;
                 case AppUpdateStatusKind.Available:
-                    await PromptDownloadAndInstallAsync(result, _updateCts.Token);
+                    if (mode == UpdateCheckMode.StartupAutoDownload)
+                    {
+                        await DownloadAndPromptInstallAsync(result, _updateCts.Token, mode);
+                    }
+                    else
+                    {
+                        await PromptDownloadAndInstallAsync(result, _updateCts.Token);
+                    }
                     break;
                 case AppUpdateStatusKind.ReadyToRestart:
-                    await PromptRestartForInstallAsync(result);
+                    await PromptRestartForInstallAsync(result, result.Status, mode);
                     break;
             }
         }
         catch (OperationCanceledException)
         {
-            UpdateFooterStatus("Updates", "Update check cancelled.");
+            if (mode == UpdateCheckMode.Manual)
+            {
+                UpdateFooterStatus("Updates", "Update check cancelled.");
+            }
+            else
+            {
+                RestoreFooterStatus(previousFooterStatus, previousFooterDetail);
+            }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Update check failed (automatic={IsAutomatic}).", isAutomatic);
+            Logger.LogError(ex, "Update check failed (mode={UpdateCheckMode}).", mode);
             var status = AppUpdateStatusFactory.Failed(ex.Message);
-            ApplyUpdateStatus(status);
-            if (!isAutomatic)
+            if (mode == UpdateCheckMode.Manual)
             {
+                ApplyUpdateStatus(status);
                 UpdateDialog.ShowInformation(this, "Update failed", status.Message, UpdateDialogTone.Error);
+            }
+            else
+            {
+                RestoreFooterStatus(previousFooterStatus, previousFooterDetail);
             }
         }
         finally
@@ -491,19 +542,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void MarkUpdateCheckCompleted()
-    {
-        _settings.LastAutomaticUpdateCheckUtc = DateTime.UtcNow;
-        ScheduleSettingsSave();
-    }
+    private bool ShouldShowUpdateStatus(UpdateCheckMode mode, AppUpdateStatusKind statusKind)
+        => mode == UpdateCheckMode.Manual
+           || (CanShowBackgroundUpdateStatus()
+               && statusKind is AppUpdateStatusKind.Available
+                   or AppUpdateStatusKind.Downloading
+                   or AppUpdateStatusKind.ReadyToRestart);
 
-    private bool ShouldRunAutomaticUpdateCheck()
+    private bool CanShowBackgroundUpdateStatus() => _activeScan is null && !_isRecycleBinViewActive;
+
+    private void RestoreFooterStatus(string status, string detail)
     {
-        var now = DateTime.UtcNow;
-        var lastCheck = _settings.LastAutomaticUpdateCheckUtc;
-        return lastCheck == DateTime.MinValue
-            || lastCheck > now
-            || now - lastCheck >= AutomaticUpdateCheckInterval;
+        if (!CanShowBackgroundUpdateStatus() || FooterStatus.Text != "Updates")
+        {
+            return;
+        }
+
+        FooterStatus.Text = status;
+        FooterDetail.Text = detail;
     }
 
     private async Task PromptDownloadAndInstallAsync(AppUpdateCheckResult result, CancellationToken cancellationToken)
@@ -522,16 +578,35 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var progress = new Progress<AppUpdateStatus>(ApplyUpdateStatus);
+        await DownloadAndPromptInstallAsync(result, cancellationToken, UpdateCheckMode.Manual);
+    }
+
+    private async Task DownloadAndPromptInstallAsync(
+        AppUpdateCheckResult result,
+        CancellationToken cancellationToken,
+        UpdateCheckMode mode)
+    {
+        var availableVersion = result.Status.AvailableVersion ?? "the latest version";
+        var progress = new Progress<AppUpdateStatus>(status => ApplyUpdateStatusIfVisible(status, mode));
         await _updates.DownloadUpdatesAsync(result, progress, cancellationToken);
 
         var readyStatus = AppUpdateStatusFactory.ReadyToRestart(availableVersion);
-        ApplyUpdateStatus(readyStatus);
+        ApplyUpdateStatusIfVisible(readyStatus, mode);
+        await PromptRestartForInstallAsync(result, readyStatus, mode);
+    }
 
+    private Task PromptRestartForInstallAsync(AppUpdateCheckResult result)
+        => PromptRestartForInstallAsync(result, result.Status, UpdateCheckMode.Manual);
+
+    private async Task PromptRestartForInstallAsync(
+        AppUpdateCheckResult result,
+        AppUpdateStatus status,
+        UpdateCheckMode mode)
+    {
         var shouldRestart = UpdateDialog.ShowConfirmation(
             this,
             "Install update",
-            $"{readyStatus.Message}\n\nRestart Custodian now to install it?",
+            $"{status.Message}\n\nRestart Custodian now to install it?",
             "Restart now",
             "Later");
 
@@ -541,21 +616,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        UpdateFooterStatus("Updates", "Update downloaded. Use Help > Check for Updates when you are ready to restart and install.");
+        if (mode == UpdateCheckMode.Manual || CanShowBackgroundUpdateStatus())
+        {
+            UpdateFooterStatus("Updates", "Update downloaded. Use Help > Check for Updates when you are ready to restart and install.");
+        }
     }
 
-    private async Task PromptRestartForInstallAsync(AppUpdateCheckResult result)
+    private void ApplyUpdateStatusIfVisible(AppUpdateStatus status, UpdateCheckMode mode)
     {
-        var shouldRestart = UpdateDialog.ShowConfirmation(
-            this,
-            "Install update",
-            $"{result.Status.Message}\n\nRestart Custodian now to install it?",
-            "Restart now",
-            "Later");
-
-        if (shouldRestart)
+        if (mode == UpdateCheckMode.Manual || CanShowBackgroundUpdateStatus())
         {
-            await ApplyUpdateAndShutdownAsync(result);
+            ApplyUpdateStatus(status);
         }
     }
 
@@ -1024,6 +1095,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _chartDisplayMode = mode;
         UpdateChartModeVisibility();
         ScheduleSettingsSave();
+    }
+
+    private void ResetPieZoom_Click(object sender, RoutedEventArgs e)
+    {
+        ResetPieZoom();
+    }
+
+    private void ResetPieZoom()
+    {
+        if (PieZoomSlider is not null)
+        {
+            PieZoomSlider.Value = 1;
+        }
     }
 
     private void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
@@ -2281,6 +2365,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _visibleScanKey = cached.RootKey;
         _visibleCachedScan = cached;
         StopLoadingAnimation();
+        ResetPieZoom();
 
         FolderNodes.Clear();
         FolderNodes.Add(cached.Preparation.RootNode);
@@ -2749,6 +2834,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailRows.Clear();
         _boundDetailRows = null;
         ChartSlices.Clear();
+        ResetPieZoom();
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
@@ -2816,6 +2902,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailRows.Clear();
         _boundDetailRows = null;
         ChartSlices.Clear();
+        ResetPieZoom();
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
@@ -2983,6 +3070,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         TreemapHost.Visibility = _chartDisplayMode == ChartDisplayMode.Treemap ? Visibility.Visible : Visibility.Collapsed;
         PieHost.Visibility = _chartDisplayMode == ChartDisplayMode.Pie ? Visibility.Visible : Visibility.Collapsed;
+        PieZoomControls.Visibility = _chartDisplayMode == ChartDisplayMode.Pie ? Visibility.Visible : Visibility.Collapsed;
         BarHost.Visibility = _chartDisplayMode == ChartDisplayMode.Bars ? Visibility.Visible : Visibility.Collapsed;
         Treemap.InvalidateVisual();
         PieChart.InvalidateVisual();
@@ -3473,4 +3561,5 @@ public enum TargetKind
 internal enum DetailViewMode { Contents, LargestFiles, LargestFolders, Extensions }
 internal enum ChartScope { SelectedFolder, LargestFolders, LargestFiles, Extensions }
 internal enum ChartDisplayMode { Treemap, Pie, Bars }
+internal enum UpdateCheckMode { Manual, StartupAutoDownload }
 internal enum DetailSortColumn { Name, Kind, LogicalSize, Percent, AllocatedSize, FileCount, DirectoryCount, FullPath }

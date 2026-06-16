@@ -92,7 +92,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.2.0
+.\scripts\publish-velopack.ps1 -Version 1.3.0
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -115,6 +115,10 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 Custodian follows the update channel embedded in the installed Velopack package.
 The scripts default to the `win` channel; pass `-Channel <name>` when producing
 or uploading another channel.
+
+Installed apps check for updates on startup by default. Use Help > Automatically
+download updates on startup to turn the launch-time check/download on or off;
+Custodian still asks before restarting to install a downloaded update.
 
 Optional environment overrides:
 
