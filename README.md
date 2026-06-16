@@ -92,7 +92,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.2.0
+.\scripts\publish-velopack.ps1 -Version 1.3.0
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
