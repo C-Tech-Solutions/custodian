@@ -497,7 +497,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 case AppUpdateStatusKind.Available:
                     if (mode == UpdateCheckMode.StartupAutoDownload)
                     {
-                        await DownloadAndPromptInstallAsync(result, _updateCts.Token);
+                        await DownloadAndPromptInstallAsync(result, _updateCts.Token, mode);
                     }
                     else
                     {
@@ -505,7 +505,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     }
                     break;
                 case AppUpdateStatusKind.ReadyToRestart:
-                    await PromptRestartForInstallAsync(result);
+                    await PromptRestartForInstallAsync(result, result.Status, mode);
                     break;
             }
         }
@@ -542,15 +542,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private static bool ShouldShowUpdateStatus(UpdateCheckMode mode, AppUpdateStatusKind statusKind)
+    private bool ShouldShowUpdateStatus(UpdateCheckMode mode, AppUpdateStatusKind statusKind)
         => mode == UpdateCheckMode.Manual
-           || statusKind is AppUpdateStatusKind.Available
-               or AppUpdateStatusKind.Downloading
-               or AppUpdateStatusKind.ReadyToRestart;
+           || (CanShowBackgroundUpdateStatus()
+               && statusKind is AppUpdateStatusKind.Available
+                   or AppUpdateStatusKind.Downloading
+                   or AppUpdateStatusKind.ReadyToRestart);
+
+    private bool CanShowBackgroundUpdateStatus() => _activeScan is null && !_isRecycleBinViewActive;
 
     private void RestoreFooterStatus(string status, string detail)
     {
-        if (_activeScan is not null || _isRecycleBinViewActive || FooterStatus.Text != "Updates")
+        if (!CanShowBackgroundUpdateStatus() || FooterStatus.Text != "Updates")
         {
             return;
         }
@@ -575,24 +578,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        await DownloadAndPromptInstallAsync(result, cancellationToken);
+        await DownloadAndPromptInstallAsync(result, cancellationToken, UpdateCheckMode.Manual);
     }
 
-    private async Task DownloadAndPromptInstallAsync(AppUpdateCheckResult result, CancellationToken cancellationToken)
+    private async Task DownloadAndPromptInstallAsync(
+        AppUpdateCheckResult result,
+        CancellationToken cancellationToken,
+        UpdateCheckMode mode)
     {
         var availableVersion = result.Status.AvailableVersion ?? "the latest version";
-        var progress = new Progress<AppUpdateStatus>(ApplyUpdateStatus);
+        var progress = new Progress<AppUpdateStatus>(status => ApplyUpdateStatusIfVisible(status, mode));
         await _updates.DownloadUpdatesAsync(result, progress, cancellationToken);
 
         var readyStatus = AppUpdateStatusFactory.ReadyToRestart(availableVersion);
-        ApplyUpdateStatus(readyStatus);
-        await PromptRestartForInstallAsync(result, readyStatus);
+        ApplyUpdateStatusIfVisible(readyStatus, mode);
+        await PromptRestartForInstallAsync(result, readyStatus, mode);
     }
 
     private Task PromptRestartForInstallAsync(AppUpdateCheckResult result)
-        => PromptRestartForInstallAsync(result, result.Status);
+        => PromptRestartForInstallAsync(result, result.Status, UpdateCheckMode.Manual);
 
-    private async Task PromptRestartForInstallAsync(AppUpdateCheckResult result, AppUpdateStatus status)
+    private async Task PromptRestartForInstallAsync(
+        AppUpdateCheckResult result,
+        AppUpdateStatus status,
+        UpdateCheckMode mode)
     {
         var shouldRestart = UpdateDialog.ShowConfirmation(
             this,
@@ -607,7 +616,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        UpdateFooterStatus("Updates", "Update downloaded. Use Help > Check for Updates when you are ready to restart and install.");
+        if (mode == UpdateCheckMode.Manual || CanShowBackgroundUpdateStatus())
+        {
+            UpdateFooterStatus("Updates", "Update downloaded. Use Help > Check for Updates when you are ready to restart and install.");
+        }
+    }
+
+    private void ApplyUpdateStatusIfVisible(AppUpdateStatus status, UpdateCheckMode mode)
+    {
+        if (mode == UpdateCheckMode.Manual || CanShowBackgroundUpdateStatus())
+        {
+            ApplyUpdateStatus(status);
+        }
     }
 
     private void ApplyUpdateStatus(AppUpdateStatus status)
