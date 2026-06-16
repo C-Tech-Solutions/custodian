@@ -2,6 +2,12 @@
 
 All notable changes to Custodian are tracked here.
 
+## Unreleased
+
+### Added
+
+- Added a Help menu toggle to automatically check for and download updates on startup while still asking before restart/install.
+
 ## 1.2.0 - 2026-06-14
 
 ### Added
