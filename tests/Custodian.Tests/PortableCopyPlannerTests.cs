@@ -170,6 +170,41 @@ public sealed class PortableCopyPlannerTests
     }
 
     [Fact]
+    public void BuildPlanKeepsCollidingSanitizedSubfoldersSeparate()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+        var albums = Directory("Pixel/Internal shared storage/Albums", "albums");
+        var first = Directory("Pixel/Internal shared storage/Albums/A:B", "first");
+        var second = Directory("Pixel/Internal shared storage/Albums/A?B", "second");
+        var firstPhoto = File("Pixel/Internal shared storage/Albums/A:B/photo.jpg", "first-photo");
+        var secondPhoto = File("Pixel/Internal shared storage/Albums/A?B/photo.jpg", "second-photo");
+        first.Children.Add(firstPhoto);
+        second.Children.Add(secondPhoto);
+        albums.Children.Add(first);
+        albums.Children.Add(second);
+
+        var plan = PortableCopyPlanner.BuildPlan([albums], destination);
+
+        Assert.Contains(plan.Items, item =>
+            item.Entry == firstPhoto &&
+            item.DestinationPath == Path.Combine(destination, "Albums", "A_B", "photo.jpg"));
+        Assert.Contains(plan.Items, item =>
+            item.Entry == secondPhoto &&
+            item.DestinationPath == Path.Combine(destination, "Albums", "A_B (1)", "photo.jpg"));
+    }
+
+    [Theory]
+    [InlineData("CON", "CON_")]
+    [InlineData("con.txt", "con_.txt")]
+    [InlineData("NUL.", "NUL_")]
+    [InlineData("COM1.jpg", "COM1_.jpg")]
+    [InlineData("LPT9", "LPT9_")]
+    public void SanitizeFileNameRenamesWindowsReservedDeviceNames(string name, string expected)
+    {
+        Assert.Equal(expected, PortableCopyPlanner.SanitizeFileName(name));
+    }
+
+    [Fact]
     public void BuildPlanRenamesTopLevelFolderWhenDestinationFileConflicts()
     {
         var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");

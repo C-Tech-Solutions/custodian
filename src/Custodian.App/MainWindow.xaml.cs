@@ -2458,8 +2458,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var result = PortableDeviceExplorerService.Open(currentScan, entry, mode);
-        ShowPortableExplorerResult(result, entry, mode);
+        try
+        {
+            var result = PortableDeviceExplorerService.Open(currentScan, entry, mode);
+            ShowPortableExplorerResult(result, entry, mode);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to open portable device item in Explorer.");
+            ShowPortableExplorerResult(
+                PortableExplorerOpenResult.Failed(ex.Message),
+                entry,
+                mode);
+        }
     }
 
     private void ShowPortableExplorerResult(

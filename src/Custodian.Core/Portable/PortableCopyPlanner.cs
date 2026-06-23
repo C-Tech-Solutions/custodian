@@ -5,6 +5,31 @@ namespace Custodian.Core.Portable;
 public static class PortableCopyPlanner
 {
     private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
+    private static readonly HashSet<string> ReservedWindowsFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9"
+    };
 
     public static PortableCopyPlan BuildPlan(
         IEnumerable<FileSystemEntry> selectedEntries,
@@ -38,46 +63,50 @@ public static class PortableCopyPlanner
                 destinationRoot,
                 usedTopLevelDirectories,
                 usedPaths);
-            AddEmptyDirectories(entry, entry, topFolderName, destinationRoot, items, usedPaths);
-
-            var files = entry.Flatten()
-                .Where(child => !child.IsDirectory)
-                .OrderBy(child => child.FullPath, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var file in files)
-            {
-                var relativeInsideFolder = RelativePortablePath(entry, file);
-                var relativePath = Path.Combine(topFolderName, relativeInsideFolder);
-                AddFile(file, relativePath, destinationRoot, items, skipped, usedPaths);
-            }
+            var directoryPaths = new Dictionary<FileSystemEntry, string>();
+            ReserveDirectoryDestinations(entry, topFolderName, destinationRoot, usedPaths, directoryPaths);
+            AddEmptyDirectories(entry, destinationRoot, items, directoryPaths);
+            AddFiles(entry, destinationRoot, items, skipped, usedPaths, directoryPaths);
         }
 
         return new PortableCopyPlan(items, skipped);
     }
 
-    private static bool AddEmptyDirectories(
-        FileSystemEntry root,
+    private static void ReserveDirectoryDestinations(
         FileSystemEntry directory,
-        string topFolderName,
+        string relativePath,
+        string destinationRoot,
+        ISet<string> usedPaths,
+        Dictionary<FileSystemEntry, string> directoryPaths)
+    {
+        directoryPaths[directory] = relativePath;
+        usedPaths.Add(Path.Combine(destinationRoot, relativePath));
+
+        var childDirectories = directory.Children
+            .Where(child => child.IsDirectory)
+            .OrderBy(child => child.FullPath, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var child in childDirectories)
+        {
+            var desiredRelativePath = Path.Combine(relativePath, SanitizeFileName(child.Name));
+            var destinationPath = GetAvailableDirectoryPath(Path.Combine(destinationRoot, desiredRelativePath), usedPaths);
+            var childRelativePath = Path.GetRelativePath(destinationRoot, destinationPath);
+            ReserveDirectoryDestinations(child, childRelativePath, destinationRoot, usedPaths, directoryPaths);
+        }
+    }
+
+    private static bool AddEmptyDirectories(
+        FileSystemEntry directory,
         string destinationRoot,
         List<PortableCopyPlanItem> items,
-        ISet<string> usedPaths)
+        IReadOnlyDictionary<FileSystemEntry, string> directoryPaths)
     {
-        var relativeInsideFolder = ReferenceEquals(root, directory)
-            ? string.Empty
-            : RelativePortablePath(root, directory);
-        var relativePath = string.IsNullOrWhiteSpace(relativeInsideFolder)
-            ? topFolderName
-            : Path.Combine(topFolderName, relativeInsideFolder);
-        var destinationPath = Path.Combine(destinationRoot, SanitizeRelativePath(relativePath));
-        usedPaths.Add(destinationPath);
-
         var containsFile = false;
         foreach (var child in directory.Children)
         {
             if (child.IsDirectory)
             {
-                containsFile |= AddEmptyDirectories(root, child, topFolderName, destinationRoot, items, usedPaths);
+                containsFile |= AddEmptyDirectories(child, destinationRoot, items, directoryPaths);
             }
             else
             {
@@ -87,10 +116,45 @@ public static class PortableCopyPlanner
 
         if (!containsFile)
         {
+            var relativePath = directoryPaths[directory];
+            var destinationPath = Path.Combine(destinationRoot, relativePath);
             items.Add(new PortableCopyPlanItem(directory, relativePath, destinationPath, IsDirectory: true));
         }
 
         return containsFile;
+    }
+
+    private static void AddFiles(
+        FileSystemEntry directory,
+        string destinationRoot,
+        List<PortableCopyPlanItem> items,
+        List<SkippedEntry> skipped,
+        ISet<string> usedPaths,
+        IReadOnlyDictionary<FileSystemEntry, string> directoryPaths)
+    {
+        var files = directory.Children
+            .Where(child => !child.IsDirectory)
+            .OrderBy(child => child.FullPath, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in files)
+        {
+            AddFile(
+                file,
+                Path.Combine(directoryPaths[directory], SanitizeFileName(file.Name)),
+                destinationRoot,
+                items,
+                skipped,
+                usedPaths);
+        }
+
+        var childDirectories = directory.Children
+            .Where(child => child.IsDirectory)
+            .OrderBy(child => child.FullPath, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var child in childDirectories)
+        {
+            AddFiles(child, destinationRoot, items, skipped, usedPaths, directoryPaths);
+        }
     }
 
     private static void AddFile(
@@ -165,20 +229,6 @@ public static class PortableCopyPlanner
         return false;
     }
 
-    private static string RelativePortablePath(FileSystemEntry root, FileSystemEntry file)
-    {
-        var rootPath = root.FullPath.TrimEnd('/', '\\');
-        var fullPath = file.FullPath;
-        if (fullPath.Length > rootPath.Length &&
-            fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) &&
-            (fullPath[rootPath.Length] == '/' || fullPath[rootPath.Length] == '\\'))
-        {
-            return SanitizeRelativePath(fullPath[(rootPath.Length + 1)..]);
-        }
-
-        return SanitizeFileName(file.Name);
-    }
-
     private static string SanitizeRelativePath(string relativePath)
     {
         var segments = relativePath
@@ -209,7 +259,24 @@ public static class PortableCopyPlanner
         }
 
         name = name.TrimEnd('.', ' ');
-        return string.IsNullOrWhiteSpace(name) ? "Unnamed" : name;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "Unnamed";
+        }
+
+        return RenameReservedDeviceName(name);
+    }
+
+    private static string RenameReservedDeviceName(string name)
+    {
+        var extension = Path.GetExtension(name);
+        var baseName = string.IsNullOrEmpty(extension)
+            ? name
+            : name[..^extension.Length];
+
+        return !string.IsNullOrWhiteSpace(baseName) && ReservedWindowsFileNames.Contains(baseName)
+            ? $"{baseName}_{extension}"
+            : name;
     }
 
     private static string GetAvailableTopLevelDirectorySegment(
@@ -261,6 +328,25 @@ public static class PortableCopyPlanner
         for (var index = 1; ; index++)
         {
             var candidate = Path.Combine(directory, $"{fileName} ({index}){extension}");
+            if (!usedPaths.Contains(candidate) && !File.Exists(candidate) && !Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static string GetAvailableDirectoryPath(string path, ISet<string> usedPaths)
+    {
+        if (!usedPaths.Contains(path) && !File.Exists(path) && !Directory.Exists(path))
+        {
+            return path;
+        }
+
+        var directory = Path.GetDirectoryName(path) ?? string.Empty;
+        var folderName = Path.GetFileName(path);
+        for (var index = 1; ; index++)
+        {
+            var candidate = Path.Combine(directory, $"{folderName} ({index})");
             if (!usedPaths.Contains(candidate) && !File.Exists(candidate) && !Directory.Exists(candidate))
             {
                 return candidate;
