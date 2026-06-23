@@ -125,6 +125,26 @@ public sealed class PortableCopyPlannerTests
             item.DestinationPath == Path.Combine(destination, "Albums", "Empty", "Nested"));
     }
 
+    [Fact]
+    public void BuildPlanRenamesTopLevelFolderWhenDestinationFileConflicts()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+        var camera = Directory("Pixel/Internal shared storage/DCIM/Camera", "camera");
+        var photo = File("Pixel/Internal shared storage/DCIM/Camera/photo.jpg", "photo");
+        camera.Children.Add(photo);
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Path.Combine(destination, "Camera")
+        };
+
+        var plan = PortableCopyPlanner.BuildPlan([camera], destination, existing);
+
+        var item = Assert.Single(plan.Items);
+        Assert.Equal(photo, item.Entry);
+        Assert.Equal(Path.Combine("Camera (1)", "photo.jpg"), item.RelativePath);
+        Assert.Equal(Path.Combine(destination, "Camera (1)", "photo.jpg"), item.DestinationPath);
+    }
+
     private static FileSystemEntry Directory(string path, string objectId) => new()
     {
         Name = path.Split('/').Last(),

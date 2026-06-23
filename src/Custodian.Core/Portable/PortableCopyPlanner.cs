@@ -33,7 +33,12 @@ public static class PortableCopyPlanner
                 continue;
             }
 
-            var topFolderName = GetAvailableSegment(SanitizeFileName(entry.Name), usedTopLevelDirectories);
+            var topFolderName = GetAvailableTopLevelDirectorySegment(
+                SanitizeFileName(entry.Name),
+                destinationRoot,
+                usedTopLevelDirectories,
+                usedPaths);
+            usedPaths.Add(Path.Combine(destinationRoot, topFolderName));
             AddEmptyDirectories(entry, entry, topFolderName, destinationRoot, items);
 
             var files = entry.Flatten()
@@ -183,21 +188,39 @@ public static class PortableCopyPlanner
         return string.IsNullOrWhiteSpace(name) ? "Unnamed" : name;
     }
 
-    private static string GetAvailableSegment(string segment, ISet<string> usedSegments)
+    private static string GetAvailableTopLevelDirectorySegment(
+        string segment,
+        string destinationRoot,
+        ISet<string> usedSegments,
+        ISet<string> usedPaths)
     {
-        if (usedSegments.Add(segment))
+        if (IsAvailableTopLevelDirectorySegment(segment, destinationRoot, usedSegments, usedPaths))
         {
+            usedSegments.Add(segment);
             return segment;
         }
 
         for (var index = 1; ; index++)
         {
             var candidate = $"{segment} ({index})";
-            if (usedSegments.Add(candidate))
+            if (IsAvailableTopLevelDirectorySegment(candidate, destinationRoot, usedSegments, usedPaths))
             {
+                usedSegments.Add(candidate);
                 return candidate;
             }
         }
+    }
+
+    private static bool IsAvailableTopLevelDirectorySegment(
+        string segment,
+        string destinationRoot,
+        ISet<string> usedSegments,
+        ISet<string> usedPaths)
+    {
+        var destinationPath = Path.Combine(destinationRoot, segment);
+        return !usedSegments.Contains(segment) &&
+            !usedPaths.Contains(destinationPath) &&
+            !File.Exists(destinationPath);
     }
 
     private static string GetAvailablePath(string path, ISet<string> usedPaths)

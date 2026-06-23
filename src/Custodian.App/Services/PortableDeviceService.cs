@@ -114,7 +114,17 @@ internal sealed class PortableDeviceService
             foreach (var objectId in EnumerateChildIds(content, PortableDeviceApi.WPD_DEVICE_OBJECT_ID, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var item = ReadObjectProperties(properties, keys, objectId);
+                PortableObjectProperties item;
+                try
+                {
+                    item = ReadObjectProperties(properties, keys, objectId);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogInformation(ex, "Failed to read properties for object {ObjectId} on device {DeviceName}.", objectId, deviceName);
+                    continue;
+                }
+
                 if (!item.IsStorage)
                 {
                     continue;
@@ -338,12 +348,20 @@ internal sealed class PortableDeviceService
     private static PortableDeviceApi.IPortableDevice OpenDevice(string deviceId)
     {
         PortableDeviceApi.IPortableDeviceValues? clientInfo = null;
+        PortableDeviceApi.IPortableDevice? device = null;
         try
         {
             clientInfo = CreateClientInfo();
-            var device = (PortableDeviceApi.IPortableDevice)new PortableDeviceApi.PortableDeviceFTM();
+            device = (PortableDeviceApi.IPortableDevice)new PortableDeviceApi.PortableDeviceFTM();
             device.Open(deviceId, clientInfo);
-            return device;
+            var result = device;
+            device = null;
+            return result;
+        }
+        catch
+        {
+            ReleaseComObject(device);
+            throw;
         }
         finally
         {
@@ -920,8 +938,21 @@ internal sealed class PortableDeviceService
                 Marshal.FreeCoTaskMem(bytesReadPointer);
             }
 
-            ReleaseComObject(stream);
+            if (disposing)
+            {
+                ReleaseComObject(stream);
+            }
+
             base.Dispose(disposing);
+            if (disposing)
+            {
+                GC.SuppressFinalize(this);
+            }
+        }
+
+        ~PortableDeviceReadStream()
+        {
+            Dispose(disposing: false);
         }
     }
 
