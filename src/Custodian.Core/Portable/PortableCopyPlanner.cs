@@ -220,7 +220,8 @@ public static class PortableCopyPlanner
         var destinationPath = Path.Combine(destinationRoot, segment);
         return !usedSegments.Contains(segment) &&
             !usedPaths.Contains(destinationPath) &&
-            !File.Exists(destinationPath);
+            !File.Exists(destinationPath) &&
+            !Directory.Exists(destinationPath);
     }
 
     private static string GetAvailablePath(string path, ISet<string> usedPaths)

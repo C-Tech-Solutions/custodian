@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Custodian.Core.Model;
 
@@ -111,11 +112,21 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
         }
         finally
         {
+            ArrayPool<byte>.Shared.Return(buffer);
+            Exception? disposeFailure = null;
             if (destination is not null)
             {
                 if (success)
                 {
-                    await destination.DisposeAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await destination.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        success = false;
+                        disposeFailure = ex;
+                    }
                 }
                 else
                 {
@@ -130,11 +141,14 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
                 }
             }
 
-            ArrayPool<byte>.Shared.Return(buffer);
-
             if (deletePartialFile && !success)
             {
                 DeletePartialFile(destinationPath);
+            }
+
+            if (disposeFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(disposeFailure).Throw();
             }
         }
     }

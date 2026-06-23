@@ -145,6 +145,33 @@ public sealed class PortableCopyPlannerTests
         Assert.Equal(Path.Combine(destination, "Camera (1)", "photo.jpg"), item.DestinationPath);
     }
 
+    [Fact]
+    public void BuildPlanRenamesTopLevelFolderWhenDestinationDirectoryExists()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+        try
+        {
+            System.IO.Directory.CreateDirectory(Path.Combine(destination, "Camera"));
+            var camera = Directory("Pixel/Internal shared storage/DCIM/Camera", "camera");
+            var photo = File("Pixel/Internal shared storage/DCIM/Camera/photo.jpg", "photo");
+            camera.Children.Add(photo);
+
+            var plan = PortableCopyPlanner.BuildPlan([camera], destination);
+
+            var item = Assert.Single(plan.Items);
+            Assert.Equal(photo, item.Entry);
+            Assert.Equal(Path.Combine("Camera (1)", "photo.jpg"), item.RelativePath);
+            Assert.Equal(Path.Combine(destination, "Camera (1)", "photo.jpg"), item.DestinationPath);
+        }
+        finally
+        {
+            if (System.IO.Directory.Exists(destination))
+            {
+                System.IO.Directory.Delete(destination, recursive: true);
+            }
+        }
+    }
+
     private static FileSystemEntry Directory(string path, string objectId) => new()
     {
         Name = path.Split('/').Last(),
