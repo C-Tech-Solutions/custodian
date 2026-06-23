@@ -88,8 +88,83 @@ public sealed class ScanViewProjectorTests
         var deep = alpha.Children.Single(child => child.Name == "Deep");
 
         var breadcrumbs = ScanViewProjector.Breadcrumb(result.Root, deep);
+        var file = deep.Children.Single(child => child.Name == "nested.txt");
+        var foundFileParent = ScanViewProjector.TryFindParent(result.Root, file, out var fileParent);
 
         Assert.Equal([@"C:\", "Alpha", "Deep"], breadcrumbs.Select(item => item.Name).ToList());
+        Assert.True(foundFileParent);
+        Assert.Equal(@"C:\Alpha\Deep", fileParent.FullPath);
+    }
+
+    [Fact]
+    public void BreadcrumbAndParentSupportNonFileSystemPaths()
+    {
+        var root = Directory("Pixel/Internal shared storage", 200, 1, 2);
+        var dcim = Directory("Pixel/Internal shared storage/DCIM", 200, 1, 1);
+        var camera = Directory("Pixel/Internal shared storage/DCIM/Camera", 200, 1, 0);
+        camera.Children.Add(File("Pixel/Internal shared storage/DCIM/Camera/photo.jpg", 200, ".jpg"));
+        dcim.Children.Add(camera);
+        root.Children.Add(dcim);
+
+        var breadcrumbs = ScanViewProjector.Breadcrumb(root, camera);
+        var foundParent = ScanViewProjector.TryFindParent(root, camera, out var parent);
+        var photo = camera.Children.Single(child => child.Name == "photo.jpg");
+        var foundFileParent = ScanViewProjector.TryFindParent(root, photo, out var fileParent);
+
+        Assert.Equal(["Internal shared storage", "DCIM", "Camera"], breadcrumbs.Select(item => item.Name).ToList());
+        Assert.True(foundParent);
+        Assert.Equal("Pixel/Internal shared storage/DCIM", parent.FullPath);
+        Assert.True(foundFileParent);
+        Assert.Equal("Pixel/Internal shared storage/DCIM/Camera", fileParent.FullPath);
+    }
+
+    [Fact]
+    public void NonFileSystemLookupUsesPathSegments()
+    {
+        var root = Directory("Pixel/Internal shared storage", 200, 0, 2);
+        var other = Directory("Pixel/Internal shared storage/Other", 200, 0, 1);
+        other.Children.Add(Directory("Pixel/Internal shared storage/DCIM/Camera", 200, 0, 0));
+        root.Children.Add(other);
+
+        var found = ScanViewProjector.TryFindDirectoryByPath(
+            root,
+            "Pixel/Internal shared storage/DCIM/Camera",
+            out _);
+
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void TryFindDirectoryByPathReturnsFalseForNullPath()
+    {
+        var root = Directory("Pixel/Internal shared storage", 200, 0, 0);
+
+        var found = ScanViewProjector.TryFindDirectoryByPath(root, null!, out _);
+
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void TryFindParentReturnsFalseForNullArguments()
+    {
+        var root = Directory(@"C:\", 0, 0, 0);
+        var child = Directory(@"C:\Child", 0, 0, 0);
+
+        Assert.False(ScanViewProjector.TryFindParent(null!, child, out _));
+        Assert.False(ScanViewProjector.TryFindParent(root, null!, out _));
+    }
+
+    [Fact]
+    public void TryFindParentFindsRootForSingleSegmentPortablePath()
+    {
+        var root = Directory("/", 0, 0, 1);
+        var child = Directory("/DCIM", 0, 0, 0);
+        root.Children.Add(child);
+
+        var found = ScanViewProjector.TryFindParent(root, child, out var parent);
+
+        Assert.True(found);
+        Assert.Equal(root, parent);
     }
 
     [Fact]

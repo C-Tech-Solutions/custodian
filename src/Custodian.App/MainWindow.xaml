@@ -264,7 +264,18 @@
                         <RowDefinition Height="8"/>
                         <RowDefinition Height="*" MinHeight="120"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="14,12,14,4"/>
+                    <Grid Margin="14,10,10,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="0,2,0,0"/>
+                        <Button Grid.Column="1"
+                                Style="{StaticResource ExplorerNavButton}"
+                                Content="Refresh"
+                                Click="RefreshTargets_Click"
+                                ToolTip="Refresh drives and connected phones"/>
+                    </Grid>
                     <ListBox x:Name="DriveList" Grid.Row="1"
                              ItemsSource="{Binding TargetRows}"
                              SelectionChanged="DriveList_SelectionChanged"
@@ -578,6 +589,7 @@
                             </StackPanel>
                             <ListView x:Name="DetailsGrid"
                                       ItemsSource="{Binding DetailRowsView}"
+                                      SelectionMode="Extended"
                                       VirtualizingPanel.IsVirtualizing="True"
                                       VirtualizingPanel.VirtualizationMode="Recycling"
                                       ScrollViewer.CanContentScroll="True"
@@ -586,9 +598,11 @@
                                       PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown"
                                       PreviewKeyDown="DetailsGrid_PreviewKeyDown">
                                 <ListView.ContextMenu>
-                                    <ContextMenu>
+                                    <ContextMenu Opened="DetailsContextMenu_Opened">
                                         <MenuItem Header="Open" Click="OpenSelected_Click"/>
                                         <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                        <MenuItem x:Name="CopyPortableToPcMenuItem" Header="Copy selected files to PC..." Click="CopyPortableToPc_Click"/>
+                                        <Separator x:Name="CopyPortableToPcSeparator"/>
                                         <Separator/>
                                         <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
                                         <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
@@ -889,20 +903,28 @@
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Button Click="EmptyStateDrive_Click" Tag="{Binding RootPath}"
-                                                Margin="4" Padding="14,8">
-                                            <StackPanel Orientation="Horizontal">
-                                                <Viewbox Width="14" Height="14" VerticalAlignment="Center">
-                                                    <Path Data="{StaticResource IconDriveGeometry}"
-                                                          Stroke="{DynamicResource AccentBrush}"
-                                                          Style="{StaticResource VectorIconPath}"/>
-                                                </Viewbox>
-                                                <StackPanel Margin="10,0,0,0">
-                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold"/>
+                                        <Button Click="EmptyStateDrive_Click"
+                                                Margin="4" Padding="14,8"
+                                                MinWidth="132" MaxWidth="220">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Icon}"
+                                                           FontFamily="{StaticResource IconFont}"
+                                                           FontSize="14"
+                                                           Foreground="{Binding IconBrush, Converter={x:Static controls:ColorStringToBrushConverter.Instance}}"
+                                                           VerticalAlignment="Center"/>
+                                                <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                                    <TextBlock Text="{Binding Label}"
+                                                               FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis"/>
                                                     <TextBlock Text="{Binding UsedText}"
+                                                               TextTrimming="CharacterEllipsis"
                                                                Foreground="{DynamicResource MutedBrush}" FontSize="10.5"/>
                                                 </StackPanel>
-                                            </StackPanel>
+                                            </Grid>
                                         </Button>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

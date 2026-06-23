@@ -187,7 +187,7 @@ public static class ScanViewProjector
 
     public static IReadOnlyList<BreadcrumbItem> Breadcrumb(FileSystemEntry root, FileSystemEntry selected)
     {
-        if (!TryBuildPathBySegments(root, selected.FullPath, out var path))
+        if (!TryBuildPath(root, selected.FullPath, out var path))
         {
             return [];
         }
@@ -197,13 +197,40 @@ public static class ScanViewProjector
 
     public static bool TryFindDirectoryByPath(FileSystemEntry root, string fullPath, out FileSystemEntry entry)
     {
-        if (TryBuildPathBySegments(root, fullPath, out var path) && path.Count > 0)
+        if (TryBuildPath(root, fullPath, out var path) && path.Count > 0)
         {
             entry = path[^1];
             return true;
         }
 
         entry = null!;
+        return false;
+    }
+
+    public static bool TryFindParent(FileSystemEntry root, FileSystemEntry child, out FileSystemEntry parent)
+    {
+        parent = null!;
+        if (root is null || child is null)
+        {
+            return false;
+        }
+
+        if (child.IsDirectory)
+        {
+            if (TryBuildPath(root, child.FullPath, out var directoryPath) && directoryPath.Count > 1)
+            {
+                parent = directoryPath[^2];
+                return true;
+            }
+        }
+        else if (TryGetParentPath(child.FullPath, out var parentPath) &&
+            TryBuildPath(root, parentPath, out var fileParentPath) &&
+            fileParentPath.Count > 0)
+        {
+            parent = fileParentPath[^1];
+            return true;
+        }
+
         return false;
     }
 
@@ -490,10 +517,31 @@ public static class ScanViewProjector
         return -StringComparer.OrdinalIgnoreCase.Compare(left.FullPath, right.FullPath);
     }
 
-    private static bool TryBuildPathBySegments(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
+    private static bool TryBuildPath(FileSystemEntry root, string? fullPath, out List<FileSystemEntry> path)
+    {
+        path = [];
+        if (string.IsNullOrEmpty(fullPath))
+        {
+            return false;
+        }
+
+        if (TryBuildFileSystemPath(root, fullPath, out path))
+        {
+            return true;
+        }
+
+        return TryBuildPortablePath(root, fullPath, out path);
+    }
+
+    private static bool TryBuildFileSystemPath(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
     {
         path = [];
         if (!root.IsDirectory)
+        {
+            return false;
+        }
+
+        if (!IsFullyQualifiedPath(root.FullPath) || !IsFullyQualifiedPath(fullPath))
         {
             return false;
         }
@@ -504,7 +552,17 @@ public static class ScanViewProjector
             return true;
         }
 
-        var relativePath = Path.GetRelativePath(root.FullPath, fullPath);
+        string relativePath;
+        try
+        {
+            relativePath = Path.GetRelativePath(root.FullPath, fullPath);
+        }
+        catch (ArgumentException)
+        {
+            path.Clear();
+            return false;
+        }
+
         if (relativePath == "." || Path.IsPathRooted(relativePath) || IsParentRelativePath(relativePath))
         {
             path.Clear();
@@ -512,7 +570,9 @@ public static class ScanViewProjector
         }
 
         var current = root;
-        foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var segment in relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries))
         {
             var next = current.Children.FirstOrDefault(child =>
                 child.IsDirectory &&
@@ -523,19 +583,126 @@ public static class ScanViewProjector
                 return false;
             }
 
+            path.Add(next);
             current = next;
-            path.Add(current);
         }
 
-        return string.Equals(current.FullPath, fullPath, StringComparison.OrdinalIgnoreCase);
+        return true;
+    }
+
+    private static bool TryBuildPortablePath(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
+    {
+        path = [];
+        if (!root.IsDirectory)
+        {
+            return false;
+        }
+
+        var rootPath = NormalizePortablePath(root.FullPath);
+        var targetPath = NormalizePortablePath(fullPath);
+
+        path.Add(root);
+        if (string.Equals(rootPath, targetPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var relativePath = targetPath;
+        if (!string.IsNullOrEmpty(rootPath))
+        {
+            if (targetPath.Length <= rootPath.Length ||
+                !targetPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
+                targetPath[rootPath.Length] != '/')
+            {
+                path.Clear();
+                return false;
+            }
+
+            relativePath = targetPath[(rootPath.Length + 1)..];
+        }
+        else if (string.IsNullOrEmpty(targetPath))
+        {
+            path.Clear();
+            return false;
+        }
+
+        var current = root;
+        foreach (var segment in SplitPortablePath(relativePath))
+        {
+            var next = current.Children.FirstOrDefault(child =>
+                child.IsDirectory &&
+                string.Equals(NormalizePortableSegment(child.Name), segment, StringComparison.OrdinalIgnoreCase));
+            if (next is null)
+            {
+                path.Clear();
+                return false;
+            }
+
+            path.Add(next);
+            current = next;
+        }
+
+        return true;
+    }
+
+    private static bool IsFullyQualifiedPath(string path)
+    {
+        try
+        {
+            return Path.IsPathFullyQualified(path);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static bool IsParentRelativePath(string relativePath)
-    {
-        return relativePath == ".." ||
+        => relativePath == ".." ||
             relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
             relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+
+    private static bool TryGetParentPath(string fullPath, out string parentPath)
+    {
+        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\');
+        if (IsFullyQualifiedPath(trimmed))
+        {
+            var directoryName = Path.GetDirectoryName(trimmed);
+            if (!string.IsNullOrWhiteSpace(directoryName))
+            {
+                parentPath = directoryName;
+                return true;
+            }
+        }
+
+        var slashIndex = trimmed.LastIndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\']);
+        if (slashIndex < 0)
+        {
+            parentPath = string.Empty;
+            return false;
+        }
+
+        var rootPath = Path.GetPathRoot(trimmed);
+        parentPath = !string.IsNullOrWhiteSpace(rootPath) && slashIndex < rootPath.Length
+            ? rootPath
+            : slashIndex == 0
+                ? trimmed[..1]
+            : trimmed[..slashIndex];
+        return true;
     }
+
+    private static string NormalizePortablePath(string path)
+        => string.Join('/', SplitPortablePath(path));
+
+    private static IEnumerable<string> SplitPortablePath(string path)
+        => path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizePortableSegment)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment));
+
+    private static string NormalizePortableSegment(string segment)
+        => (string.IsNullOrWhiteSpace(segment) ? string.Empty : segment.Trim())
+            .Replace('\\', '_')
+            .Replace('/', '_');
 
     private static string DisplayName(FileSystemEntry entry)
     {

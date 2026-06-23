@@ -6,6 +6,12 @@
 - Scan one drive, scan another drive, switch back to the first drive, and confirm the cached scan restores without rescanning.
 - Start scanning one drive, switch to another cached drive, and confirm the running drive keeps a `Scanning` badge until it completes.
 - Click an uncached drive and confirm the empty state shows a Start Scan prompt without starting automatically.
+- Connect an Android phone in charging-only or locked state and confirm Custodian shows guidance to unlock the phone and choose USB File Transfer mode.
+- Unlock the phone, choose USB File Transfer mode, refresh Targets, and confirm each readable storage root appears as a phone target without starting a scan automatically.
+- Scan a phone storage root and confirm progress, cancellation, save/open, CSV/JSON export, charts, largest files/folders, extension summaries, search/filter, breadcrumbs, and session cache restore work.
+- On a phone scan, confirm MFT and allocated-size controls are disabled, Open/Reveal opens the selected phone folder or reveals the selected file when possible, falls back cleanly to the nearest available folder or This PC, and Move to Recycle Bin stays blocked.
+- Copy one selected phone file, multiple selected files, and a selected folder to a PC folder; confirm selected folders copy recursively and filename conflicts are auto-renamed instead of overwritten.
+- Disconnect the phone or cancel mid-copy and confirm completed files remain, the current partial file is removed, and Custodian returns to a usable state.
 - Toggle View > Always open as administrator, close Custodian, and confirm the next launch requests elevation before opening.
 - Save a `.custodian-scan`, close the app, reopen it, and load the file.
 - Export CSV and JSON from both GUI and CLI.

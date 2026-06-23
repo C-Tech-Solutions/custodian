@@ -32,6 +32,9 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         return Task.FromResult(new ScanResult
         {
             RootPath = root.FullPath,
+            SourceKind = ScanSourceKind.FileSystem,
+            SourceId = root.FullPath,
+            DisplayRootPath = root.FullPath,
             Engine = Name,
             StartedAt = started,
             CompletedAt = DateTimeOffset.UtcNow,

@@ -1,5 +1,6 @@
 using Custodian.Core.Model;
 using Custodian.Core.Storage;
+using Microsoft.Data.Sqlite;
 
 namespace Custodian.Tests;
 
@@ -82,6 +83,85 @@ public sealed class ScanStoreTests
         Assert.Equal(2, loaded.SkippedEntries.Count);
         Assert.Contains(loaded.SkippedEntries, s => s.Path == @"C:\Locked" && s.Reason == "Access denied");
         Assert.Contains(loaded.SkippedEntries, s => s.Path == @"\\server\share" && s.Reason == "Network timeout");
+    }
+
+    [Fact]
+    public async Task SaveThenLoadPreservesSourceMetadata()
+    {
+        var result = SampleResult();
+        result.RootPath = "wpd:device:storage";
+        result.SourceKind = ScanSourceKind.PortableDevice;
+        result.SourceId = "wpd:device:storage";
+        result.DisplayRootPath = "Pixel/Internal shared storage";
+        result.PortableDeviceId = "device-id";
+        result.PortableStorageObjectId = "storage-object-id";
+        result.PortableDeviceName = "Pixel";
+        result.PortableStorageName = "Internal shared storage";
+        result.Root.PortableObjectId = "storage-object-id";
+        result.Root.Children[0].PortableObjectId = "folder-object-id";
+        result.Root.Children[0].PortablePersistentId = "folder-persistent-id";
+        result.Root.Children[0].Children[0].PortableObjectId = "file-object-id";
+        result.Root.Children[0].Children[0].PortablePersistentId = "file-persistent-id";
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+
+        await store.SaveAsync(result, temp.Path);
+        var loaded = await store.LoadAsync(temp.Path);
+
+        Assert.Equal(ScanSourceKind.PortableDevice, loaded.SourceKind);
+        Assert.Equal("wpd:device:storage", loaded.SourceId);
+        Assert.Equal("Pixel/Internal shared storage", loaded.DisplayRootPath);
+        Assert.Equal("device-id", loaded.PortableDeviceId);
+        Assert.Equal("storage-object-id", loaded.PortableStorageObjectId);
+        Assert.Equal("Pixel", loaded.PortableDeviceName);
+        Assert.Equal("Internal shared storage", loaded.PortableStorageName);
+        Assert.Equal("storage-object-id", loaded.Root.PortableObjectId);
+        Assert.Equal("folder-object-id", loaded.Root.Children[0].PortableObjectId);
+        Assert.Equal("folder-persistent-id", loaded.Root.Children[0].PortablePersistentId);
+        Assert.Equal("file-object-id", loaded.Root.Children[0].Children[0].PortableObjectId);
+        Assert.Equal("file-persistent-id", loaded.Root.Children[0].Children[0].PortablePersistentId);
+    }
+
+    [Fact]
+    public async Task LoadDefaultsSourceMetadataForLegacyScanFiles()
+    {
+        var result = SampleResult();
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+
+        await store.SaveAsync(result, temp.Path);
+        await using (var connection = new SqliteConnection($"Data Source={temp.Path};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM metadata
+                WHERE key IN (
+                    'source_kind',
+                    'source_id',
+                    'display_root_path',
+                    'portable_device_id',
+                    'portable_storage_object_id',
+                    'portable_device_name',
+                    'portable_storage_name'
+                );
+                ALTER TABLE entries DROP COLUMN portable_object_id;
+                ALTER TABLE entries DROP COLUMN portable_persistent_id;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var loaded = await store.LoadAsync(temp.Path);
+
+        Assert.Equal(ScanSourceKind.FileSystem, loaded.SourceKind);
+        Assert.Equal(result.RootPath, loaded.SourceId);
+        Assert.Equal(result.RootPath, loaded.DisplayRootPath);
+        Assert.Equal(string.Empty, loaded.PortableDeviceId);
+        Assert.Equal(string.Empty, loaded.PortableStorageObjectId);
+        Assert.Equal(string.Empty, loaded.PortableDeviceName);
+        Assert.Equal(string.Empty, loaded.PortableStorageName);
+        Assert.Equal(string.Empty, loaded.Root.PortableObjectId);
+        Assert.Equal(string.Empty, loaded.Root.Children[0].PortableObjectId);
     }
 
     [Fact]

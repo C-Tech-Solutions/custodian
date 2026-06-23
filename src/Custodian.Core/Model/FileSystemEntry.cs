@@ -12,6 +12,8 @@ public sealed class FileSystemEntry
     public string Extension { get; set; } = string.Empty;
     public string Attributes { get; set; } = string.Empty;
     public DateTimeOffset? LastWriteTime { get; set; }
+    public string PortableObjectId { get; set; } = string.Empty;
+    public string PortablePersistentId { get; set; } = string.Empty;
     public List<FileSystemEntry> Children { get; } = [];
 
     public IEnumerable<FileSystemEntry> Flatten()
