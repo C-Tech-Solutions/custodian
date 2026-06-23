@@ -905,10 +905,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return null;
         }
 
-        var liveTargetRow = TargetRows.FirstOrDefault(row =>
-            row.Kind == TargetKind.PortableDevice &&
-            row.PortableTarget is { } portableTarget &&
-            PortableTargetMatchesScan(portableTarget, currentScan));
+        var liveTargetRow = FindPortableTargetRowForScan(TargetRows, currentScan);
         if (liveTargetRow?.PortableTarget is { } liveTarget)
         {
             return new PendingScan(liveTargetRow.RootPath, liveTargetRow.DisplayPath, liveTargetRow.RootPath, liveTarget);
@@ -3539,17 +3536,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     internal static bool PortableTargetMatchesScan(PortableDeviceTarget target, ScanResult scan)
+        => PortableTargetMatchesScanExactly(target, scan) ||
+            PortableTargetMatchesScanByName(target, scan);
+
+    internal static TargetRow? FindPortableTargetRowForScan(IEnumerable<TargetRow> targetRows, ScanResult scan)
+    {
+        var candidates = targetRows
+            .Where(row => row.Kind == TargetKind.PortableDevice && row.PortableTarget is not null)
+            .ToList();
+        return candidates.FirstOrDefault(row => PortableTargetMatchesScanExactly(row.PortableTarget!, scan)) ??
+            candidates.FirstOrDefault(row => PortableTargetMatchesScanByName(row.PortableTarget!, scan));
+    }
+
+    private static bool PortableTargetMatchesScanExactly(PortableDeviceTarget target, ScanResult scan)
     {
         if (!string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (string.Equals(target.StorageObjectId, scan.PortableStorageObjectId, StringComparison.Ordinal) ||
-            string.Equals(target.TargetId, scan.SourceId, StringComparison.Ordinal) ||
-            string.Equals(target.TargetId, scan.RootPath, StringComparison.Ordinal) ||
-            (!string.IsNullOrWhiteSpace(scan.PortableStorageName) &&
-                string.Equals(target.StorageName, scan.PortableStorageName, StringComparison.OrdinalIgnoreCase)))
+        return (!string.IsNullOrWhiteSpace(scan.PortableStorageObjectId) &&
+                string.Equals(target.StorageObjectId, scan.PortableStorageObjectId, StringComparison.Ordinal)) ||
+            (!string.IsNullOrWhiteSpace(scan.SourceId) &&
+                string.Equals(target.TargetId, scan.SourceId, StringComparison.Ordinal)) ||
+            (!string.IsNullOrWhiteSpace(scan.RootPath) &&
+                string.Equals(target.TargetId, scan.RootPath, StringComparison.Ordinal));
+    }
+
+    private static bool PortableTargetMatchesScanByName(PortableDeviceTarget target, ScanResult scan)
+    {
+        if (!string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(scan.PortableStorageName) &&
+            string.Equals(target.StorageName, scan.PortableStorageName, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

@@ -76,4 +76,41 @@ public sealed class MainWindowTargetRepairTests
 
         Assert.True(MainWindow.PortableTargetMatchesScan(target, scan));
     }
+
+    [Fact]
+    public void FindPortableTargetRowForScanPrefersExactIdentityBeforeNameFallback()
+    {
+        var nameFallbackTarget = new PortableDeviceTarget(
+            "wpd:first",
+            "phone-device-id",
+            "Pixel",
+            "first-storage-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var exactTarget = nameFallbackTarget with
+        {
+            TargetId = "wpd:second",
+            StorageObjectId = "second-storage-object-id"
+        };
+        var scan = new ScanResult
+        {
+            RootPath = "wpd:second",
+            SourceId = "wpd:second",
+            SourceKind = ScanSourceKind.PortableDevice,
+            PortableDeviceId = "phone-device-id",
+            PortableStorageObjectId = "second-storage-object-id",
+            PortableStorageName = "Internal storage"
+        };
+
+        var match = MainWindow.FindPortableTargetRowForScan(
+            [TargetRow.FromPortable(nameFallbackTarget), TargetRow.FromPortable(exactTarget)],
+            scan);
+
+        Assert.NotNull(match);
+        Assert.Same(exactTarget, match.PortableTarget);
+    }
 }

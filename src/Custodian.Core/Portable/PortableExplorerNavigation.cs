@@ -110,7 +110,7 @@ public static class PortableExplorerNavigator
             return TryOpenThisPc(thisPc);
         }
 
-        var storage = FindChild(device, result.PortableStorageName, allowContains: true);
+        var storage = FindStorageChild(device, result);
         if (storage is null)
         {
             return device.TryOpen()
@@ -240,6 +240,23 @@ public static class PortableExplorerNavigator
 
         return children.FirstOrDefault(child =>
             NamesMatch(child.Name, expectedName, allowContains: true));
+    }
+
+    private static IPortableExplorerNode? FindStorageChild(
+        IPortableExplorerNode device,
+        ScanResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.PortableStorageObjectId))
+        {
+            var identityMatch = device.GetChildren().FirstOrDefault(child =>
+                ObjectIdentityMatches(child.IdentityText, result.PortableStorageObjectId));
+            if (identityMatch is not null)
+            {
+                return identityMatch;
+            }
+        }
+
+        return FindChild(device, result.PortableStorageName, allowContains: true);
     }
 
     private static IPortableExplorerNode? FindChildBySegment(

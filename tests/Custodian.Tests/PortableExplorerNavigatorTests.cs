@@ -227,6 +227,37 @@ public sealed class PortableExplorerNavigatorTests
         Assert.Equal(1, pixelDcim.OpenCount);
     }
 
+    [Fact]
+    public void OpenPrefersStorageIdentityBeforeNameMatch()
+    {
+        var thisPc = new FakeExplorerNode("This PC");
+        var device = new FakeExplorerNode("Pixel");
+        var wrongStorage = new FakeExplorerNode("Internal storage")
+        {
+            IdentityText = "shell://phone/storage-a"
+        };
+        var rightStorage = new FakeExplorerNode("Internal storage")
+        {
+            IdentityText = "shell://phone/storage-b"
+        };
+        var wrongDcim = new FakeExplorerNode("DCIM");
+        var rightDcim = new FakeExplorerNode("DCIM");
+        thisPc.Children.Add(device);
+        device.Children.Add(wrongStorage);
+        device.Children.Add(rightStorage);
+        wrongStorage.Children.Add(wrongDcim);
+        rightStorage.Children.Add(rightDcim);
+        var result = ScanResult();
+        result.PortableStorageObjectId = "storage-b";
+        var entry = Directory("Pixel/Internal storage/DCIM");
+
+        var openResult = PortableExplorerNavigator.Open(result, entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.OpenedExactItem, openResult.Kind);
+        Assert.Equal(0, wrongDcim.OpenCount);
+        Assert.Equal(1, rightDcim.OpenCount);
+    }
+
     private static ScanResult ScanResult() => new()
     {
         DisplayRootPath = "Pixel/Internal storage",
