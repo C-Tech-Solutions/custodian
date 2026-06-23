@@ -88,8 +88,12 @@ public sealed class ScanViewProjectorTests
         var deep = alpha.Children.Single(child => child.Name == "Deep");
 
         var breadcrumbs = ScanViewProjector.Breadcrumb(result.Root, deep);
+        var file = deep.Children.Single(child => child.Name == "nested.txt");
+        var foundFileParent = ScanViewProjector.TryFindParent(result.Root, file, out var fileParent);
 
         Assert.Equal([@"C:\", "Alpha", "Deep"], breadcrumbs.Select(item => item.Name).ToList());
+        Assert.True(foundFileParent);
+        Assert.Equal(@"C:\Alpha\Deep", fileParent.FullPath);
     }
 
     [Fact]
@@ -104,10 +108,14 @@ public sealed class ScanViewProjectorTests
 
         var breadcrumbs = ScanViewProjector.Breadcrumb(root, camera);
         var foundParent = ScanViewProjector.TryFindParent(root, camera, out var parent);
+        var photo = camera.Children.Single(child => child.Name == "photo.jpg");
+        var foundFileParent = ScanViewProjector.TryFindParent(root, photo, out var fileParent);
 
         Assert.Equal(["Internal shared storage", "DCIM", "Camera"], breadcrumbs.Select(item => item.Name).ToList());
         Assert.True(foundParent);
         Assert.Equal("Pixel/Internal shared storage/DCIM", parent.FullPath);
+        Assert.True(foundFileParent);
+        Assert.Equal("Pixel/Internal shared storage/DCIM/Camera", fileParent.FullPath);
     }
 
     [Fact]

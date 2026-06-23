@@ -52,6 +52,26 @@ public sealed class PortableCopyExecutorTests
         Assert.False(System.IO.File.Exists(Path.Combine(temp.Path, "cancel.bin")));
     }
 
+    [Fact]
+    public async Task CopyAsyncDoesNotDeleteExistingFileWhenCreateNewFails()
+    {
+        using var temp = new TempDirectory();
+        var destination = Path.Combine(temp.Path, "existing.bin");
+        await System.IO.File.WriteAllBytesAsync(destination, [9, 8, 7]);
+
+        var entry = PortableFile("Pixel/Internal shared storage/existing.bin", "existing", "existing-persistent");
+        var plan = new PortableCopyPlan(
+            [new PortableCopyPlanItem(entry, entry.Name, destination)],
+            []);
+        var provider = new FakeStreamProvider(_ => new MemoryStream([1, 2, 3]));
+
+        var result = await new PortableCopyExecutor(provider).CopyAsync(plan);
+
+        Assert.Equal(0, result.FilesCopied);
+        Assert.Equal(1, result.FilesSkipped);
+        Assert.Equal([9, 8, 7], await System.IO.File.ReadAllBytesAsync(destination));
+    }
+
     private static FileSystemEntry PortableFile(string path, string objectId, string persistentId) => new()
     {
         Name = path.Split('/').Last(),

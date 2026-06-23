@@ -719,25 +719,45 @@ internal sealed class PortableDeviceService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!string.IsNullOrWhiteSpace(entry.PortableObjectId) &&
-                TryOpenDefaultResource(entry.PortableObjectId, out var stream))
+            if (!string.IsNullOrWhiteSpace(entry.PortablePersistentId))
             {
-                return Task.FromResult<Stream?>(stream);
-            }
+                if (!string.IsNullOrWhiteSpace(entry.PortableObjectId) &&
+                    TryPersistentIdMatches(entry.PortableObjectId, entry.PortablePersistentId) &&
+                    TryOpenDefaultResource(entry.PortableObjectId, out var stream))
+                {
+                    return Task.FromResult<Stream?>(stream);
+                }
 
-            if (string.IsNullOrWhiteSpace(entry.PortablePersistentId))
-            {
+                _objectIdByPersistentId ??= BuildPersistentIdMap(cancellationToken);
+                if (_objectIdByPersistentId.TryGetValue(entry.PortablePersistentId, out var refreshedObjectId) &&
+                    TryOpenDefaultResource(refreshedObjectId, out stream))
+                {
+                    return Task.FromResult<Stream?>(stream);
+                }
+
                 return Task.FromResult<Stream?>(null);
             }
 
-            _objectIdByPersistentId ??= BuildPersistentIdMap(cancellationToken);
-            if (_objectIdByPersistentId.TryGetValue(entry.PortablePersistentId, out var refreshedObjectId) &&
-                TryOpenDefaultResource(refreshedObjectId, out stream))
+            if (!string.IsNullOrWhiteSpace(entry.PortableObjectId) &&
+                TryOpenDefaultResource(entry.PortableObjectId, out var objectStream))
             {
-                return Task.FromResult<Stream?>(stream);
+                return Task.FromResult<Stream?>(objectStream);
             }
 
             return Task.FromResult<Stream?>(null);
+        }
+
+        private bool TryPersistentIdMatches(string objectId, string expectedPersistentId)
+        {
+            try
+            {
+                var item = ReadObjectProperties(properties, keys, objectId);
+                return string.Equals(item.PersistentUniqueId, expectedPersistentId, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (IsPortableDeviceException(ex))
+            {
+                return false;
+            }
         }
 
         private bool TryOpenDefaultResource(string objectId, out Stream stream)

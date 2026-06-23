@@ -44,12 +44,10 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
             }
             catch (OperationCanceledException)
             {
-                DeletePartialFile(item.DestinationPath);
                 throw;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
-                DeletePartialFile(item.DestinationPath);
                 skipped.Add(new SkippedEntry(item.Entry.FullPath, ex.Message));
             }
         }
@@ -71,28 +69,50 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
     {
         var buffer = new byte[128 * 1024];
         long bytesCopied = 0;
-        await using var destination = new FileStream(
-            destinationPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            buffer.Length,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-        while (true)
+        FileStream? destination = null;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
-            if (read == 0)
+            destination = new FileStream(
+                destinationPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                buffer.Length,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+            while (true)
             {
-                break;
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                bytesCopied += read;
             }
 
-            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            bytesCopied += read;
+            return bytesCopied;
         }
+        catch
+        {
+            if (destination is not null)
+            {
+                await destination.DisposeAsync().ConfigureAwait(false);
+                destination = null;
+                DeletePartialFile(destinationPath);
+            }
 
-        return bytesCopied;
+            throw;
+        }
+        finally
+        {
+            if (destination is not null)
+            {
+                await destination.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     private static void DeletePartialFile(string path)

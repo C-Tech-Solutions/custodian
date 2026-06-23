@@ -209,9 +209,19 @@ public static class ScanViewProjector
 
     public static bool TryFindParent(FileSystemEntry root, FileSystemEntry child, out FileSystemEntry parent)
     {
-        if (TryBuildPath(root, child.FullPath, out var path) && path.Count > 1)
+        if (child.IsDirectory)
         {
-            parent = path[^2];
+            if (TryBuildPath(root, child.FullPath, out var directoryPath) && directoryPath.Count > 1)
+            {
+                parent = directoryPath[^2];
+                return true;
+            }
+        }
+        else if (TryGetParentPath(child.FullPath, out var parentPath) &&
+            TryBuildPath(root, parentPath, out var fileParentPath) &&
+            fileParentPath.Count > 0)
+        {
+            parent = fileParentPath[^1];
             return true;
         }
 
@@ -504,6 +514,73 @@ public static class ScanViewProjector
 
     private static bool TryBuildPath(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
     {
+        if (TryBuildFileSystemPath(root, fullPath, out path))
+        {
+            return true;
+        }
+
+        return TryBuildPathByTraversal(root, fullPath, out path);
+    }
+
+    private static bool TryBuildFileSystemPath(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
+    {
+        path = [];
+        if (!root.IsDirectory)
+        {
+            return false;
+        }
+
+        if (!IsFullyQualifiedPath(root.FullPath) || !IsFullyQualifiedPath(fullPath))
+        {
+            return false;
+        }
+
+        path.Add(root);
+        if (string.Equals(root.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string relativePath;
+        try
+        {
+            relativePath = Path.GetRelativePath(root.FullPath, fullPath);
+        }
+        catch (ArgumentException)
+        {
+            path.Clear();
+            return false;
+        }
+
+        if (relativePath == "." || Path.IsPathRooted(relativePath) || IsParentRelativePath(relativePath))
+        {
+            path.Clear();
+            return false;
+        }
+
+        var current = root;
+        foreach (var segment in relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            var next = current.Children.FirstOrDefault(child =>
+                child.IsDirectory &&
+                string.Equals(child.Name, segment, StringComparison.OrdinalIgnoreCase));
+            if (next is null)
+            {
+                path.Clear();
+                return false;
+            }
+
+            path.Add(next);
+            current = next;
+        }
+
+        return true;
+    }
+
+    private static bool TryBuildPathByTraversal(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
+    {
         path = [];
         if (!root.IsDirectory)
         {
@@ -518,7 +595,7 @@ public static class ScanViewProjector
 
         foreach (var child in root.Children.Where(child => child.IsDirectory))
         {
-            if (TryBuildPath(child, fullPath, out var childPath))
+            if (TryBuildPathByTraversal(child, fullPath, out var childPath))
             {
                 path.AddRange(childPath);
                 return true;
@@ -527,6 +604,40 @@ public static class ScanViewProjector
 
         path.Clear();
         return false;
+    }
+
+    private static bool IsFullyQualifiedPath(string path)
+    {
+        try
+        {
+            return Path.IsPathFullyQualified(path);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsParentRelativePath(string relativePath)
+        => relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+
+    private static bool TryGetParentPath(string fullPath, out string parentPath)
+    {
+        var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\');
+        var slashIndex = trimmed.LastIndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\']);
+        if (slashIndex <= 0)
+        {
+            parentPath = string.Empty;
+            return false;
+        }
+
+        var rootPath = Path.GetPathRoot(trimmed);
+        parentPath = !string.IsNullOrWhiteSpace(rootPath) && slashIndex < rootPath.Length
+            ? rootPath
+            : trimmed[..slashIndex];
+        return true;
     }
 
     private static string DisplayName(FileSystemEntry entry)
