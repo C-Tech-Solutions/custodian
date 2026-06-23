@@ -229,10 +229,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _updateCts?.Cancel();
         _recycleBinCts?.Cancel();
         _settingsSaveTimer.Stop();
-        await CancelActivePortableCopyAsync();
-        await PersistSettingsAsync();
-        _settingsPersistedForClose = true;
-        Close();
+        try
+        {
+            await CancelActivePortableCopyAsync();
+            await PersistSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error during window closing cleanup.");
+        }
+        finally
+        {
+            _settingsPersistedForClose = true;
+            Close();
+        }
     }
 
     private async Task CancelActivePortableCopyAsync()
@@ -473,7 +483,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var text = PathBox.Text?.Trim() ?? string.Empty;
         if (!TargetRows.Any(row =>
                 row.Kind == TargetKind.PortableDevice &&
-                TextMatchesTarget(text, row, allowEmpty: false)))
+                TextMatchesTarget(text, row, allowEmpty: false)) &&
+            !TextMatchesCurrentPortableScan(text))
         {
             SetPortableScanControls(isPortableTarget: false);
         }
@@ -870,6 +881,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return new PendingScan(portableTargetRow.RootPath, portableTargetRow.DisplayPath, portableTargetRow.RootPath, target);
         }
 
+        if (CreatePendingScanFromCurrentPortableScan(text) is { } portableScan)
+        {
+            return portableScan;
+        }
+
         if (string.IsNullOrWhiteSpace(text))
         {
             return null;
@@ -879,6 +895,38 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? normalizedKey
             : text;
         return new PendingScan(scanKey, text, text, null);
+    }
+
+    private PendingScan? CreatePendingScanFromCurrentPortableScan(string text)
+    {
+        if (_currentScan is not { SourceKind: ScanSourceKind.PortableDevice } currentScan ||
+            !TextMatchesScanDisplayRoot(text, currentScan))
+        {
+            return null;
+        }
+
+        var liveTargetRow = TargetRows.FirstOrDefault(row =>
+            row.Kind == TargetKind.PortableDevice &&
+            row.PortableTarget is { } portableTarget &&
+            PortableTargetMatchesScan(portableTarget, currentScan));
+        if (liveTargetRow?.PortableTarget is { } liveTarget)
+        {
+            return new PendingScan(liveTargetRow.RootPath, liveTargetRow.DisplayPath, liveTargetRow.RootPath, liveTarget);
+        }
+
+        var displayPath = DisplayRootPath(currentScan);
+        var unavailableTarget = new PortableDeviceTarget(
+            currentScan.RootPath,
+            currentScan.PortableDeviceId,
+            string.IsNullOrWhiteSpace(currentScan.PortableDeviceName) ? displayPath : currentScan.PortableDeviceName,
+            currentScan.PortableStorageObjectId,
+            currentScan.PortableStorageName,
+            displayPath,
+            null,
+            null,
+            IsAvailable: false,
+            "Reconnect or unlock the phone and choose USB File Transfer mode.");
+        return new PendingScan(currentScan.RootPath, displayPath, currentScan.RootPath, unavailableTarget);
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)
@@ -3391,6 +3439,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string.Equals(text, row.RootPath, StringComparison.OrdinalIgnoreCase) ||
             IsPortableDisplaySubpath(text, row.DisplayPath);
     }
+
+    private bool TextMatchesCurrentPortableScan(string text)
+        => _currentScan is { SourceKind: ScanSourceKind.PortableDevice } currentScan &&
+            TextMatchesScanDisplayRoot(text, currentScan);
+
+    private static bool TextMatchesScanDisplayRoot(string text, ScanResult scan)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var displayRoot = DisplayRootPath(scan);
+        return string.Equals(text, displayRoot, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, scan.RootPath, StringComparison.OrdinalIgnoreCase) ||
+            IsPortableDisplaySubpath(text, displayRoot);
+    }
+
+    private static bool PortableTargetMatchesScan(PortableDeviceTarget target, ScanResult scan)
+        => string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal) &&
+            string.Equals(target.StorageObjectId, scan.PortableStorageObjectId, StringComparison.Ordinal);
 
     private static bool IsPortableDisplaySubpath(string text, string displayRoot)
     {

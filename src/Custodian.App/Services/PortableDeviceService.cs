@@ -714,8 +714,22 @@ internal sealed class PortableDeviceService
             : parent.TrimEnd('/', '\\') + PathSeparator + safeChild;
     }
 
-    private static string FirstNonEmpty(params string?[] values)
-        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+    private static string FirstNonEmpty(string? first, string? second, string? third)
+    {
+        if (!string.IsNullOrWhiteSpace(first)) return first;
+        if (!string.IsNullOrWhiteSpace(second)) return second;
+        if (!string.IsNullOrWhiteSpace(third)) return third;
+        return string.Empty;
+    }
+
+    private static string FirstNonEmpty(string? first, string? second, string? third, string? fourth)
+    {
+        if (!string.IsNullOrWhiteSpace(first)) return first;
+        if (!string.IsNullOrWhiteSpace(second)) return second;
+        if (!string.IsNullOrWhiteSpace(third)) return third;
+        if (!string.IsNullOrWhiteSpace(fourth)) return fourth;
+        return string.Empty;
+    }
 
     private static bool IsPortableDeviceException(Exception ex)
         => ex is COMException or InvalidOperationException or ArgumentException or ExternalException or UnauthorizedAccessException;
