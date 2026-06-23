@@ -92,11 +92,14 @@ internal static class PortableDeviceExplorerService
             try
             {
                 items = shellFolder.Items();
-                foreach (dynamic item in (dynamic)items)
+                if (items is not null)
                 {
-                    if (item is not null)
+                    foreach (dynamic item in (dynamic)items)
                     {
-                        nodes.Add(new ShellItemNode((object)item));
+                        if (item is not null)
+                        {
+                            nodes.Add(new ShellItemNode((object)item));
+                        }
                     }
                 }
             }
@@ -285,7 +288,12 @@ internal static class PortableDeviceExplorerService
 
             try
             {
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+                var startInfo = new ProcessStartInfo("explorer.exe")
+                {
+                    UseShellExecute = true
+                };
+                startInfo.ArgumentList.Add($"/select,{path}");
+                Process.Start(startInfo);
                 return true;
             }
             catch (Exception ex) when (IsShellException(ex))

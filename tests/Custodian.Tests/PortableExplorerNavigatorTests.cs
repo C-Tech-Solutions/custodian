@@ -142,6 +142,18 @@ public sealed class PortableExplorerNavigatorTests
     }
 
     [Fact]
+    public void OpenRejectsEntryOutsideScanTreeBeforeMissingPhoneFallback()
+    {
+        var thisPc = new FakeExplorerNode("This PC");
+        var entry = File(".jpg", string.Empty);
+
+        var result = PortableExplorerNavigator.Open(ScanResult(), entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.Failed, result.Kind);
+        Assert.Equal(0, thisPc.OpenCount);
+    }
+
+    [Fact]
     public void OpenRejectsEntryOutsideScanTree()
     {
         var (thisPc, _, storage) = BuildTree();
@@ -151,6 +163,31 @@ public sealed class PortableExplorerNavigatorTests
 
         Assert.Equal(PortableExplorerOpenResultKind.Failed, result.Kind);
         Assert.Equal(0, storage.OpenCount);
+    }
+
+    [Fact]
+    public void OpenPrefersExactDeviceMatchBeforeSubstringMatch()
+    {
+        var thisPc = new FakeExplorerNode("This PC");
+        var pixel8 = new FakeExplorerNode("Pixel 8");
+        var pixel8Storage = new FakeExplorerNode("Internal storage");
+        var pixel8Dcim = new FakeExplorerNode("DCIM");
+        var pixel = new FakeExplorerNode("Pixel");
+        var pixelStorage = new FakeExplorerNode("Internal storage");
+        var pixelDcim = new FakeExplorerNode("DCIM");
+        thisPc.Children.Add(pixel8);
+        thisPc.Children.Add(pixel);
+        pixel8.Children.Add(pixel8Storage);
+        pixel8Storage.Children.Add(pixel8Dcim);
+        pixel.Children.Add(pixelStorage);
+        pixelStorage.Children.Add(pixelDcim);
+        var entry = Directory("Pixel/Internal storage/DCIM");
+
+        var result = PortableExplorerNavigator.Open(ScanResult(), entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.OpenedExactItem, result.Kind);
+        Assert.Equal(0, pixel8Dcim.OpenCount);
+        Assert.Equal(1, pixelDcim.OpenCount);
     }
 
     private static ScanResult ScanResult() => new()

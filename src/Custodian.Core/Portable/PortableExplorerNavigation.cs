@@ -99,6 +99,11 @@ public static class PortableExplorerNavigator
         IPortableExplorerNode thisPc,
         PortableExplorerOpenMode mode)
     {
+        if (!TryGetRelativeSegments(result, entry, out var segments))
+        {
+            return PortableExplorerOpenResult.Failed("Selected phone item is not part of the current scan.");
+        }
+
         var device = FindChild(thisPc, result.PortableDeviceName, allowContains: true);
         if (device is null)
         {
@@ -111,11 +116,6 @@ public static class PortableExplorerNavigator
             return device.TryOpen()
                 ? PortableExplorerOpenResult.Parent("Opened the phone device.")
                 : TryOpenThisPc(thisPc);
-        }
-
-        if (!TryGetRelativeSegments(result, entry, out var segments))
-        {
-            return PortableExplorerOpenResult.Failed("Selected phone item is not part of the current scan.");
         }
 
         var current = storage;
@@ -230,8 +230,16 @@ public static class PortableExplorerNavigator
             return null;
         }
 
-        return parent.GetChildren().FirstOrDefault(child =>
-            NamesMatch(child.Name, expectedName, allowContains));
+        var children = parent.GetChildren();
+        var exactMatch = children.FirstOrDefault(child =>
+            NamesMatch(child.Name, expectedName, allowContains: false));
+        if (exactMatch is not null || !allowContains)
+        {
+            return exactMatch;
+        }
+
+        return children.FirstOrDefault(child =>
+            NamesMatch(child.Name, expectedName, allowContains: true));
     }
 
     private static IPortableExplorerNode? FindChildBySegment(
