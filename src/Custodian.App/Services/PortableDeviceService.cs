@@ -470,11 +470,6 @@ internal sealed class PortableDeviceService
             }
         }
 
-        if (roots.Count > 0)
-        {
-            return roots;
-        }
-
         var inspected = visited.Count;
         while (queue.Count > 0 && inspected < MaxStorageDiscoveryObjects)
         {

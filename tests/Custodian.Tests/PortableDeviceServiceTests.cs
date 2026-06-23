@@ -89,6 +89,30 @@ public sealed class PortableDeviceServiceTests
     }
 
     [Fact]
+    public void DiscoverStorageRootsFindsMixedDirectAndNestedStorageObjects()
+    {
+        var records = new Dictionary<string, PortableObjectProperties>
+        {
+            ["internal"] = Storage("Internal storage"),
+            ["phone"] = Folder("Phone"),
+            ["sd-card"] = Storage("SD card")
+        };
+        var children = new Dictionary<string, IReadOnlyList<string>>
+        {
+            [DeviceRoot] = ["internal", "phone"],
+            ["phone"] = ["sd-card"]
+        };
+
+        var roots = PortableDeviceService.DiscoverStorageRoots(
+            DeviceRoot,
+            parent => children.GetValueOrDefault(parent, []),
+            objectId => records[objectId],
+            CancellationToken.None);
+
+        Assert.Equal(["internal", "sd-card"], roots.Select(root => root.ObjectId));
+    }
+
+    [Fact]
     public void BuildTargetsForDeviceUsesStoragePersistentIdForStableTargetId()
     {
         var first = PortableDeviceService.BuildTargetsForDevice(
