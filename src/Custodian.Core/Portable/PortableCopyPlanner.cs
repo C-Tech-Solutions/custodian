@@ -22,6 +22,7 @@ public static class PortableCopyPlanner
         var normalizedSelection = RemoveSelectionsCoveredBySelectedFolders(selected);
         var skipped = new List<SkippedEntry>();
         var usedPaths = existingPaths ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedTopLevelDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var items = new List<PortableCopyPlanItem>();
 
         foreach (var entry in normalizedSelection)
@@ -32,7 +33,7 @@ public static class PortableCopyPlanner
                 continue;
             }
 
-            var topFolderName = SanitizeFileName(entry.Name);
+            var topFolderName = GetAvailableSegment(SanitizeFileName(entry.Name), usedTopLevelDirectories);
             var files = entry.Flatten()
                 .Where(child => !child.IsDirectory)
                 .OrderBy(child => child.FullPath, StringComparer.OrdinalIgnoreCase);
@@ -83,21 +84,29 @@ public static class PortableCopyPlanner
 
     private static IReadOnlyList<FileSystemEntry> RemoveSelectionsCoveredBySelectedFolders(IReadOnlyList<FileSystemEntry> entries)
     {
-        var selectedDirectories = entries.Where(entry => entry.IsDirectory).ToList();
-        return entries
-            .Where(entry => !selectedDirectories.Any(directory =>
-                !ReferenceEquals(directory, entry) &&
-                IsPortableDescendantOf(entry, directory)))
+        var selectedDirectories = entries
+            .Where(entry => entry.IsDirectory)
+            .Select(entry => new PathEntry(entry, NormalizePortablePath(entry.FullPath)))
+            .ToList();
+
+        if (selectedDirectories.Count == 0)
+        {
+            return entries;
+        }
+
+        return entries.Select(entry => new PathEntry(entry, NormalizePortablePath(entry.FullPath)))
+            .Where(candidate => !selectedDirectories.Any(directory =>
+                !ReferenceEquals(directory.Entry, candidate.Entry) &&
+                IsPortableDescendantOf(candidate.Path, directory.Path)))
+            .Select(candidate => candidate.Entry)
             .ToList();
     }
 
-    private static bool IsPortableDescendantOf(FileSystemEntry candidate, FileSystemEntry ancestor)
+    private static bool IsPortableDescendantOf(string candidatePath, string ancestorPath)
     {
-        var ancestorPath = ancestor.FullPath.TrimEnd('/', '\\');
-        var candidatePath = candidate.FullPath.TrimEnd('/', '\\');
         return candidatePath.Length > ancestorPath.Length &&
             candidatePath.StartsWith(ancestorPath, StringComparison.OrdinalIgnoreCase) &&
-            (candidatePath[ancestorPath.Length] == '/' || candidatePath[ancestorPath.Length] == '\\');
+            candidatePath[ancestorPath.Length] == '/';
     }
 
     private static string RelativePortablePath(FileSystemEntry root, FileSystemEntry file)
@@ -137,6 +146,23 @@ public static class PortableCopyPlanner
         return string.IsNullOrWhiteSpace(name) ? "Unnamed" : name;
     }
 
+    private static string GetAvailableSegment(string segment, ISet<string> usedSegments)
+    {
+        if (usedSegments.Add(segment))
+        {
+            return segment;
+        }
+
+        for (var index = 1; ; index++)
+        {
+            var candidate = $"{segment} ({index})";
+            if (usedSegments.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
     private static string GetAvailablePath(string path, ISet<string> usedPaths)
     {
         if (!usedPaths.Contains(path) && !File.Exists(path) && !Directory.Exists(path))
@@ -161,4 +187,9 @@ public static class PortableCopyPlanner
         => !string.IsNullOrWhiteSpace(entry.PortableObjectId)
             ? entry.PortableObjectId
             : entry.FullPath;
+
+    private static string NormalizePortablePath(string path)
+        => string.Join('/', path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private sealed record PathEntry(FileSystemEntry Entry, string Path);
 }

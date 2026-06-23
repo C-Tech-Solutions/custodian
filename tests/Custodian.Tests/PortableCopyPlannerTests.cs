@@ -71,6 +71,30 @@ public sealed class PortableCopyPlannerTests
         Assert.Equal(Path.Combine(destination, "Internal shared storage", "report.txt"), item.DestinationPath);
     }
 
+    [Fact]
+    public void BuildPlanKeepsSameNamedSelectedFoldersSeparate()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+        var dcimCamera = Directory("Pixel/Internal shared storage/DCIM/Camera", "dcim-camera");
+        var picturesCamera = Directory("Pixel/Internal shared storage/Pictures/Camera", "pictures-camera");
+        var dcimPhoto = File("Pixel/Internal shared storage/DCIM/Camera/photo.jpg", "dcim-photo");
+        var picturesPhoto = File("Pixel/Internal shared storage/Pictures/Camera/photo.jpg", "pictures-photo");
+        dcimCamera.Children.Add(dcimPhoto);
+        picturesCamera.Children.Add(picturesPhoto);
+
+        var plan = PortableCopyPlanner.BuildPlan([dcimCamera, picturesCamera], destination);
+
+        Assert.Empty(plan.SkippedEntries);
+        Assert.Contains(plan.Items, item =>
+            item.Entry == dcimPhoto &&
+            item.RelativePath == Path.Combine("Camera", "photo.jpg") &&
+            item.DestinationPath == Path.Combine(destination, "Camera", "photo.jpg"));
+        Assert.Contains(plan.Items, item =>
+            item.Entry == picturesPhoto &&
+            item.RelativePath == Path.Combine("Camera (1)", "photo.jpg") &&
+            item.DestinationPath == Path.Combine(destination, "Camera (1)", "photo.jpg"));
+    }
+
     private static FileSystemEntry Directory(string path, string objectId) => new()
     {
         Name = path.Split('/').Last(),

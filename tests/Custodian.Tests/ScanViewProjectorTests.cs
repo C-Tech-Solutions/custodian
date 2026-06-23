@@ -145,6 +145,19 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void TryFindParentFindsRootForSingleSegmentPortablePath()
+    {
+        var root = Directory("/", 0, 0, 1);
+        var child = Directory("/DCIM", 0, 0, 0);
+        root.Children.Add(child);
+
+        var found = ScanViewProjector.TryFindParent(root, child, out var parent);
+
+        Assert.True(found);
+        Assert.Equal(root, parent);
+    }
+
+    [Fact]
     public void FolderJumpRowsMatchNameAndFullPath()
     {
         var result = NestedResult();

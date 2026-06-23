@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.InteropServices;
 using Custodian.Core.Model;
 
 namespace Custodian.Core.Portable;
@@ -49,7 +50,7 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
             {
                 throw;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ExternalException)
             {
                 skipped.Add(new SkippedEntry(item.Entry.FullPath, ex.Message));
             }

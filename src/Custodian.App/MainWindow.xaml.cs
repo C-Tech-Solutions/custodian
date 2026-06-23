@@ -29,6 +29,7 @@ using Custodian.Core.Scanning;
 using Custodian.Core.Storage;
 using Custodian.Core.Updates;
 using WinForms = System.Windows.Forms;
+using WpfButton = System.Windows.Controls.Button;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfClipboard = System.Windows.Clipboard;
@@ -72,6 +73,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string? _selectedChartSourceKey;
     private bool _suppressChartSelection;
     private bool _suppressJumpSelection;
+    private bool _isRefreshingTargets;
     private readonly Stack<FileSystemEntry> _backStack = new();
     private readonly Stack<FileSystemEntry> _forwardStack = new();
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
@@ -3290,7 +3292,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void RefreshTargets_Click(object sender, RoutedEventArgs e)
     {
-        await LoadDriveRowsAsync();
+        if (_isRefreshingTargets)
+        {
+            return;
+        }
+
+        _isRefreshingTargets = true;
+        if (sender is WpfButton button)
+        {
+            button.IsEnabled = false;
+        }
+
+        try
+        {
+            await LoadDriveRowsAsync();
+        }
+        finally
+        {
+            if (sender is WpfButton refreshButton)
+            {
+                refreshButton.IsEnabled = true;
+            }
+
+            _isRefreshingTargets = false;
+        }
     }
 
     private void RefreshEmptyStateTargets()

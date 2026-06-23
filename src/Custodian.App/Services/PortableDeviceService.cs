@@ -12,6 +12,7 @@ using Custodian.Core.Scanning;
 using Microsoft.Extensions.Logging;
 using Vanara.PInvoke;
 using PROPERTYKEY = Vanara.PInvoke.Ole32.PROPERTYKEY;
+using PROPVARIANT = Vanara.PInvoke.Ole32.PROPVARIANT;
 
 namespace Custodian.App.Services;
 
@@ -318,8 +319,7 @@ internal sealed class PortableDeviceService
                 content,
                 properties,
                 keys,
-                resources,
-                result.PortableStorageObjectId);
+                resources);
             return await new PortableCopyExecutor(provider)
                 .CopyAsync(plan, progress, cancellationToken)
                 .ConfigureAwait(false);
@@ -754,11 +754,8 @@ internal sealed class PortableDeviceService
         PortableDeviceApi.IPortableDeviceContent content,
         PortableDeviceApi.IPortableDeviceProperties properties,
         PortableDeviceApi.IPortableDeviceKeyCollection keys,
-        PortableDeviceApi.IPortableDeviceResources resources,
-        string storageObjectId) : IPortableObjectStreamProvider
+        PortableDeviceApi.IPortableDeviceResources resources) : IPortableObjectStreamProvider
     {
-        private Dictionary<string, string>? _objectIdByPersistentId;
-
         public Task<Stream?> OpenReadAsync(FileSystemEntry entry, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -772,8 +769,8 @@ internal sealed class PortableDeviceService
                     return Task.FromResult<Stream?>(stream);
                 }
 
-                _objectIdByPersistentId ??= BuildPersistentIdMap(cancellationToken);
-                if (_objectIdByPersistentId.TryGetValue(entry.PortablePersistentId, out var refreshedObjectId) &&
+                var refreshedObjectId = TryGetObjectIdFromPersistentId(entry.PortablePersistentId);
+                if (!string.IsNullOrWhiteSpace(refreshedObjectId) &&
                     TryOpenDefaultResource(refreshedObjectId, out stream))
                 {
                     return Task.FromResult<Stream?>(stream);
@@ -804,6 +801,44 @@ internal sealed class PortableDeviceService
             }
         }
 
+        private string? TryGetObjectIdFromPersistentId(string persistentId)
+        {
+            PortableDeviceApi.IPortableDevicePropVariantCollection? persistentIds = null;
+            PortableDeviceApi.IPortableDevicePropVariantCollection? objectIds = null;
+            try
+            {
+                persistentIds = (PortableDeviceApi.IPortableDevicePropVariantCollection)new PortableDeviceApi.PortableDevicePropVariantCollection();
+                using var persistentVariant = new PROPVARIANT(persistentId);
+                persistentIds.Add(persistentVariant);
+
+                objectIds = content.GetObjectIDsFromPersistentUniqueIDs(persistentIds);
+                foreach (var variant in PortableDeviceApi.Enumerate(objectIds))
+                {
+                    using (variant)
+                    {
+                        if (variant.Value is string objectId &&
+                            !string.IsNullOrWhiteSpace(objectId) &&
+                            !string.Equals(objectId, PortableDeviceApi.WPD_DEVICE_OBJECT_ID, StringComparison.OrdinalIgnoreCase) &&
+                            TryPersistentIdMatches(objectId, persistentId))
+                        {
+                            return objectId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (IsPortableDeviceException(ex))
+            {
+                return null;
+            }
+            finally
+            {
+                ReleaseComObject(objectIds);
+                ReleaseComObject(persistentIds);
+            }
+
+            return null;
+        }
+
         private bool TryOpenDefaultResource(string objectId, out Stream stream)
         {
             stream = Stream.Null;
@@ -817,53 +852,6 @@ internal sealed class PortableDeviceService
             catch (Exception ex) when (IsPortableDeviceException(ex))
             {
                 return false;
-            }
-        }
-
-        private Dictionary<string, string> BuildPersistentIdMap(CancellationToken cancellationToken)
-        {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            AddPersistentIds(storageObjectId, map, cancellationToken);
-            return map;
-        }
-
-        private void AddPersistentIds(
-            string parentObjectId,
-            Dictionary<string, string> map,
-            CancellationToken cancellationToken)
-        {
-            IReadOnlyList<string> childIds;
-            try
-            {
-                childIds = EnumerateChildIds(content, parentObjectId, cancellationToken);
-            }
-            catch (Exception ex) when (IsPortableDeviceException(ex))
-            {
-                return;
-            }
-
-            foreach (var childId in childIds)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                PortableObjectProperties item;
-                try
-                {
-                    item = ReadObjectProperties(properties, keys, childId);
-                }
-                catch (Exception ex) when (IsPortableDeviceException(ex))
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrWhiteSpace(item.PersistentUniqueId))
-                {
-                    map[item.PersistentUniqueId] = childId;
-                }
-
-                if (item.IsFolder)
-                {
-                    AddPersistentIds(childId, map, cancellationToken);
-                }
             }
         }
     }

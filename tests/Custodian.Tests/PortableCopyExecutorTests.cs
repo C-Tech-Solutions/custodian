@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Custodian.Core.Model;
 using Custodian.Core.Portable;
 
@@ -36,6 +37,26 @@ public sealed class PortableCopyExecutorTests
         Assert.Equal(0, result.FilesCopied);
         Assert.Equal(1, result.FilesSkipped);
         Assert.False(System.IO.File.Exists(Path.Combine(temp.Path, "broken.bin")));
+    }
+
+    [Fact]
+    public async Task CopyAsyncSkipsComReadFailureAndContinues()
+    {
+        using var temp = new TempDirectory();
+        var broken = PortableFile("Pixel/Internal shared storage/broken.bin", "broken", "broken-persistent");
+        var good = PortableFile("Pixel/Internal shared storage/good.bin", "good", "good-persistent");
+        var plan = PortableCopyPlanner.BuildPlan([broken, good], temp.Path);
+        var provider = new FakeStreamProvider(entry =>
+            entry.PortableObjectId == "broken"
+                ? new ComExceptionAfterFirstReadStream()
+                : new MemoryStream([7, 8, 9]));
+
+        var result = await new PortableCopyExecutor(provider).CopyAsync(plan);
+
+        Assert.Equal(1, result.FilesCopied);
+        Assert.Equal(1, result.FilesSkipped);
+        Assert.False(System.IO.File.Exists(Path.Combine(temp.Path, "broken.bin")));
+        Assert.Equal([7, 8, 9], await System.IO.File.ReadAllBytesAsync(Path.Combine(temp.Path, "good.bin")));
     }
 
     [Fact]
@@ -133,6 +154,33 @@ public sealed class PortableCopyExecutorTests
             if (_hasRead)
             {
                 throw new OperationCanceledException();
+            }
+
+            _hasRead = true;
+            buffer.Span[0] = 42;
+            return ValueTask.FromResult(1);
+        }
+    }
+
+    private sealed class ComExceptionAfterFirstReadStream : Stream
+    {
+        private bool _hasRead;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_hasRead)
+            {
+                throw new COMException("Simulated device read failure.");
             }
 
             _hasRead = true;

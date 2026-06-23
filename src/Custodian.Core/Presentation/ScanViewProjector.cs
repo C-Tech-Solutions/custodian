@@ -601,16 +601,27 @@ public static class ScanViewProjector
             return true;
         }
 
-        if (targetPath.Length <= rootPath.Length ||
-            !targetPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
-            targetPath[rootPath.Length] != '/')
+        var relativePath = targetPath;
+        if (!string.IsNullOrEmpty(rootPath))
+        {
+            if (targetPath.Length <= rootPath.Length ||
+                !targetPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
+                targetPath[rootPath.Length] != '/')
+            {
+                path.Clear();
+                return false;
+            }
+
+            relativePath = targetPath[(rootPath.Length + 1)..];
+        }
+        else if (string.IsNullOrEmpty(targetPath))
         {
             path.Clear();
             return false;
         }
 
         var current = root;
-        foreach (var segment in SplitPortablePath(targetPath[(rootPath.Length + 1)..]))
+        foreach (var segment in SplitPortablePath(relativePath))
         {
             var next = current.Children.FirstOrDefault(child =>
                 child.IsDirectory &&
@@ -649,7 +660,7 @@ public static class ScanViewProjector
     {
         var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\');
         var slashIndex = trimmed.LastIndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\']);
-        if (slashIndex <= 0)
+        if (slashIndex < 0)
         {
             parentPath = string.Empty;
             return false;
@@ -658,6 +669,8 @@ public static class ScanViewProjector
         var rootPath = Path.GetPathRoot(trimmed);
         parentPath = !string.IsNullOrWhiteSpace(rootPath) && slashIndex < rootPath.Length
             ? rootPath
+            : slashIndex == 0
+                ? trimmed[..1]
             : trimmed[..slashIndex];
         return true;
     }
