@@ -659,6 +659,16 @@ public static class ScanViewProjector
     private static bool TryGetParentPath(string fullPath, out string parentPath)
     {
         var trimmed = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\');
+        if (IsFullyQualifiedPath(trimmed))
+        {
+            var directoryName = Path.GetDirectoryName(trimmed);
+            if (!string.IsNullOrWhiteSpace(directoryName))
+            {
+                parentPath = directoryName;
+                return true;
+            }
+        }
+
         var slashIndex = trimmed.LastIndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\']);
         if (slashIndex < 0)
         {
