@@ -961,6 +961,48 @@ internal sealed class PortableDeviceService
             }
         }
 
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<int>(cancellationToken);
+            }
+
+            try
+            {
+                return Task.FromResult(Read(buffer, offset, count));
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException<int>(ex);
+            }
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (MemoryMarshal.TryGetArray<byte>(buffer, out var segment))
+            {
+                return ValueTask.FromResult(Read(segment.Array!, segment.Offset, segment.Count));
+            }
+
+            byte[]? rentedBuffer = null;
+            try
+            {
+                rentedBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length);
+                var bytesRead = Read(rentedBuffer, 0, buffer.Length);
+                rentedBuffer.AsSpan(0, bytesRead).CopyTo(buffer.Span);
+                return ValueTask.FromResult(bytesRead);
+            }
+            finally
+            {
+                if (rentedBuffer is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
+                }
+            }
+        }
+
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
