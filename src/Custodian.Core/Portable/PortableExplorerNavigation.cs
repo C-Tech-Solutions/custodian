@@ -294,7 +294,31 @@ public static class PortableExplorerNavigator
             decodedIdentity = identityText;
         }
 
-        return decodedIdentity.Contains(expectedObjectId, StringComparison.OrdinalIgnoreCase);
+        return ContainsDelimitedIdentity(decodedIdentity, expectedObjectId);
+    }
+
+    private static bool ContainsDelimitedIdentity(string identityText, string expectedObjectId)
+    {
+        var matchIndex = identityText.IndexOf(expectedObjectId, StringComparison.OrdinalIgnoreCase);
+        while (matchIndex >= 0)
+        {
+            var beforeMatch = matchIndex == 0 || IsIdentityDelimiter(identityText[matchIndex - 1]);
+            var afterIndex = matchIndex + expectedObjectId.Length;
+            var afterMatch = afterIndex == identityText.Length || IsIdentityDelimiter(identityText[afterIndex]);
+            if (beforeMatch && afterMatch)
+            {
+                return true;
+            }
+
+            matchIndex = identityText.IndexOf(expectedObjectId, matchIndex + 1, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentityDelimiter(char value)
+    {
+        return !char.IsLetterOrDigit(value);
     }
 
     private static string NormalizePortablePath(string value)

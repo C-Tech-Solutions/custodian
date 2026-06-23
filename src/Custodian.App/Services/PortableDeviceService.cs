@@ -891,6 +891,7 @@ internal sealed class PortableDeviceService
     private sealed class PortableDeviceReadStream(System.Runtime.InteropServices.ComTypes.IStream stream) : Stream
     {
         private System.Runtime.InteropServices.ComTypes.IStream? _stream = stream;
+        private IntPtr _bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
 
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -925,7 +926,12 @@ internal sealed class PortableDeviceService
                 return 0;
             }
 
-            IntPtr bytesReadPointer = IntPtr.Zero;
+            var bytesReadPointer = _bytesReadPointer;
+            if (bytesReadPointer == IntPtr.Zero)
+            {
+                throw new ObjectDisposedException(nameof(PortableDeviceReadStream));
+            }
+
             byte[]? rentedBuffer = null;
             var readBuffer = buffer;
             if (offset != 0)
@@ -936,7 +942,6 @@ internal sealed class PortableDeviceService
 
             try
             {
-                bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
                 Marshal.WriteInt32(bytesReadPointer, 0);
                 currentStream.Read(readBuffer, count, bytesReadPointer);
                 var bytesRead = Marshal.ReadInt32(bytesReadPointer);
@@ -949,11 +954,6 @@ internal sealed class PortableDeviceService
             }
             finally
             {
-                if (bytesReadPointer != IntPtr.Zero)
-                {
-                    Marshal.FreeCoTaskMem(bytesReadPointer);
-                }
-
                 if (rentedBuffer is not null)
                 {
                     ArrayPool<byte>.Shared.Return(rentedBuffer);
@@ -973,7 +973,22 @@ internal sealed class PortableDeviceService
                 ReleaseComObject(streamToRelease);
             }
 
+            var bytesReadPointer = Interlocked.Exchange(ref _bytesReadPointer, IntPtr.Zero);
+            if (bytesReadPointer != IntPtr.Zero)
+            {
+                Marshal.FreeCoTaskMem(bytesReadPointer);
+            }
+
             base.Dispose(disposing);
+            if (disposing)
+            {
+                GC.SuppressFinalize(this);
+            }
+        }
+
+        ~PortableDeviceReadStream()
+        {
+            Dispose(disposing: false);
         }
     }
 
