@@ -481,6 +481,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var text = PathBox.Text?.Trim() ?? string.Empty;
+        if (FindFilesystemTargetForScanText(TargetRows, DriveRows, text) is not null)
+        {
+            SetPortableScanControls(isPortableTarget: false);
+            return;
+        }
+
         if (!TargetRows.Any(row =>
                 row.Kind == TargetKind.PortableDevice &&
                 TextMatchesTarget(text, row, allowEmpty: false)) &&
@@ -866,6 +872,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private PendingScan? CreatePendingScan()
     {
         var text = PathBox.Text?.Trim() ?? string.Empty;
+        if (FindFilesystemTargetForScanText(TargetRows, DriveRows, text) is { } filesystemTarget)
+        {
+            return new PendingScan(filesystemTarget.RootPath, filesystemTarget.DisplayPath, filesystemTarget.RootPath, null);
+        }
+
         if (DriveList.SelectedItem is TargetRow { Kind: TargetKind.PortableDevice, PortableTarget: { } portableTarget } row &&
             TextMatchesTarget(text, row, allowEmpty: true))
         {
@@ -3405,13 +3416,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var repairDrive = FindDriveByVolumeLabel(driveRows, previousPathText);
-        if (repairDrive is null && previousSelectedTarget?.Kind == TargetKind.PortableDevice)
-        {
-            repairDrive = FindDriveByVolumeLabel(driveRows, previousSelectedTarget.DisplayPath) ??
-                FindDriveByVolumeLabel(driveRows, previousSelectedTarget.Label);
-        }
-
+        var repairDrive = FindLocalVolumeProjectionRepairDrive(driveRows, previousPathText, previousSelectedTarget);
         if (repairDrive is null)
         {
             return;
@@ -3443,6 +3448,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    internal static DriveRow? FindLocalVolumeProjectionRepairDrive(
+        IEnumerable<DriveRow> driveRows,
+        string previousPathText,
+        TargetRow? previousSelectedTarget)
+    {
+        var rows = driveRows as IReadOnlyList<DriveRow> ?? driveRows.ToList();
+        var repairDrive = FindDriveByVolumeLabel(rows, previousPathText);
+        if (repairDrive is null && previousSelectedTarget?.Kind == TargetKind.PortableDevice)
+        {
+            repairDrive = FindDriveByVolumeLabel(rows, previousSelectedTarget.DisplayPath) ??
+                FindDriveByVolumeLabel(rows, previousSelectedTarget.Label);
+        }
+
+        return repairDrive;
+    }
+
     internal static DriveRow? FindDriveByVolumeLabel(IEnumerable<DriveRow> driveRows, string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -3465,6 +3486,38 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         return driveRows.FirstOrDefault(row =>
             row.Label.EndsWith(" " + trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static TargetRow? FindFilesystemTargetForScanText(
+        IEnumerable<TargetRow> targetRows,
+        IEnumerable<DriveRow> driveRows,
+        string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var targets = targetRows as IReadOnlyList<TargetRow> ?? targetRows.ToList();
+        var driveTarget = targets.FirstOrDefault(row =>
+            row.Kind == TargetKind.Drive &&
+            (string.Equals(row.RootPath, text, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(row.DisplayPath, text, StringComparison.OrdinalIgnoreCase)));
+        if (driveTarget is not null)
+        {
+            return driveTarget;
+        }
+
+        var drive = FindDriveByVolumeLabel(driveRows, text);
+        if (drive is null)
+        {
+            return null;
+        }
+
+        return targets.FirstOrDefault(row =>
+            row.Kind == TargetKind.Drive &&
+            string.Equals(row.RootPath, drive.RootPath, StringComparison.OrdinalIgnoreCase)) ??
+            TargetRow.FromDrive(drive);
     }
 
     private async void RefreshTargets_Click(object sender, RoutedEventArgs e)

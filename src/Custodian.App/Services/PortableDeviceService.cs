@@ -73,6 +73,12 @@ internal sealed class PortableDeviceService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var deviceName = GetDeviceName(manager, deviceId);
+                if (ShouldSkipDeviceBeforeStorageDiscovery(deviceId, deviceName, localVolumeLabels))
+                {
+                    Logger.LogDebug("Ignoring local volume WPD projection {DeviceName}.", deviceName);
+                    continue;
+                }
+
                 try
                 {
                     var storageRoots = GetDeviceStorageRoots(deviceId, cancellationToken);
@@ -565,6 +571,12 @@ internal sealed class PortableDeviceService
         IReadOnlySet<string> localVolumeLabels)
         => !IsLocalVolumeProjection(deviceId, deviceName, localVolumeLabels, hasReadableStorage: false);
 
+    internal static bool ShouldSkipDeviceBeforeStorageDiscovery(
+        string deviceId,
+        string deviceName,
+        IReadOnlySet<string> localVolumeLabels)
+        => IsLocalVolumeProjection(deviceId, deviceName, localVolumeLabels, hasReadableStorage: false);
+
     private static IReadOnlySet<string> GetLocalVolumeLabels()
     {
         if (!OperatingSystem.IsWindows())
@@ -720,7 +732,7 @@ internal sealed class PortableDeviceService
             hr = getter(deviceId, builder, ref length);
             return hr.Succeeded ? builder.ToString().TrimEnd('\0') : null;
         }
-        catch (Exception ex) when (IsPortableDeviceException(ex))
+        catch (Exception ex) when (IsOptionalPortablePropertyException(ex))
         {
             return null;
         }
@@ -752,7 +764,7 @@ internal sealed class PortableDeviceService
         {
             return values.GetStringValue(in key);
         }
-        catch (Exception ex) when (IsPortableDeviceException(ex))
+        catch (Exception ex) when (IsOptionalPortablePropertyException(ex))
         {
             return null;
         }
@@ -769,7 +781,7 @@ internal sealed class PortableDeviceService
         {
             return values.GetGuidValue(in key);
         }
-        catch (Exception ex) when (IsPortableDeviceException(ex))
+        catch (Exception ex) when (IsOptionalPortablePropertyException(ex))
         {
             return null;
         }
@@ -786,7 +798,7 @@ internal sealed class PortableDeviceService
         {
             return values.GetUnsignedLargeIntegerValue(in key);
         }
-        catch (Exception ex) when (IsPortableDeviceException(ex))
+        catch (Exception ex) when (IsOptionalPortablePropertyException(ex))
         {
             return null;
         }
@@ -816,9 +828,16 @@ internal sealed class PortableDeviceService
             return null;
         }
 
+        return TryReadOptionalDateValue(
+            () => values.GetValue(in key),
+            () => TryGetString(values, key));
+    }
+
+    internal static DateTimeOffset? TryReadOptionalDateValue(Func<PROPVARIANT> getValue, Func<string?> getFallbackString)
+    {
         try
         {
-            using var variant = values.GetValue(in key);
+            using var variant = getValue();
             if (variant.Value is DateTime date)
             {
                 return TryCreateDateTimeOffset(date);
@@ -829,12 +848,16 @@ internal sealed class PortableDeviceService
                 return dateTimeOffset;
             }
         }
-        catch (Exception ex) when (IsPortableDeviceException(ex))
+        catch (Exception ex) when (IsOptionalPortablePropertyException(ex))
         {
         }
 
-        var value = TryGetString(values, key);
-        if (string.IsNullOrWhiteSpace(value))
+        string? value;
+        try
+        {
+            value = getFallbackString();
+        }
+        catch (Exception ex) when (IsOptionalPortablePropertyException(ex))
         {
             return null;
         }
@@ -924,6 +947,9 @@ internal sealed class PortableDeviceService
 
     private static bool IsPortableDeviceException(Exception ex)
         => ex is COMException or InvalidOperationException or ArgumentException or ExternalException or UnauthorizedAccessException;
+
+    private static bool IsOptionalPortablePropertyException(Exception ex)
+        => IsPortableDeviceException(ex) || ex is NullReferenceException;
 
     private static void CloseAndRelease(PortableDeviceApi.IPortableDevice? device)
     {

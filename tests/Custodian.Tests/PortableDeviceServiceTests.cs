@@ -1,6 +1,7 @@
 using Custodian.App.Services;
 using Vanara.PInvoke;
 using PortableObjectProperties = Custodian.App.Services.PortableDeviceService.PortableObjectProperties;
+using PROPVARIANT = Vanara.PInvoke.Ole32.PROPVARIANT;
 
 public sealed class PortableDeviceServiceTests
 {
@@ -18,6 +19,7 @@ public sealed class PortableDeviceServiceTests
         Assert.Empty(targets);
         Assert.True(PortableDeviceService.IsLocalVolumeProjection(LocalProjectionId, @"D:\ Library", labels, hasReadableStorage: false));
         Assert.False(PortableDeviceService.IsLocalVolumeProjection(LocalProjectionId, "Library", labels, hasReadableStorage: true));
+        Assert.True(PortableDeviceService.ShouldSkipDeviceBeforeStorageDiscovery(LocalProjectionId, "Library", labels));
     }
 
     [Fact]
@@ -31,6 +33,29 @@ public sealed class PortableDeviceServiceTests
         Assert.False(target.IsAvailable);
         Assert.Equal("Colten's S23 Ultra", target.DeviceName);
         Assert.Contains("File Transfer", target.DetailText, StringComparison.OrdinalIgnoreCase);
+        Assert.False(PortableDeviceService.ShouldSkipDeviceBeforeStorageDiscovery(UsbPhoneId, "Colten's S23 Ultra", labels));
+    }
+
+    [Fact]
+    public void TryReadOptionalDateValueTreatsNullReferenceAsMissingMetadata()
+    {
+        static PROPVARIANT ThrowNullReference() => throw new NullReferenceException("WPD optional date was unavailable.");
+
+        var date = PortableDeviceService.TryReadOptionalDateValue(ThrowNullReference, static () => null);
+
+        Assert.Null(date);
+    }
+
+    [Fact]
+    public void TryReadOptionalDateValueUsesFallbackStringWhenVariantReadFails()
+    {
+        static PROPVARIANT ThrowNullReference() => throw new NullReferenceException("WPD optional date was unavailable.");
+
+        var date = PortableDeviceService.TryReadOptionalDateValue(
+            ThrowNullReference,
+            static () => "2026-06-23T12:34:56Z");
+
+        Assert.Equal(DateTimeOffset.Parse("2026-06-23T12:34:56Z"), date);
     }
 
     [Fact]

@@ -26,6 +26,43 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void FindLocalVolumeProjectionRepairDriveUsesPreviousPortableLabel()
+    {
+        var drive = new DriveRow(@"D:\ Library", @"D:\", "1 GB used", "2 GB free", 50);
+        var portableProjection = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            @"SWD\WPDBUSENUM\{657BF548-8DCB-11EE-99AA-806E6F6E6963}#0000000000100000",
+            "Library",
+            "Unlock the phone and choose USB File Transfer mode."));
+
+        var match = MainWindow.FindLocalVolumeProjectionRepairDrive([drive], string.Empty, portableProjection);
+
+        Assert.Same(drive, match);
+    }
+
+    [Theory]
+    [InlineData(@"D:\")]
+    [InlineData(@"D:\ Library")]
+    [InlineData("Library")]
+    public void FindFilesystemTargetForScanTextResolvesDriveBeforePortableProjection(string text)
+    {
+        var drive = new DriveRow(@"D:\ Library", @"D:\", "1 GB used", "2 GB free", 50);
+        var driveTarget = TargetRow.FromDrive(drive);
+        var portableProjection = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            @"SWD\WPDBUSENUM\{657BF548-8DCB-11EE-99AA-806E6F6E6963}#0000000000100000",
+            "Library",
+            "Unlock the phone and choose USB File Transfer mode."));
+
+        var match = MainWindow.FindFilesystemTargetForScanText(
+            [portableProjection, driveTarget],
+            [drive],
+            text);
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.Drive, match.Kind);
+        Assert.Equal(@"D:\", match.RootPath);
+    }
+
+    [Fact]
     public void PortableTargetMatchesScanUsesStableTargetIdWhenStorageObjectIdChanges()
     {
         var target = new PortableDeviceTarget(
