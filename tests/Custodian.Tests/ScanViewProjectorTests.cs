@@ -119,6 +119,22 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void NonFileSystemLookupUsesPathSegments()
+    {
+        var root = Directory("Pixel/Internal shared storage", 200, 0, 2);
+        var other = Directory("Pixel/Internal shared storage/Other", 200, 0, 1);
+        other.Children.Add(Directory("Pixel/Internal shared storage/DCIM/Camera", 200, 0, 0));
+        root.Children.Add(other);
+
+        var found = ScanViewProjector.TryFindDirectoryByPath(
+            root,
+            "Pixel/Internal shared storage/DCIM/Camera",
+            out _);
+
+        Assert.False(found);
+    }
+
+    [Fact]
     public void FolderJumpRowsMatchNameAndFullPath()
     {
         var result = NestedResult();

@@ -3307,7 +3307,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return string.Equals(text, row.DisplayPath, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(text, row.RootPath, StringComparison.OrdinalIgnoreCase);
+            string.Equals(text, row.RootPath, StringComparison.OrdinalIgnoreCase) ||
+            IsPortableDisplaySubpath(text, row.DisplayPath);
+    }
+
+    private static bool IsPortableDisplaySubpath(string text, string displayRoot)
+    {
+        if (string.IsNullOrWhiteSpace(displayRoot))
+        {
+            return false;
+        }
+
+        var normalizedText = NormalizePortableDisplayPath(text);
+        var normalizedRoot = NormalizePortableDisplayPath(displayRoot);
+        return normalizedText.Length > normalizedRoot.Length &&
+            normalizedText.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase) &&
+            normalizedText[normalizedRoot.Length] == '/';
+    }
+
+    private static string NormalizePortableDisplayPath(string path)
+    {
+        return string.Join(
+            '/',
+            path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private async Task RefreshRecycleBinTargetUsageAsync()

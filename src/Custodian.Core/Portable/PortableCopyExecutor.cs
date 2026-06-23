@@ -1,9 +1,12 @@
+using System.Buffers;
 using Custodian.Core.Model;
 
 namespace Custodian.Core.Portable;
 
 public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamProvider)
 {
+    private const int CopyBufferSize = 128 * 1024;
+
     public async Task<PortableCopyResult> CopyAsync(
         PortableCopyPlan plan,
         IProgress<PortableCopyProgress>? progress = null,
@@ -67,7 +70,7 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
         string destinationPath,
         CancellationToken cancellationToken)
     {
-        var buffer = new byte[128 * 1024];
+        var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
         long bytesCopied = 0;
         FileStream? destination = null;
         try
@@ -77,13 +80,13 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
                 FileMode.CreateNew,
                 FileAccess.Write,
                 FileShare.None,
-                buffer.Length,
+                CopyBufferSize,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+                var read = await source.ReadAsync(buffer.AsMemory(0, CopyBufferSize), cancellationToken).ConfigureAwait(false);
                 if (read == 0)
                 {
                     break;
@@ -112,6 +115,8 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
             {
                 await destination.DisposeAsync().ConfigureAwait(false);
             }
+
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

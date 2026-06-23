@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -43,7 +44,7 @@ internal sealed class PortableDeviceService
         IProgress<PortableCopyProgress>? progress,
         CancellationToken cancellationToken)
         => Task.Run(
-            () => CopyToPc(result, selectedEntries, destinationRoot, progress, cancellationToken),
+            () => CopyToPcCoreAsync(result, selectedEntries, destinationRoot, progress, cancellationToken),
             cancellationToken);
 
     public static string BuildUnavailableTargetId(string deviceId)
@@ -71,7 +72,7 @@ internal sealed class PortableDeviceService
                 {
                     targets.AddRange(GetDeviceStorageTargets(deviceId, deviceName, cancellationToken));
                 }
-                catch (Exception ex) when (IsPortableDeviceException(ex))
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Logger.LogInformation(ex, "Portable device {DeviceName} is not exposing readable storage.", deviceName);
                     targets.Add(PortableDeviceTarget.Unavailable(deviceId, deviceName, LockedDeviceDetail));
@@ -80,7 +81,7 @@ internal sealed class PortableDeviceService
 
             return targets;
         }
-        catch (Exception ex) when (IsPortableDeviceException(ex))
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.LogWarning(ex, "Failed to enumerate portable devices.");
             return [];
@@ -281,7 +282,7 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private static PortableCopyResult CopyToPc(
+    private static async Task<PortableCopyResult> CopyToPcCoreAsync(
         ScanResult result,
         IReadOnlyList<FileSystemEntry> selectedEntries,
         string destinationRoot,
@@ -319,10 +320,9 @@ internal sealed class PortableDeviceService
                 keys,
                 resources,
                 result.PortableStorageObjectId);
-            return new PortableCopyExecutor(provider)
+            return await new PortableCopyExecutor(provider)
                 .CopyAsync(plan, progress, cancellationToken)
-                .GetAwaiter()
-                .GetResult();
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -842,7 +842,14 @@ internal sealed class PortableDeviceService
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            var readBuffer = offset == 0 ? buffer : new byte[count];
+            byte[]? rentedBuffer = null;
+            var readBuffer = buffer;
+            if (offset != 0)
+            {
+                rentedBuffer = ArrayPool<byte>.Shared.Rent(count);
+                readBuffer = rentedBuffer;
+            }
+
             var bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
             try
             {
@@ -858,6 +865,10 @@ internal sealed class PortableDeviceService
             finally
             {
                 Marshal.FreeCoTaskMem(bytesReadPointer);
+                if (rentedBuffer is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(rentedBuffer);
+                }
             }
         }
 
