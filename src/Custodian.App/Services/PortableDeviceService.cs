@@ -273,7 +273,8 @@ internal sealed class PortableDeviceService
             var item = storageRoot.Properties;
             var storageName = FirstNonEmpty(item.Name, item.OriginalFileName, item.StorageDescription, "Portable storage");
             var displayPath = CombinePortablePath(deviceName, storageName);
-            var targetId = BuildTargetId(deviceId, storageRoot.ObjectId);
+            var storageTargetKey = FirstNonEmpty(item.PersistentUniqueId, storageName, storageRoot.ObjectId);
+            var targetId = BuildTargetId(deviceId, storageTargetKey);
             var capacity = item.CapacityBytes;
             var free = item.FreeBytes;
             var detail = capacity > 0

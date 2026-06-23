@@ -1361,7 +1361,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var row = FindVisualParent<System.Windows.Controls.ListViewItem>((DependencyObject)e.OriginalSource);
         if (row is null) return;
-        row.IsSelected = true;
+        if (!row.IsSelected)
+        {
+            DetailsGrid.SelectedItems.Clear();
+            row.IsSelected = true;
+        }
+
         row.Focus();
     }
 
@@ -3533,9 +3538,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             IsPortableDisplaySubpath(text, displayRoot);
     }
 
-    private static bool PortableTargetMatchesScan(PortableDeviceTarget target, ScanResult scan)
-        => string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal) &&
-            string.Equals(target.StorageObjectId, scan.PortableStorageObjectId, StringComparison.Ordinal);
+    internal static bool PortableTargetMatchesScan(PortableDeviceTarget target, ScanResult scan)
+    {
+        if (!string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.Equals(target.StorageObjectId, scan.PortableStorageObjectId, StringComparison.Ordinal) ||
+            string.Equals(target.TargetId, scan.SourceId, StringComparison.Ordinal) ||
+            string.Equals(target.TargetId, scan.RootPath, StringComparison.Ordinal) ||
+            (!string.IsNullOrWhiteSpace(scan.PortableStorageName) &&
+                string.Equals(target.StorageName, scan.PortableStorageName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var displayRoot = DisplayRootPath(scan);
+        return !string.IsNullOrWhiteSpace(displayRoot) &&
+            string.Equals(target.DisplayPath, displayRoot, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsPortableDisplaySubpath(string text, string displayRoot)
     {

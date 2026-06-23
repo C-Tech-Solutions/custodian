@@ -589,6 +589,7 @@
                             </StackPanel>
                             <ListView x:Name="DetailsGrid"
                                       ItemsSource="{Binding DetailRowsView}"
+                                      SelectionMode="Extended"
                                       VirtualizingPanel.IsVirtualizing="True"
                                       VirtualizingPanel.VirtualizationMode="Recycling"
                                       ScrollViewer.CanContentScroll="True"

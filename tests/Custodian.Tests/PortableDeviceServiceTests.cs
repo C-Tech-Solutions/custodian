@@ -88,6 +88,44 @@ public sealed class PortableDeviceServiceTests
         Assert.Equal("Internal storage", target.StorageName);
     }
 
+    [Fact]
+    public void BuildTargetsForDeviceUsesStoragePersistentIdForStableTargetId()
+    {
+        var first = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [new PortableDeviceService.PortableStorageObject("storage-v1", Storage("Internal storage", persistentId: "persistent-storage"))],
+            EmptyLabels());
+        var second = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [new PortableDeviceService.PortableStorageObject("storage-v2", Storage("Internal storage", persistentId: "persistent-storage"))],
+            EmptyLabels());
+
+        Assert.Equal(first[0].TargetId, second[0].TargetId);
+        Assert.Equal("storage-v1", first[0].StorageObjectId);
+        Assert.Equal("storage-v2", second[0].StorageObjectId);
+    }
+
+    [Fact]
+    public void BuildTargetsForDeviceFallsBackToStorageNameForStableTargetId()
+    {
+        var first = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [new PortableDeviceService.PortableStorageObject("storage-v1", Storage("Internal storage"))],
+            EmptyLabels());
+        var second = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [new PortableDeviceService.PortableStorageObject("storage-v2", Storage("Internal storage"))],
+            EmptyLabels());
+
+        Assert.Equal(first[0].TargetId, second[0].TargetId);
+        Assert.Equal("storage-v1", first[0].StorageObjectId);
+        Assert.Equal("storage-v2", second[0].StorageObjectId);
+    }
+
     private static IReadOnlySet<string> EmptyLabels()
         => PortableDeviceService.CreateLocalVolumeLabelSet([]);
 
@@ -105,13 +143,17 @@ public sealed class PortableDeviceServiceTests
             null,
             null);
 
-    private static PortableObjectProperties Storage(string name, ulong? capacity = null, ulong? free = null)
+    private static PortableObjectProperties Storage(
+        string name,
+        ulong? capacity = null,
+        ulong? free = null,
+        string? persistentId = null)
         => new(
             name,
             null,
             null,
             PortableDeviceApi.WPD_FUNCTIONAL_CATEGORY_STORAGE,
-            null,
+            persistentId,
             null,
             null,
             "PortableDevice",
