@@ -38,7 +38,6 @@ public static class PortableCopyPlanner
                 destinationRoot,
                 usedTopLevelDirectories,
                 usedPaths);
-            usedPaths.Add(Path.Combine(destinationRoot, topFolderName));
             AddEmptyDirectories(entry, entry, topFolderName, destinationRoot, items, usedPaths);
 
             var files = entry.Flatten()
@@ -64,6 +63,15 @@ public static class PortableCopyPlanner
         List<PortableCopyPlanItem> items,
         ISet<string> usedPaths)
     {
+        var relativeInsideFolder = ReferenceEquals(root, directory)
+            ? string.Empty
+            : RelativePortablePath(root, directory);
+        var relativePath = string.IsNullOrWhiteSpace(relativeInsideFolder)
+            ? topFolderName
+            : Path.Combine(topFolderName, relativeInsideFolder);
+        var destinationPath = Path.Combine(destinationRoot, SanitizeRelativePath(relativePath));
+        usedPaths.Add(destinationPath);
+
         var containsFile = false;
         foreach (var child in directory.Children)
         {
@@ -79,14 +87,6 @@ public static class PortableCopyPlanner
 
         if (!containsFile)
         {
-            var relativeInsideFolder = ReferenceEquals(root, directory)
-                ? string.Empty
-                : RelativePortablePath(root, directory);
-            var relativePath = string.IsNullOrWhiteSpace(relativeInsideFolder)
-                ? topFolderName
-                : Path.Combine(topFolderName, relativeInsideFolder);
-            var destinationPath = Path.Combine(destinationRoot, SanitizeRelativePath(relativePath));
-            usedPaths.Add(destinationPath);
             items.Add(new PortableCopyPlanItem(directory, relativePath, destinationPath, IsDirectory: true));
         }
 
@@ -128,29 +128,41 @@ public static class PortableCopyPlanner
 
     private static IReadOnlyList<FileSystemEntry> RemoveSelectionsCoveredBySelectedFolders(IReadOnlyList<FileSystemEntry> entries)
     {
-        var selectedDirectories = entries
-            .Where(entry => entry.IsDirectory)
-            .Select(entry => new PathEntry(entry, NormalizePortablePath(entry.FullPath)))
-            .ToList();
+        if (entries.Count <= 1)
+        {
+            return entries;
+        }
 
-        if (selectedDirectories.Count == 0)
+        var selectedDirectoryPaths = entries
+            .Where(entry => entry.IsDirectory)
+            .Select(entry => NormalizePortablePath(entry.FullPath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (selectedDirectoryPaths.Count == 0)
         {
             return entries;
         }
 
         return entries.Select(entry => new PathEntry(entry, NormalizePortablePath(entry.FullPath)))
-            .Where(candidate => !selectedDirectories.Any(directory =>
-                !ReferenceEquals(directory.Entry, candidate.Entry) &&
-                IsPortableDescendantOf(candidate.Path, directory.Path)))
+            .Where(candidate => !IsCoveredBySelectedDirectory(candidate.Path, selectedDirectoryPaths))
             .Select(candidate => candidate.Entry)
             .ToList();
     }
 
-    private static bool IsPortableDescendantOf(string candidatePath, string ancestorPath)
+    private static bool IsCoveredBySelectedDirectory(string candidatePath, ISet<string> selectedDirectoryPaths)
     {
-        return candidatePath.Length > ancestorPath.Length &&
-            candidatePath.StartsWith(ancestorPath, StringComparison.OrdinalIgnoreCase) &&
-            candidatePath[ancestorPath.Length] == '/';
+        var slashIndex = candidatePath.LastIndexOf('/');
+        while (slashIndex > 0)
+        {
+            if (selectedDirectoryPaths.Contains(candidatePath[..slashIndex]))
+            {
+                return true;
+            }
+
+            slashIndex = candidatePath.LastIndexOf('/', slashIndex - 1);
+        }
+
+        return false;
     }
 
     private static string RelativePortablePath(FileSystemEntry root, FileSystemEntry file)
@@ -181,9 +193,19 @@ public static class PortableCopyPlanner
     public static string SanitizeFileName(string value)
     {
         var name = string.IsNullOrWhiteSpace(value) ? "Unnamed" : value.Trim();
-        foreach (var invalid in InvalidFileNameChars)
+        char[]? chars = null;
+        for (var index = 0; index < name.Length; index++)
         {
-            name = name.Replace(invalid, '_');
+            if (Array.IndexOf(InvalidFileNameChars, name[index]) >= 0)
+            {
+                chars ??= name.ToCharArray();
+                chars[index] = '_';
+            }
+        }
+
+        if (chars is not null)
+        {
+            name = new string(chars);
         }
 
         name = name.TrimEnd('.', ' ');
