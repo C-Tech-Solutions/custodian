@@ -95,6 +95,36 @@ public sealed class PortableCopyPlannerTests
             item.DestinationPath == Path.Combine(destination, "Camera (1)", "photo.jpg"));
     }
 
+    [Fact]
+    public void BuildPlanPreservesEmptySelectedFoldersAndSubfolders()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+        var albums = Directory("Pixel/Internal shared storage/Albums", "albums");
+        var empty = Directory("Pixel/Internal shared storage/Albums/Empty", "empty");
+        var nested = Directory("Pixel/Internal shared storage/Albums/Empty/Nested", "nested");
+        empty.Children.Add(nested);
+        albums.Children.Add(empty);
+
+        var plan = PortableCopyPlanner.BuildPlan([albums], destination);
+
+        Assert.Empty(plan.SkippedEntries);
+        Assert.Contains(plan.Items, item =>
+            item.IsDirectory &&
+            item.Entry == albums &&
+            item.RelativePath == "Albums" &&
+            item.DestinationPath == Path.Combine(destination, "Albums"));
+        Assert.Contains(plan.Items, item =>
+            item.IsDirectory &&
+            item.Entry == empty &&
+            item.RelativePath == Path.Combine("Albums", "Empty") &&
+            item.DestinationPath == Path.Combine(destination, "Albums", "Empty"));
+        Assert.Contains(plan.Items, item =>
+            item.IsDirectory &&
+            item.Entry == nested &&
+            item.RelativePath == Path.Combine("Albums", "Empty", "Nested") &&
+            item.DestinationPath == Path.Combine(destination, "Albums", "Empty", "Nested"));
+    }
+
     private static FileSystemEntry Directory(string path, string objectId) => new()
     {
         Name = path.Split('/').Last(),

@@ -9,4 +9,5 @@ public sealed record PortableCopyPlan(
 public sealed record PortableCopyPlanItem(
     FileSystemEntry Entry,
     string RelativePath,
-    string DestinationPath);
+    string DestinationPath,
+    bool IsDirectory = false);

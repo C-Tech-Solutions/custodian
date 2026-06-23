@@ -93,6 +93,28 @@ public sealed class PortableCopyExecutorTests
         Assert.Equal([9, 8, 7], await System.IO.File.ReadAllBytesAsync(destination));
     }
 
+    [Fact]
+    public async Task CopyAsyncCreatesPlannedDirectoriesWithoutOpeningPhoneStream()
+    {
+        using var temp = new TempDirectory();
+        var directory = new FileSystemEntry
+        {
+            Name = "Empty",
+            FullPath = "Pixel/Internal shared storage/Empty",
+            IsDirectory = true
+        };
+        var plan = new PortableCopyPlan(
+            [new PortableCopyPlanItem(directory, directory.Name, Path.Combine(temp.Path, directory.Name), IsDirectory: true)],
+            []);
+        var provider = new FakeStreamProvider(_ => throw new InvalidOperationException("Directories should not open phone streams."));
+
+        var result = await new PortableCopyExecutor(provider).CopyAsync(plan);
+
+        Assert.Equal(0, result.FilesCopied);
+        Assert.Equal(0, result.FilesSkipped);
+        Assert.True(System.IO.Directory.Exists(Path.Combine(temp.Path, directory.Name)));
+    }
+
     private static FileSystemEntry PortableFile(string path, string objectId, string persistentId) => new()
     {
         Name = path.Split('/').Last(),

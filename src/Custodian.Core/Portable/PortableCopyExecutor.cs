@@ -29,6 +29,12 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
 
             try
             {
+                if (item.IsDirectory)
+                {
+                    Directory.CreateDirectory(item.DestinationPath);
+                    continue;
+                }
+
                 await using var source = await streamProvider.OpenReadAsync(item.Entry, cancellationToken).ConfigureAwait(false);
                 if (source is null)
                 {
@@ -74,6 +80,8 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
         var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
         long bytesCopied = 0;
         FileStream? destination = null;
+        var deletePartialFile = false;
+        var success = false;
         try
         {
             destination = new FileStream(
@@ -83,6 +91,7 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
                 FileShare.None,
                 CopyBufferSize,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
+            deletePartialFile = true;
 
             while (true)
             {
@@ -97,27 +106,36 @@ public sealed class PortableCopyExecutor(IPortableObjectStreamProvider streamPro
                 bytesCopied += read;
             }
 
+            success = true;
             return bytesCopied;
-        }
-        catch
-        {
-            if (destination is not null)
-            {
-                await destination.DisposeAsync().ConfigureAwait(false);
-                destination = null;
-                DeletePartialFile(destinationPath);
-            }
-
-            throw;
         }
         finally
         {
             if (destination is not null)
             {
-                await destination.DisposeAsync().ConfigureAwait(false);
+                if (success)
+                {
+                    await destination.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    try
+                    {
+                        await destination.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Preserve the original copy failure; cleanup below is best-effort.
+                    }
+                }
             }
 
             ArrayPool<byte>.Shared.Return(buffer);
+
+            if (deletePartialFile && !success)
+            {
+                DeletePartialFile(destinationPath);
+            }
         }
     }
 

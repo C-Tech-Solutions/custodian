@@ -34,6 +34,8 @@ public static class PortableCopyPlanner
             }
 
             var topFolderName = GetAvailableSegment(SanitizeFileName(entry.Name), usedTopLevelDirectories);
+            AddEmptyDirectories(entry, entry, topFolderName, destinationRoot, items);
+
             var files = entry.Flatten()
                 .Where(child => !child.IsDirectory)
                 .OrderBy(child => child.FullPath, StringComparer.OrdinalIgnoreCase);
@@ -47,6 +49,41 @@ public static class PortableCopyPlanner
         }
 
         return new PortableCopyPlan(items, skipped);
+    }
+
+    private static bool AddEmptyDirectories(
+        FileSystemEntry root,
+        FileSystemEntry directory,
+        string topFolderName,
+        string destinationRoot,
+        List<PortableCopyPlanItem> items)
+    {
+        var containsFile = false;
+        foreach (var child in directory.Children)
+        {
+            if (child.IsDirectory)
+            {
+                containsFile |= AddEmptyDirectories(root, child, topFolderName, destinationRoot, items);
+            }
+            else
+            {
+                containsFile = true;
+            }
+        }
+
+        if (!containsFile)
+        {
+            var relativeInsideFolder = ReferenceEquals(root, directory)
+                ? string.Empty
+                : RelativePortablePath(root, directory);
+            var relativePath = string.IsNullOrWhiteSpace(relativeInsideFolder)
+                ? topFolderName
+                : Path.Combine(topFolderName, relativeInsideFolder);
+            var destinationPath = Path.Combine(destinationRoot, SanitizeRelativePath(relativePath));
+            items.Add(new PortableCopyPlanItem(directory, relativePath, destinationPath, IsDirectory: true));
+        }
+
+        return containsFile;
     }
 
     private static void AddFile(

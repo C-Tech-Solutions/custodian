@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using Custodian.App.Logging;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
@@ -858,6 +859,8 @@ internal sealed class PortableDeviceService
 
     private sealed class PortableDeviceReadStream(System.Runtime.InteropServices.ComTypes.IStream stream) : Stream
     {
+        private IntPtr _bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
+
         public override bool CanRead => true;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
@@ -874,6 +877,8 @@ internal sealed class PortableDeviceService
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            ObjectDisposedException.ThrowIf(_bytesReadPointer == IntPtr.Zero, this);
+
             byte[]? rentedBuffer = null;
             var readBuffer = buffer;
             if (offset != 0)
@@ -882,12 +887,11 @@ internal sealed class PortableDeviceService
                 readBuffer = rentedBuffer;
             }
 
-            var bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
-            Marshal.WriteInt32(bytesReadPointer, 0);
+            Marshal.WriteInt32(_bytesReadPointer, 0);
             try
             {
-                stream.Read(readBuffer, count, bytesReadPointer);
-                var bytesRead = Marshal.ReadInt32(bytesReadPointer);
+                stream.Read(readBuffer, count, _bytesReadPointer);
+                var bytesRead = Marshal.ReadInt32(_bytesReadPointer);
                 if (offset != 0 && bytesRead > 0)
                 {
                     Buffer.BlockCopy(readBuffer, 0, buffer, offset, bytesRead);
@@ -897,7 +901,6 @@ internal sealed class PortableDeviceService
             }
             finally
             {
-                Marshal.FreeCoTaskMem(bytesReadPointer);
                 if (rentedBuffer is not null)
                 {
                     ArrayPool<byte>.Shared.Return(rentedBuffer);
@@ -911,6 +914,12 @@ internal sealed class PortableDeviceService
 
         protected override void Dispose(bool disposing)
         {
+            var bytesReadPointer = Interlocked.Exchange(ref _bytesReadPointer, IntPtr.Zero);
+            if (bytesReadPointer != IntPtr.Zero)
+            {
+                Marshal.FreeCoTaskMem(bytesReadPointer);
+            }
+
             ReleaseComObject(stream);
             base.Dispose(disposing);
         }

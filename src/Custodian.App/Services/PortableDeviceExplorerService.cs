@@ -77,8 +77,13 @@ internal static class PortableDeviceExplorerService
         }
     }
 
-    private static IReadOnlyList<IPortableExplorerNode> EnumerateFolderItems(object folder)
+    private static IReadOnlyList<IPortableExplorerNode> EnumerateFolderItems(object? folder)
     {
+        if (folder is null)
+        {
+            return [];
+        }
+
         try
         {
             dynamic shellFolder = folder;
