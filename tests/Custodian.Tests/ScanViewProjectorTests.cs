@@ -93,6 +93,24 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void BreadcrumbAndParentSupportNonFileSystemPaths()
+    {
+        var root = Directory("Pixel/Internal shared storage", 200, 1, 2);
+        var dcim = Directory("Pixel/Internal shared storage/DCIM", 200, 1, 1);
+        var camera = Directory("Pixel/Internal shared storage/DCIM/Camera", 200, 1, 0);
+        camera.Children.Add(File("Pixel/Internal shared storage/DCIM/Camera/photo.jpg", 200, ".jpg"));
+        dcim.Children.Add(camera);
+        root.Children.Add(dcim);
+
+        var breadcrumbs = ScanViewProjector.Breadcrumb(root, camera);
+        var foundParent = ScanViewProjector.TryFindParent(root, camera, out var parent);
+
+        Assert.Equal(["Internal shared storage", "DCIM", "Camera"], breadcrumbs.Select(item => item.Name).ToList());
+        Assert.True(foundParent);
+        Assert.Equal("Pixel/Internal shared storage/DCIM", parent.FullPath);
+    }
+
+    [Fact]
     public void FolderJumpRowsMatchNameAndFullPath()
     {
         var result = NestedResult();

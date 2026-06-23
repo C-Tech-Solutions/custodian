@@ -19,6 +19,9 @@ server or workstation workflows.
   scope while Custodian stays open.
 - **Choose the right scanner** with Auto mode, recursive scanning for folders
   and network shares, and optional NTFS MFT scanning for local NTFS volumes.
+- **Inspect Android phone storage** when Windows exposes an unlocked phone
+  through USB File Transfer / MTP, with read-only metadata scans of each
+  readable storage root plus safe copy-to-PC actions.
 - **Run in locked-down environments** with a portable build, a CLI, UNC path
   support, safe fallbacks when raw NTFS access is unavailable, and an optional
   always-open-as-administrator launch setting.
@@ -47,12 +50,17 @@ Release assets include:
 - Windows 10, Windows 11, or Windows Server with Desktop Experience for the WPF
   desktop app.
 - Administrator launch is recommended for full local NTFS MFT access.
+- Android phone scanning requires the desktop app, an unlocked phone, and USB
+  File Transfer mode. Custodian can analyze phone metadata, open selected phone
+  folders or files in Explorer when Windows supports it, and copy selected files
+  to the PC, but it does not delete, rename, move, or modify files on the phone.
+  Allocated-size/MFT data is not available.
 - The CLI can run in more constrained server workflows, including scheduled
   jobs, recursive scans, and export tasks.
 
 ## Desktop Workflow
 
-1. Choose a drive, folder, or UNC path.
+1. Choose a drive, folder, UNC path, or connected phone storage root.
 2. Pick Auto, Recursive, or MFT scanning.
 3. Scan and inspect space by folder, file, extension, or chart slice.
 4. Switch to another drive and return to any cached scan without rescanning.
@@ -67,6 +75,13 @@ elevation before future launches instead of starting normally and relaunching.
 Drive targets show whether a scan is currently running or already cached for
 the session. Uncached drives show a Start Scan prompt instead of clearing the
 workspace without direction.
+
+Connected Android phones appear under Targets when Windows exposes readable MTP
+storage. If a phone is locked or left in charging-only mode, Custodian shows a
+target hint asking you to unlock the phone and choose File Transfer mode.
+Phone scan rows can be opened in Explorer at the storage-root level or copied
+to a PC folder; selected folders copy recursively and existing PC files are
+left untouched by auto-renaming duplicates.
 
 ## CLI Examples
 

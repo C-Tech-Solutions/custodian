@@ -102,6 +102,9 @@ public sealed class MftScanProvider : IDiskScanProvider
         return new ScanResult
         {
             RootPath = build.Root.FullPath,
+            SourceKind = ScanSourceKind.FileSystem,
+            SourceId = build.Root.FullPath,
+            DisplayRootPath = build.Root.FullPath,
             Engine = "NTFS MFT",
             StartedAt = started,
             CompletedAt = DateTimeOffset.UtcNow,

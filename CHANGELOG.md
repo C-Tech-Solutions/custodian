@@ -7,10 +7,14 @@ All notable changes to Custodian are tracked here.
 ### Added
 
 - Added Azure Artifact Signing support for Velopack and portable release builds.
+- Added read-only Android phone storage scanning through Windows Portable Devices / MTP in the desktop app.
+- Added portable-device source metadata to saved scan files while preserving compatibility with existing `.custodian-scan` files.
+- Added phone scan actions to open selected phone folders/files in Explorer and copy selected phone files or folders to the PC.
 
 ### Changed
 
 - Updated the app icon with the new disk-analysis scan mark.
+- Updated scan navigation to support non-filesystem paths for portable-device scan trees.
 
 ## 1.3.0 - 2026-06-16
 

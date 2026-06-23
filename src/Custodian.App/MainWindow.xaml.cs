@@ -23,6 +23,7 @@ using Microsoft.Extensions.Logging;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
+using Custodian.Core.Portable;
 using Custodian.Core.Presentation;
 using Custodian.Core.Scanning;
 using Custodian.Core.Storage;
@@ -54,9 +55,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private static readonly TimeSpan StartupUpdateCheckTimeout = TimeSpan.FromSeconds(15);
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
     private readonly DiskScanner _scanner = new();
+    private readonly PortableDeviceService _portableDevices = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
     private ActiveScanJob? _activeScan;
+    private CancellationTokenSource? _activePortableCopy;
     private CancellationTokenSource? _updateCts;
     private CancellationTokenSource? _recycleBinCts;
     private bool _recycleBinCtsIsRefresh;
@@ -105,6 +108,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<DriveRow> DriveRows { get; } = [];
     public ObservableCollection<TargetRow> TargetRows { get; } = [];
+    public BulkObservableCollection<TargetRow> EmptyStateTargets { get; } = [];
     public ObservableCollection<string> RecentPaths { get; } = [];
     public BulkObservableCollection<FolderNode> FolderNodes { get; } = [];
     public BulkObservableCollection<DetailRow> DetailRows { get; } = [];
@@ -134,7 +138,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PathBox.ItemsSource = RecentPaths;
         JumpBox.ItemsSource = FolderJumpRows;
         ChartScopeBox.SelectedIndex = 0;
-        EmptyStateDrives.ItemsSource = DriveRows;
+        EmptyStateDrives.ItemsSource = EmptyStateTargets;
 
         _settingsSaveTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -218,6 +222,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isClosing = true;
         IsEnabled = false;
         _activeScan?.Cancellation.Cancel();
+        _activePortableCopy?.Cancel();
         _updateCts?.Cancel();
         _recycleBinCts?.Cancel();
         _settingsSaveTimer.Stop();
@@ -262,6 +267,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 PathBox.Text?.Trim());
 
             _activeScan?.Cancellation.Cancel();
+            _activePortableCopy?.Cancel();
             _updateCts?.Cancel();
             _recycleBinCts?.Cancel();
             _settingsPersistedForClose = true;
@@ -425,7 +431,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void Stop_Click(object sender, RoutedEventArgs e) => StopScan();
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await StartScanAsync();
 
-    private void StopScan() => _activeScan?.Cancellation.Cancel();
+    private void StopScan()
+    {
+        _activeScan?.Cancellation.Cancel();
+        _activePortableCopy?.Cancel();
+    }
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
     {
@@ -549,7 +559,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                    or AppUpdateStatusKind.Downloading
                    or AppUpdateStatusKind.ReadyToRestart);
 
-    private bool CanShowBackgroundUpdateStatus() => _activeScan is null && !_isRecycleBinViewActive;
+    private bool CanShowBackgroundUpdateStatus() => _activeScan is null && _activePortableCopy is null && !_isRecycleBinViewActive;
 
     private void RestoreFooterStatus(string status, string detail)
     {
@@ -639,6 +649,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _isClosing = true;
         _activeScan?.Cancellation.Cancel();
+        _activePortableCopy?.Cancel();
         _updateCts?.Cancel();
         _settingsSaveTimer.Stop();
         await PersistSettingsAsync();
@@ -650,45 +661,55 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task StartScanAsync()
     {
-        if (_activeScan is not null) return;
+        if (_activeScan is not null || _activePortableCopy is not null) return;
 
-        var path = PathBox.Text?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(path))
+        var request = CreatePendingScan();
+        if (request is null)
         {
             UpdateFooterStatus("Choose a path to scan.", string.Empty);
             return;
         }
 
+        if (request.PortableTarget is { IsAvailable: false } unavailableTarget)
+        {
+            UpdateFooterStatus("Phone unavailable", unavailableTarget.DetailText);
+            ShowToast(unavailableTarget.DetailText);
+            return;
+        }
+
         var navigationVersion = BeginNavigation();
-        var scanKey = TryGetScanCacheKey(path, out var normalizedKey)
-            ? normalizedKey
-            : path;
+        var scanKey = request.RootKey;
+        var displayPath = request.DisplayPath;
         var cts = new CancellationTokenSource();
-        var scan = new ActiveScanJob(scanKey, path, cts);
+        var scan = new ActiveScanJob(scanKey, displayPath, cts);
         _activeScan = scan;
         _scanStarted = DateTime.UtcNow;
         _scanFilesSeen = 0;
         _scanBytesSeen = 0;
-        _scanCurrentPath = path;
+        _scanCurrentPath = displayPath;
         SetScanningState(true);
         RememberCurrentScanState();
-        AddRecentPath(path);
-        RefreshTargetStatus(path);
+        if (request.PortableTarget is null)
+        {
+            AddRecentPath(request.ScanPath);
+        }
+
+        RefreshTargetStatus(scanKey);
         if (_isRecycleBinViewActive)
         {
             await LeaveRecycleBinViewAsync();
         }
 
-        if (TryGetCachedScan(path, out var cached))
+        if (TryGetCachedScan(scanKey, out var cached))
         {
             if (await RestoreCachedScanAsync(cached, navigationVersion, showToast: false))
             {
-                UpdateFooterStatus("Scanning", $"Refreshing {path}...");
+                UpdateFooterStatus("Scanning", $"Refreshing {displayPath}...");
             }
         }
         else
         {
-            ClearViewsForNewScan(path, scanKey);
+            ClearViewsForNewScan(displayPath, scanKey);
             StartLoadingAnimation();
         }
 
@@ -698,7 +719,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 _scanFilesSeen = p.FilesSeen;
                 _scanBytesSeen = p.BytesSeen;
-                _scanCurrentPath = string.IsNullOrWhiteSpace(p.CurrentPath) ? path : p.CurrentPath;
+                _scanCurrentPath = string.IsNullOrWhiteSpace(p.CurrentPath) ? displayPath : p.CurrentPath;
                 LoadingPathText.Text = _scanCurrentPath;
                 if (IsShowingActiveScan(scan))
                 {
@@ -713,10 +734,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _ => ScanMode.Auto
             };
 
-            var result = await _scanner.ScanAsync(
-                new ScanOptions(path, mode, CollectAllocatedSize: AllocatedSizeBox.IsChecked == true),
-                progress,
-                cts.Token);
+            var result = request.PortableTarget is { } portableTarget
+                ? await _portableDevices.ScanAsync(portableTarget, progress, cts.Token)
+                : await _scanner.ScanAsync(
+                    new ScanOptions(request.ScanPath, mode, CollectAllocatedSize: AllocatedSizeBox.IsChecked == true),
+                    progress,
+                    cts.Token);
 
             var completed = await CacheScanResultAsync(result, scanKey);
             var shouldShowCompletedScan = ShouldShowCompletedScan(scanKey);
@@ -747,7 +770,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             else
             {
-                ShowToast($"Scan cancelled: {path}");
+                ShowToast($"Scan cancelled: {displayPath}");
             }
         }
         catch (Exception ex)
@@ -762,14 +785,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             else if (_currentScan is not null && !_isRecycleBinViewActive)
             {
-                ShowToast($"Scan failed: {path}");
+                ShowToast($"Scan failed: {displayPath}");
                 UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
                 EngineBadge.Text = _currentScan.Engine;
                 EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("SuccessBrush") ?? WpfBrushes.Green;
             }
             else
             {
-                ShowToast($"Scan failed: {path}");
+                ShowToast($"Scan failed: {displayPath}");
             }
         }
         finally
@@ -781,12 +804,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 SetScanningState(false);
                 StopLoadingAnimation();
             }
-            RefreshTargetStatus(path);
+            RefreshTargetStatus(scanKey);
         }
+    }
+
+    private PendingScan? CreatePendingScan()
+    {
+        var text = PathBox.Text?.Trim() ?? string.Empty;
+        if (DriveList.SelectedItem is TargetRow { Kind: TargetKind.PortableDevice, PortableTarget: { } portableTarget } row &&
+            TextMatchesTarget(text, row, allowEmpty: true))
+        {
+            return new PendingScan(row.RootPath, row.DisplayPath, row.RootPath, portableTarget);
+        }
+
+        var portableTargetRow = TargetRows.FirstOrDefault(row =>
+            row.Kind == TargetKind.PortableDevice &&
+            row.PortableTarget is not null &&
+            TextMatchesTarget(text, row, allowEmpty: false));
+        if (portableTargetRow?.PortableTarget is { } target)
+        {
+            return new PendingScan(portableTargetRow.RootPath, portableTargetRow.DisplayPath, portableTargetRow.RootPath, target);
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var scanKey = TryGetScanCacheKey(text, out var normalizedKey)
+            ? normalizedKey
+            : text;
+        return new PendingScan(scanKey, text, text, null);
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)
     {
+        SetPortableScanControls(isPortableTarget: false);
         using var dialog = new WinForms.FolderBrowserDialog
         {
             Description = "Choose a folder to scan",
@@ -879,8 +932,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     await LeaveRecycleBinViewAsync();
                 }
 
-                PathBox.Text = loaded.RootPath;
-                AddRecentPath(loaded.RootPath);
+                PathBox.Text = DisplayRootPath(loaded);
+                SetPortableScanControls(loaded.SourceKind == ScanSourceKind.PortableDevice);
+                if (loaded.SourceKind == ScanSourceKind.FileSystem)
+                {
+                    AddRecentPath(loaded.RootPath);
+                }
+
                 var restored = await RestoreCachedScanAsync(cached, navigationVersion, showToast: false);
                 if (restored)
                 {
@@ -946,6 +1004,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        if (row.Kind == TargetKind.PortableDevice)
+        {
+            RememberCurrentScanState();
+
+            if (_isRecycleBinViewActive)
+            {
+                await LeaveRecycleBinViewAsync();
+            }
+
+            PathBox.Text = row.DisplayPath;
+            SetPortableScanControls(row.IsAvailable);
+
+            if (!row.IsAvailable)
+            {
+                ShowStartScanPrompt(row.DisplayPath, row.DetailText);
+                UpdateFooterStatus("Phone unavailable", row.DetailText);
+                return;
+            }
+
+            if (_activeScan is { } activePortableScan && IsScanActive(row.RootPath))
+            {
+                ShowActiveScanPage(activePortableScan);
+                return;
+            }
+
+            if (TryGetCachedScan(row.RootPath, out var portableCached))
+            {
+                await RestoreCachedScanAsync(portableCached, targetSelectionVersion, showToast: false);
+                return;
+            }
+
+            ShowStartScanPrompt(row.DisplayPath);
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(row.RootPath))
         {
             RememberCurrentScanState();
@@ -956,6 +1049,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             PathBox.Text = row.RootPath;
+            SetPortableScanControls(isPortableTarget: false);
             AddRecentPath(row.RootPath);
 
             if (_activeScan is { } activeScan && IsScanActive(row.RootPath))
@@ -976,11 +1070,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void EmptyStateDrive_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string path })
+        if (sender is not FrameworkElement { DataContext: TargetRow target } ||
+            target.Kind is not (TargetKind.Drive or TargetKind.PortableDevice))
         {
-            PathBox.Text = path;
-            await StartScanAsync();
+            return;
         }
+
+        SelectTargetWithoutNavigation(target);
+        PathBox.Text = target.Kind == TargetKind.PortableDevice ? target.DisplayPath : target.RootPath;
+        SetPortableScanControls(target.Kind == TargetKind.PortableDevice && target.IsAvailable);
+        await StartScanAsync();
+    }
+
+    private void SelectTargetWithoutNavigation(TargetRow target)
+    {
+        var match = TargetRows.FirstOrDefault(row =>
+            row.Kind == target.Kind &&
+            string.Equals(row.RootPath, target.RootPath, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            return;
+        }
+
+        _suppressTargetSelection = true;
+        try
+        {
+            DriveList.SelectedItem = match;
+            DriveList.ScrollIntoView(match);
+        }
+        finally
+        {
+            _suppressTargetSelection = false;
+        }
+
+        RefreshEmptyStateTargets();
     }
 
     private void FolderTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -1924,8 +2047,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     //  Selection actions (open / reveal / copy / export / delete)
     // ============================================================
+    private void DetailsContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var visible = CurrentScanIsPortable() ? Visibility.Visible : Visibility.Collapsed;
+        CopyPortableToPcMenuItem.Visibility = visible;
+        CopyPortableToPcSeparator.Visibility = visible;
+    }
+
     private void OpenSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (CurrentScanIsPortable())
+        {
+            OpenPortableSelectionInExplorer(PortableExplorerOpenMode.Open);
+            return;
+        }
+
         var path = SelectedPath();
         if (path is null) return;
         if (Directory.Exists(path))
@@ -1938,8 +2074,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RevealSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (CurrentScanIsPortable())
+        {
+            OpenPortableSelectionInExplorer(PortableExplorerOpenMode.Reveal);
+            return;
+        }
+
         var path = SelectedPath();
-        if (path is not null && IsExistingFileSystemPath(path)) RevealPath(path);
+        if (path is null) return;
+        if (IsExistingFileSystemPath(path)) RevealPath(path);
     }
 
     private void CopyPath_Click(object sender, RoutedEventArgs e)
@@ -1966,6 +2109,89 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var builder = new StringBuilder();
         foreach (var row in rows) builder.AppendLine(row.ToString());
         CopyTextToClipboard(builder.ToString(), $"Copied {rows.Count:n0} row(s).");
+    }
+
+    private async void CopyPortableToPc_Click(object sender, RoutedEventArgs e)
+    {
+        if (_activeScan is not null || _activePortableCopy is not null)
+        {
+            ShowToast("Wait for the current operation to finish first.");
+            return;
+        }
+
+        if (_currentScan is not { SourceKind: ScanSourceKind.PortableDevice } currentScan)
+        {
+            ShowToast("Copy to PC is only available for phone scans.");
+            return;
+        }
+
+        var entries = SelectedEntriesForPortableCopy().ToList();
+        if (entries.Count == 0)
+        {
+            ShowToast("Select one or more phone files or folders first.");
+            return;
+        }
+
+        using var dialog = new WinForms.FolderBrowserDialog
+        {
+            Description = "Choose where to copy the selected phone files",
+            UseDescriptionForTitle = true,
+            SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+
+        if (dialog.ShowDialog() != WinForms.DialogResult.OK)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _activePortableCopy = cts;
+        SetScanningState(true);
+        ProgressBar.IsIndeterminate = true;
+        UpdateFooterStatus("Copying phone files", dialog.SelectedPath);
+
+        try
+        {
+            var progress = new Progress<PortableCopyProgress>(copyProgress =>
+            {
+                UpdateFooterStatus(
+                    copyProgress.Message,
+                    $"{copyProgress.FilesCopied:n0} copied, {copyProgress.FilesSkipped:n0} skipped, {SizeFormatter.Format(copyProgress.BytesCopied)}");
+            });
+
+            var result = await _portableDevices.CopyToPcAsync(currentScan, entries, dialog.SelectedPath, progress, cts.Token);
+            var skippedText = result.FilesSkipped > 0 ? $", {result.FilesSkipped:n0} skipped" : string.Empty;
+            ShowToast($"Copied {result.FilesCopied:n0} file(s){skippedText}.");
+            UpdateFooterStatus("Ready", $"Copied to {dialog.SelectedPath}");
+
+            if (result.SkippedEntries.Count > 0)
+            {
+                ShowPortableCopySkippedSummary(result);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            ShowToast("Phone copy cancelled.");
+            UpdateFooterStatus("Cancelled", "Phone copy cancelled.");
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError("Phone copy failed", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_activePortableCopy, cts))
+            {
+                _activePortableCopy = null;
+            }
+
+            cts.Dispose();
+            SetScanningState(false);
+            if (_currentScan is not null && !_isRecycleBinViewActive)
+            {
+                UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+            }
+        }
     }
 
     private void CopyTextToClipboard(string text, string successMessage)
@@ -2003,6 +2229,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void DeleteSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (CurrentScanIsPortable())
+        {
+            ShowPortableDeviceModificationBlockedMessage();
+            return;
+        }
+
         var path = SelectedPath();
         if (path is null || (!File.Exists(path) && !Directory.Exists(path)))
         {
@@ -2163,6 +2395,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static bool TryGetScanCacheKey(string rootPath, out string key)
     {
+        if (IsPortableTargetId(rootPath))
+        {
+            key = rootPath;
+            return true;
+        }
+
         try
         {
             key = ScanPathUtility.NormalizeRoot(rootPath);
@@ -2174,6 +2412,97 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return false;
         }
     }
+
+    private bool CurrentScanIsPortable()
+        => _currentScan?.SourceKind == ScanSourceKind.PortableDevice;
+
+    private void OpenPortableSelectionInExplorer(PortableExplorerOpenMode mode)
+    {
+        if (_currentScan is not { SourceKind: ScanSourceKind.PortableDevice } currentScan)
+        {
+            return;
+        }
+
+        var entry = SelectedEntry();
+        if (entry is null)
+        {
+            ShowToast("Select a phone file or folder first.");
+            return;
+        }
+
+        var result = PortableDeviceExplorerService.Open(currentScan, entry, mode);
+        ShowPortableExplorerResult(result, entry, mode);
+    }
+
+    private void ShowPortableExplorerResult(
+        PortableExplorerOpenResult result,
+        FileSystemEntry entry,
+        PortableExplorerOpenMode mode)
+    {
+        switch (result.Kind)
+        {
+            case PortableExplorerOpenResultKind.OpenedExactItem:
+                ShowToast(BuildPortableExplorerExactMessage(entry, mode));
+                break;
+            case PortableExplorerOpenResultKind.OpenedParent:
+                ShowToast("Could not open that phone item. Opened the nearest available folder.");
+                break;
+            case PortableExplorerOpenResultKind.OpenedStorageRoot:
+                ShowToast("Could not open that phone item. Opened the phone storage root.");
+                break;
+            case PortableExplorerOpenResultKind.OpenedThisPc:
+                ShowToast("Could not open that phone item. Opened This PC; open the phone from there.");
+                break;
+            default:
+                ShowToast("Could not open that phone item. Unlock the phone and choose USB File Transfer mode.");
+                break;
+        }
+    }
+
+    private static string BuildPortableExplorerExactMessage(FileSystemEntry entry, PortableExplorerOpenMode mode)
+    {
+        if (entry.IsDirectory)
+        {
+            return "Opened phone folder in Explorer.";
+        }
+
+        return mode == PortableExplorerOpenMode.Reveal
+            ? "Revealed phone file in Explorer."
+            : "Opened phone file.";
+    }
+
+    private IEnumerable<FileSystemEntry> SelectedEntriesForPortableCopy()
+    {
+        var selectedRows = SelectedDetailRows().Select(row => row.Entry).ToList();
+        if (selectedRows.Count > 0)
+        {
+            return selectedRows;
+        }
+
+        return _selectedEntry is null ? [] : [_selectedEntry];
+    }
+
+    private void ShowPortableCopySkippedSummary(PortableCopyResult result)
+    {
+        var preview = string.Join(
+            Environment.NewLine,
+            result.SkippedEntries.Take(8).Select(entry => $"{entry.Path}: {entry.Reason}"));
+        var suffix = result.SkippedEntries.Count > 8
+            ? $"{Environment.NewLine}{Environment.NewLine}...and {result.SkippedEntries.Count - 8:n0} more."
+            : string.Empty;
+        WpfMessageBox.Show(
+            this,
+            $"{result.SkippedEntries.Count:n0} phone item(s) could not be copied.{Environment.NewLine}{Environment.NewLine}{preview}{suffix}",
+            "Phone copy completed with skips",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+    }
+
+    private void ShowPortableDeviceModificationBlockedMessage()
+        => ShowToast("Portable device items can be opened in Explorer and copied to the PC, but not deleted or modified on the phone.");
+
+    private static bool IsPortableTargetId(string value)
+        => value.StartsWith("wpd:", StringComparison.OrdinalIgnoreCase);
 
     private static FileSystemEntry ResolveCachedSelection(ScanResult result, CachedScanState? restoreState)
     {
@@ -2265,23 +2594,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             for (var i = 0; i < TargetRows.Count; i++)
             {
                 var target = TargetRows[i];
-                if (target.Kind != TargetKind.Drive ||
+                if ((target.Kind != TargetKind.Drive && target.Kind != TargetKind.PortableDevice) ||
                     !TryGetScanCacheKey(target.RootPath, out var targetKey) ||
                     !string.Equals(key, targetKey, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                var drive = DriveRows.FirstOrDefault(row => string.Equals(row.RootPath, target.RootPath, StringComparison.OrdinalIgnoreCase));
-                if (drive is null)
-                {
-                    continue;
-                }
-
-                var replacement = TargetRow.FromDrive(
-                    drive,
-                    scanCached: IsScanCached(drive.RootPath),
-                    scanActive: IsScanActive(drive.RootPath));
+                var replacement = target.Kind == TargetKind.PortableDevice && target.PortableTarget is { } portableTarget
+                    ? TargetRow.FromPortable(
+                        portableTarget,
+                        scanCached: IsScanCached(portableTarget.TargetId),
+                        scanActive: IsScanActive(portableTarget.TargetId))
+                    : DriveRows.FirstOrDefault(row => string.Equals(row.RootPath, target.RootPath, StringComparison.OrdinalIgnoreCase)) is { } drive
+                        ? TargetRow.FromDrive(
+                            drive,
+                            scanCached: IsScanCached(drive.RootPath),
+                            scanActive: IsScanActive(drive.RootPath))
+                        : target;
                 if (!EqualityComparer<TargetRow>.Default.Equals(target, replacement))
                 {
                     TargetRows[i] = replacement;
@@ -2796,9 +3126,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return false;
         }
 
-        var normalized = entry.FullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var parentPath = Path.GetDirectoryName(normalized);
-        if (!string.IsNullOrWhiteSpace(parentPath) && ScanViewProjector.TryFindDirectoryByPath(root, parentPath, out parent))
+        if (ScanViewProjector.TryFindParent(root, entry, out parent))
         {
             return true;
         }
@@ -2881,7 +3209,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{_scanFilesSeen:n0} files, {SizeFormatter.Format(_scanBytesSeen)}";
     }
 
-    private void ShowStartScanPrompt(string path)
+    private void ShowStartScanPrompt(string path, string? detail = null)
     {
         _isRecycleBinViewActive = false;
         RecycleBinHost.Visibility = Visibility.Collapsed;
@@ -2908,13 +3236,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         FolderJumpRows.Clear();
 
         EmptyStateTitleText.Text = "Start Scan";
-        EmptyStateDetailText.Text = $"No session scan is loaded for {path}. Start a scan to inspect this drive.";
+        EmptyStateDetailText.Text = detail ?? $"No session scan is loaded for {path}. Start a scan to inspect this target.";
         SelectedTitleText.Text = "No scan loaded";
         SelectedSubText.Text = path;
         ChartTitleText.Text = "Disk distribution";
         ChartTotalText.Text = "Start a scan to render chart data.";
         ChartSelectionText.Text = "Select a slice to locate it in the grid.";
-        UpdateFooterStatus("Ready", $"Start a scan for {path}");
+        UpdateFooterStatus("Ready", detail ?? $"Start a scan for {path}");
         EngineBadge.Text = "Ready";
         EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("MutedBrush") ?? WpfBrushes.Gray;
         RefreshNavigationState(null, null);
@@ -2925,7 +3253,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var rows = await Task.Run(BuildDriveRows);
+            var driveRowsTask = Task.Run(BuildDriveRows);
+            var portableTargetsTask = _portableDevices.GetTargetsAsync();
+            await Task.WhenAll(driveRowsTask, portableTargetsTask);
+            var rows = await driveRowsTask;
+            var portableTargets = await portableTargetsTask;
             DriveRows.Clear();
             TargetRows.Clear();
             TargetRows.Add(TargetRow.RecycleBin());
@@ -2939,12 +3271,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 AddRecentPath(row.RootPath);
             }
 
+            foreach (var target in portableTargets)
+            {
+                TargetRows.Add(TargetRow.FromPortable(
+                    target,
+                    scanCached: IsScanCached(target.TargetId),
+                    scanActive: IsScanActive(target.TargetId)));
+            }
+
+            RefreshEmptyStateTargets();
             await RefreshRecycleBinTargetUsageAsync();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to refresh drive and target list.");
         }
+    }
+
+    private async void RefreshTargets_Click(object sender, RoutedEventArgs e)
+    {
+        await LoadDriveRowsAsync();
+    }
+
+    private void RefreshEmptyStateTargets()
+    {
+        EmptyStateTargets.ReplaceAll(TargetRows.Where(row =>
+            row.Kind is TargetKind.Drive or TargetKind.PortableDevice));
+    }
+
+    private static bool TextMatchesTarget(string text, TargetRow row, bool allowEmpty)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return allowEmpty;
+        }
+
+        return string.Equals(text, row.DisplayPath, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, row.RootPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task RefreshRecycleBinTargetUsageAsync()
@@ -3066,6 +3429,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ProgressBar.IsIndeterminate = scanning;
     }
 
+    private void SetPortableScanControls(bool isPortableTarget)
+    {
+        ModeBox.IsEnabled = !isPortableTarget;
+        AllocatedSizeBox.IsEnabled = !isPortableTarget;
+        if (isPortableTarget)
+        {
+            ModeBox.SelectedIndex = 0;
+            AllocatedSizeBox.IsChecked = false;
+            ModeBox.ToolTip = "MTP phone scans use portable-device metadata enumeration.";
+            AllocatedSizeBox.ToolTip = "Allocated size is not available over MTP.";
+        }
+        else
+        {
+            ModeBox.ToolTip = "Scan engine";
+            AllocatedSizeBox.ToolTip = "Include on-disk allocated size";
+        }
+    }
+
     private void UpdateChartModeVisibility()
     {
         TreemapHost.Visibility = _chartDisplayMode == ChartDisplayMode.Treemap ? Visibility.Visible : Visibility.Collapsed;
@@ -3156,6 +3537,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (result.SkippedEntries.Count > 0) parts.Add($"{result.SkippedEntries.Count:n0} skipped");
         return string.Join(" · ", parts);
     }
+
+    private static string DisplayRootPath(ScanResult result)
+        => string.IsNullOrWhiteSpace(result.DisplayRootPath) ? result.RootPath : result.DisplayRootPath;
 
     private void AnimateGridFadeIn()
     {
@@ -3315,6 +3699,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private sealed record CachedScanState(string SelectedPath, DetailViewMode ViewMode, ChartScope ChartScope);
 
+    private sealed record PendingScan(string RootKey, string DisplayPath, string ScanPath, PortableDeviceTarget? PortableTarget);
+
     private sealed record ActiveScanJob(string RootKey, string DisplayPath, CancellationTokenSource Cancellation);
 
     private sealed class DetailRowComparer(DetailSortColumn column, ListSortDirection direction) : IComparer
@@ -3466,6 +3852,9 @@ public sealed record TargetRow(
     TargetKind Kind,
     string Label,
     string RootPath,
+    string DisplayPath,
+    PortableDeviceTarget? PortableTarget,
+    bool IsAvailable,
     string UsedText,
     string DetailText,
     double UsedPercent,
@@ -3486,6 +3875,9 @@ public sealed record TargetRow(
             "Recycle Bin",
             string.Empty,
             string.Empty,
+            null,
+            true,
+            string.Empty,
             "Calculating usage...",
             0,
             "\uE74D",
@@ -3502,6 +3894,9 @@ public sealed record TargetRow(
             TargetKind.RecycleBin,
             "Recycle Bin",
             string.Empty,
+            string.Empty,
+            null,
+            true,
             SizeFormatter.Format(sizeBytes),
             itemCount == 0 ? "Windows Recycle Bin - empty" : $"Windows Recycle Bin - {ItemCountText(itemCount)}",
             0,
@@ -3519,6 +3914,9 @@ public sealed record TargetRow(
             TargetKind.RecycleBin,
             "Recycle Bin",
             string.Empty,
+            string.Empty,
+            null,
+            true,
             "Unavailable",
             "Windows Recycle Bin",
             0,
@@ -3536,6 +3934,9 @@ public sealed record TargetRow(
             TargetKind.Drive,
             row.Label,
             row.RootPath,
+            row.RootPath,
+            null,
+            true,
             row.UsedText,
             row.FreeText,
             row.UsedPercent,
@@ -3548,6 +3949,43 @@ public sealed record TargetRow(
             scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
             scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed);
 
+    public static TargetRow FromPortable(PortableDeviceTarget target, bool scanCached = false, bool scanActive = false)
+    {
+        var hasCapacity = target.CapacityBytes is > 0;
+        var free = Math.Max(0, target.FreeBytes ?? 0);
+        var used = hasCapacity ? Math.Max(0, target.CapacityBytes!.Value - free) : 0;
+        var percent = hasCapacity ? (double)used / target.CapacityBytes!.Value * 100 : 0;
+        var usedText = target.IsAvailable
+            ? hasCapacity ? $"{SizeFormatter.Format(used)} used" : "Ready"
+            : "Unavailable";
+        var detailText = target.IsAvailable
+            ? hasCapacity ? $"{SizeFormatter.Format(free)} free" : target.DetailText
+            : target.DetailText;
+
+        var label = target.IsAvailable
+            ? string.Join(" ", new[] { target.DeviceName, target.StorageName }.Where(part => !string.IsNullOrWhiteSpace(part)))
+            : target.DeviceName;
+
+        return new TargetRow(
+            TargetKind.PortableDevice,
+            label,
+            target.TargetId,
+            target.DisplayPath,
+            target,
+            target.IsAvailable,
+            usedText,
+            detailText,
+            percent,
+            "\uE8EA",
+            target.IsAvailable ? "#0D9488" : "#94A3B8",
+            hasCapacity ? Visibility.Visible : Visibility.Collapsed,
+            hasCapacity ? Visibility.Collapsed : Visibility.Visible,
+            scanActive ? "\uE895" : scanCached ? "\uE930" : string.Empty,
+            scanActive ? "Scanning" : scanCached ? "Scanned" : string.Empty,
+            scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
+            scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed);
+    }
+
     private static string ItemCountText(long count)
         => count == 1 ? "1 item" : $"{count:n0} items";
 }
@@ -3555,6 +3993,7 @@ public sealed record TargetRow(
 public enum TargetKind
 {
     Drive,
+    PortableDevice,
     RecycleBin
 }
 

@@ -5,6 +5,13 @@ namespace Custodian.Core.Model;
 public sealed class ScanResult
 {
     public string RootPath { get; set; } = string.Empty;
+    public ScanSourceKind SourceKind { get; set; } = ScanSourceKind.FileSystem;
+    public string SourceId { get; set; } = string.Empty;
+    public string DisplayRootPath { get; set; } = string.Empty;
+    public string PortableDeviceId { get; set; } = string.Empty;
+    public string PortableStorageObjectId { get; set; } = string.Empty;
+    public string PortableDeviceName { get; set; } = string.Empty;
+    public string PortableStorageName { get; set; } = string.Empty;
     public string Engine { get; set; } = string.Empty;
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset CompletedAt { get; set; }
