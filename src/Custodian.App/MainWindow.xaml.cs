@@ -139,6 +139,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RecycleBinRowsView.Filter = RecycleBinRowMatchesFilter;
 
         PathBox.ItemsSource = RecentPaths;
+        PathBox.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler(PathBox_TextChanged));
         JumpBox.ItemsSource = FolderJumpRows;
         ChartScopeBox.SelectedIndex = 0;
         EmptyStateDrives.ItemsSource = EmptyStateTargets;
@@ -462,6 +463,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _activePortableCopy?.Cancel();
     }
 
+    private void PathBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (ModeBox.IsEnabled)
+        {
+            return;
+        }
+
+        var text = PathBox.Text?.Trim() ?? string.Empty;
+        if (!TargetRows.Any(row =>
+                row.Kind == TargetKind.PortableDevice &&
+                TextMatchesTarget(text, row, allowEmpty: false)))
+        {
+            SetPortableScanControls(isPortableTarget: false);
+        }
+    }
+
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
     {
         await CheckForUpdatesAsync(UpdateCheckMode.Manual);
@@ -701,6 +718,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ShowToast(unavailableTarget.DetailText);
             return;
         }
+
+        SetPortableScanControls(request.PortableTarget is not null);
 
         var navigationVersion = BeginNavigation();
         var scanKey = request.RootKey;
