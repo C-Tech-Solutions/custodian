@@ -705,7 +705,7 @@ internal sealed class PortableDeviceService
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 
     private static bool IsPortableDeviceException(Exception ex)
-        => ex is COMException or InvalidOperationException or ArgumentException or ExternalException;
+        => ex is COMException or InvalidOperationException or ArgumentException or ExternalException or UnauthorizedAccessException;
 
     private static void CloseAndRelease(PortableDeviceApi.IPortableDevice? device)
     {
@@ -895,6 +895,22 @@ internal sealed class PortableDeviceService
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            ArgumentNullException.ThrowIfNull(buffer);
+            if ((uint)offset > (uint)buffer.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(offset));
+            }
+
+            if ((uint)count > (uint)(buffer.Length - offset))
+            {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+
+            if (count == 0)
+            {
+                return 0;
+            }
+
             ObjectDisposedException.ThrowIf(_bytesReadPointer == IntPtr.Zero, this);
 
             byte[]? rentedBuffer = null;
