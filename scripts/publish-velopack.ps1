@@ -6,7 +6,14 @@ param(
     [string]$OutputRoot = "artifacts\velopack",
     [string]$PackId = "Custodian.DiskAnalyzer",
     [string]$Channel = "win",
-    [switch]$PreserveExistingReleases
+    [switch]$PreserveExistingReleases,
+    [switch]$Sign,
+    [string]$AzureSigningMetadataPath,
+    [string]$SignToolPath,
+    [string]$AzureSigningDlibPath,
+    [string]$TimestampUrl,
+    [switch]$SkipSigningVerification,
+    [switch]$DebugSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +21,7 @@ $repo = Resolve-Path (Join-Path $PSScriptRoot "..")
 $publishRoot = Join-Path $repo "artifacts\velopack-publish"
 $appOut = Join-Path $publishRoot "Custodian"
 $output = Join-Path $repo $OutputRoot
+$signScript = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
 
 function Get-NumericVersion {
     param(
@@ -38,6 +46,40 @@ function Get-NumericVersion {
     }
 
     return ($parts -join ".")
+}
+
+function Add-TemplateArgument {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Template,
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Template
+    }
+
+    return "$Template -$Name `"$Value`""
+}
+
+function New-AzureSigningTemplate {
+    $template = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$signScript`" -Path `"{{file}}`""
+    $template = Add-TemplateArgument -Template $template -Name "MetadataPath" -Value $AzureSigningMetadataPath
+    $template = Add-TemplateArgument -Template $template -Name "SignToolPath" -Value $SignToolPath
+    $template = Add-TemplateArgument -Template $template -Name "DlibPath" -Value $AzureSigningDlibPath
+    $template = Add-TemplateArgument -Template $template -Name "TimestampUrl" -Value $TimestampUrl
+
+    if ($SkipSigningVerification) {
+        $template = "$template -SkipVerify"
+    }
+
+    if ($DebugSigning) {
+        $template = "$template -DebugSigning"
+    }
+
+    return $template
 }
 
 $numericVersion = Get-NumericVersion -InputVersion $Version
@@ -77,17 +119,26 @@ dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
     -p:InformationalVersion=$Version `
     -o (Join-Path $appOut "cli")
 
-dotnet vpk pack `
-    --packId $PackId `
-    --packVersion $Version `
-    --packDir $appOut `
-    --mainExe "Custodian.App.exe" `
-    --packTitle "Custodian Disk Analyzer" `
-    --packAuthors "Custodian" `
-    --runtime $Runtime `
-    --channel $Channel `
-    --shortcuts "Desktop,StartMenuRoot" `
-    --outputDir $output
+$vpkArgs = @(
+    "vpk",
+    "pack",
+    "--packId", $PackId,
+    "--packVersion", $Version,
+    "--packDir", $appOut,
+    "--mainExe", "Custodian.App.exe",
+    "--packTitle", "Custodian Disk Analyzer",
+    "--packAuthors", "Custodian",
+    "--runtime", $Runtime,
+    "--channel", $Channel,
+    "--shortcuts", "Desktop,StartMenuRoot",
+    "--outputDir", $output
+)
+
+if ($Sign) {
+    $vpkArgs += @("--signTemplate", (New-AzureSigningTemplate), "--signParallel", "1")
+}
+
+dotnet @vpkArgs
 
 Write-Host "Velopack publish input: $appOut"
 Write-Host "Velopack release output: $output"

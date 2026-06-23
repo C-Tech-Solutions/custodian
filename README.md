@@ -106,6 +106,54 @@ $env:GITHUB_TOKEN = "<token with release access>"
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
 that may not be installed in the current development environment.
 
+### Code signing
+
+Custodian release scripts can sign Windows artifacts with Azure Artifact Signing
+(formerly Azure Trusted Signing). Install Microsoft's client tools on the build
+machine first:
+
+```powershell
+winget install -e --id Microsoft.Azure.ArtifactSigningClientTools
+```
+
+Then authenticate with Azure. For local signing, `az login` is enough when the
+Azure CLI is installed and the signed-in identity has the certificate profile
+signer role. For CI, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
+`AZURE_CLIENT_SECRET` for an app registration with the same signing permission.
+
+Provide the signing profile with either a metadata file:
+
+```powershell
+$env:CUSTODIAN_AZURE_SIGNING_METADATA = "C:\secure\custodian-signing.json"
+```
+
+or environment variables:
+
+```powershell
+$env:CUSTODIAN_AZURE_SIGNING_ENDPOINT = "https://eus.codesigning.azure.net"
+$env:CUSTODIAN_AZURE_SIGNING_ACCOUNT = "<artifact-signing-account>"
+$env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
+```
+
+Build signed Velopack release assets with:
+
+```powershell
+.\scripts\publish-velopack.ps1 -Version 1.3.0 -Sign
+```
+
+The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's
+signing template so the packaged PE files and generated installer are signed and
+verified. The portable package can be signed before zipping with:
+
+```powershell
+.\scripts\publish-portable.ps1 -Sign
+```
+
+If SignTool or `Azure.CodeSigning.Dlib.dll` are installed in a nonstandard
+location, set `CUSTODIAN_SIGNTOOL_PATH` and
+`CUSTODIAN_AZURE_SIGNING_DLIB_PATH`, or pass `-SignToolPath` and
+`-AzureSigningDlibPath`.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
@@ -139,3 +187,8 @@ the installed test build.
 The Inno Setup script at `installer\Custodian.iss` packages the portable publish
 output and creates Start Menu shortcuts for the GUI and CLI. This path remains
 available for manual or legacy installs, but it is not the auto-update channel.
+After compiling the Inno installer, sign it with:
+
+```powershell
+.\scripts\sign-azure-artifact.ps1 -Path .\artifacts\installer\CustodianSetup.exe
+```

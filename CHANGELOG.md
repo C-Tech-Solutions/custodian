@@ -2,6 +2,16 @@
 
 All notable changes to Custodian are tracked here.
 
+## Unreleased
+
+### Added
+
+- Added Azure Artifact Signing support for Velopack and portable release builds.
+
+### Changed
+
+- Updated the app icon with the new disk-analysis scan mark.
+
 ## 1.3.0 - 2026-06-16
 
 ### Added

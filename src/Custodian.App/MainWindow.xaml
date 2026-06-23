@@ -72,8 +72,10 @@
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
                     <Image Width="28" Height="28"
-                           Source="Assets/CustodianIcon.png"
+                           Source="Assets/CustodianIconHeader.png"
                            Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           SnapsToDevicePixels="True"
                            VerticalAlignment="Center"/>
                     <TextBlock Text="Custodian"
                                FontFamily="{StaticResource UiFontDisplay}"
