@@ -877,6 +877,7 @@ internal sealed class PortableDeviceService
 
     private sealed class PortableDeviceReadStream(System.Runtime.InteropServices.ComTypes.IStream stream) : Stream
     {
+        private System.Runtime.InteropServices.ComTypes.IStream? _stream = stream;
         private IntPtr _bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
 
         public override bool CanRead => true;
@@ -912,6 +913,7 @@ internal sealed class PortableDeviceService
             }
 
             ObjectDisposedException.ThrowIf(_bytesReadPointer == IntPtr.Zero, this);
+            var currentStream = _stream ?? throw new ObjectDisposedException(nameof(PortableDeviceReadStream));
 
             byte[]? rentedBuffer = null;
             var readBuffer = buffer;
@@ -924,7 +926,7 @@ internal sealed class PortableDeviceService
             Marshal.WriteInt32(_bytesReadPointer, 0);
             try
             {
-                stream.Read(readBuffer, count, _bytesReadPointer);
+                currentStream.Read(readBuffer, count, _bytesReadPointer);
                 var bytesRead = Marshal.ReadInt32(_bytesReadPointer);
                 if (offset != 0 && bytesRead > 0)
                 {
@@ -956,7 +958,8 @@ internal sealed class PortableDeviceService
 
             if (disposing)
             {
-                ReleaseComObject(stream);
+                var streamToRelease = Interlocked.Exchange(ref _stream, null);
+                ReleaseComObject(streamToRelease);
             }
 
             base.Dispose(disposing);
