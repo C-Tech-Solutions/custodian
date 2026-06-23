@@ -84,11 +84,11 @@ internal static class PortableDeviceExplorerService
             return [];
         }
 
+        var nodes = new List<IPortableExplorerNode>();
         try
         {
             dynamic shellFolder = folder;
             object? items = null;
-            var nodes = new List<IPortableExplorerNode>();
             try
             {
                 items = shellFolder.Items();
@@ -112,6 +112,7 @@ internal static class PortableDeviceExplorerService
         }
         catch (Exception ex) when (IsShellException(ex))
         {
+            DisposeChildrenBestEffort(nodes.OfType<IDisposable>());
             return [];
         }
     }
@@ -365,5 +366,19 @@ internal static class PortableDeviceExplorerService
         }
 
         children.Clear();
+    }
+
+    private static void DisposeChildrenBestEffort(IEnumerable<IDisposable> children)
+    {
+        foreach (var child in children)
+        {
+            try
+            {
+                child.Dispose();
+            }
+            catch (Exception ex) when (IsShellException(ex))
+            {
+            }
+        }
     }
 }

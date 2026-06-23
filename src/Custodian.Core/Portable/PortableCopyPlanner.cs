@@ -39,7 +39,7 @@ public static class PortableCopyPlanner
                 usedTopLevelDirectories,
                 usedPaths);
             usedPaths.Add(Path.Combine(destinationRoot, topFolderName));
-            AddEmptyDirectories(entry, entry, topFolderName, destinationRoot, items);
+            AddEmptyDirectories(entry, entry, topFolderName, destinationRoot, items, usedPaths);
 
             var files = entry.Flatten()
                 .Where(child => !child.IsDirectory)
@@ -61,14 +61,15 @@ public static class PortableCopyPlanner
         FileSystemEntry directory,
         string topFolderName,
         string destinationRoot,
-        List<PortableCopyPlanItem> items)
+        List<PortableCopyPlanItem> items,
+        ISet<string> usedPaths)
     {
         var containsFile = false;
         foreach (var child in directory.Children)
         {
             if (child.IsDirectory)
             {
-                containsFile |= AddEmptyDirectories(root, child, topFolderName, destinationRoot, items);
+                containsFile |= AddEmptyDirectories(root, child, topFolderName, destinationRoot, items, usedPaths);
             }
             else
             {
@@ -85,6 +86,7 @@ public static class PortableCopyPlanner
                 ? topFolderName
                 : Path.Combine(topFolderName, relativeInsideFolder);
             var destinationPath = Path.Combine(destinationRoot, SanitizeRelativePath(relativePath));
+            usedPaths.Add(destinationPath);
             items.Add(new PortableCopyPlanItem(directory, relativePath, destinationPath, IsDirectory: true));
         }
 

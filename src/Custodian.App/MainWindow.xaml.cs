@@ -61,6 +61,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly AppUpdateService _updates = new();
     private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _activePortableCopy;
+    private Task? _activePortableCopyTask;
     private CancellationTokenSource? _updateCts;
     private CancellationTokenSource? _recycleBinCts;
     private bool _recycleBinCtsIsRefresh;
@@ -224,13 +225,35 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isClosing = true;
         IsEnabled = false;
         _activeScan?.Cancellation.Cancel();
-        _activePortableCopy?.Cancel();
         _updateCts?.Cancel();
         _recycleBinCts?.Cancel();
         _settingsSaveTimer.Stop();
+        await CancelActivePortableCopyAsync();
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
         Close();
+    }
+
+    private async Task CancelActivePortableCopyAsync()
+    {
+        var copyTask = _activePortableCopyTask;
+        _activePortableCopy?.Cancel();
+        if (copyTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await copyTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Phone copy ended while closing.");
+        }
     }
 
     private void RefreshElevationWarning()
@@ -262,16 +285,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _isClosing = true;
             _settingsSaveTimer.Stop();
+            _activeScan?.Cancellation.Cancel();
+            _updateCts?.Cancel();
+            _recycleBinCts?.Cancel();
+            await CancelActivePortableCopyAsync();
             await PersistSettingsAsync();
 
             ElevationService.RelaunchAsAdministrator(
                 Environment.GetCommandLineArgs().Skip(1),
                 PathBox.Text?.Trim());
 
-            _activeScan?.Cancellation.Cancel();
-            _activePortableCopy?.Cancel();
-            _updateCts?.Cancel();
-            _recycleBinCts?.Cancel();
             _settingsPersistedForClose = true;
             System.Windows.Application.Current.Shutdown();
         }
@@ -651,9 +674,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _isClosing = true;
         _activeScan?.Cancellation.Cancel();
-        _activePortableCopy?.Cancel();
         _updateCts?.Cancel();
         _settingsSaveTimer.Stop();
+        await CancelActivePortableCopyAsync();
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
         UpdateFooterStatus("Updates", "Installing update...");
@@ -2161,7 +2184,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     $"{copyProgress.FilesCopied:n0} copied, {copyProgress.FilesSkipped:n0} skipped, {SizeFormatter.Format(copyProgress.BytesCopied)}");
             });
 
-            var result = await _portableDevices.CopyToPcAsync(currentScan, entries, dialog.SelectedPath, progress, cts.Token);
+            var copyTask = _portableDevices.CopyToPcAsync(currentScan, entries, dialog.SelectedPath, progress, cts.Token);
+            _activePortableCopyTask = copyTask;
+            var result = await copyTask;
             var skippedText = result.FilesSkipped > 0 ? $", {result.FilesSkipped:n0} skipped" : string.Empty;
             ShowToast($"Copied {result.FilesCopied:n0} file(s){skippedText}.");
             UpdateFooterStatus("Ready", $"Copied to {dialog.SelectedPath}");
@@ -2185,6 +2210,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (ReferenceEquals(_activePortableCopy, cts))
             {
                 _activePortableCopy = null;
+                _activePortableCopyTask = null;
             }
 
             cts.Dispose();

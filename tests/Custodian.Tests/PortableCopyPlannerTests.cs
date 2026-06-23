@@ -126,6 +126,28 @@ public sealed class PortableCopyPlannerTests
     }
 
     [Fact]
+    public void BuildPlanReservesEmptyDirectoryDestinationsBeforePlanningFiles()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+        var albums = Directory("Pixel/Internal shared storage/Albums", "albums");
+        var empty = Directory("Pixel/Internal shared storage/Albums/A:B", "empty");
+        var file = File("Pixel/Internal shared storage/Albums/A?B", "file");
+        albums.Children.Add(empty);
+        albums.Children.Add(file);
+
+        var plan = PortableCopyPlanner.BuildPlan([albums], destination);
+
+        Assert.Contains(plan.Items, item =>
+            item.IsDirectory &&
+            item.Entry == empty &&
+            item.DestinationPath == Path.Combine(destination, "Albums", "A_B"));
+        Assert.Contains(plan.Items, item =>
+            !item.IsDirectory &&
+            item.Entry == file &&
+            item.DestinationPath == Path.Combine(destination, "Albums", "A_B (1)"));
+    }
+
+    [Fact]
     public void BuildPlanRenamesTopLevelFolderWhenDestinationFileConflicts()
     {
         var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
