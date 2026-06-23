@@ -630,9 +630,7 @@ internal sealed class PortableDeviceService
             using var variant = values.GetValue(in key);
             if (variant.Value is DateTime date)
             {
-                return date.Kind == DateTimeKind.Unspecified
-                    ? new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Local))
-                    : new DateTimeOffset(date);
+                return TryCreateDateTimeOffset(date);
             }
 
             if (variant.Value is DateTimeOffset dateTimeOffset)
@@ -651,6 +649,21 @@ internal sealed class PortableDeviceService
         }
 
         return DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static DateTimeOffset? TryCreateDateTimeOffset(DateTime date)
+    {
+        try
+        {
+            var normalized = date.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(date, DateTimeKind.Local)
+                : date;
+            return new DateTimeOffset(normalized);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 
     private static long? ToLong(ulong? value)
