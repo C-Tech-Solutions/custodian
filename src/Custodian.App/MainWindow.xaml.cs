@@ -3446,17 +3446,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private static DriveRow? FindDriveByVolumeLabel(IEnumerable<DriveRow> driveRows, string text)
+    internal static DriveRow? FindDriveByVolumeLabel(IEnumerable<DriveRow> driveRows, string text)
     {
-        if (string.IsNullOrWhiteSpace(text) ||
-            Path.IsPathFullyQualified(text))
+        if (string.IsNullOrWhiteSpace(text))
         {
             return null;
         }
 
         var trimmed = text.Trim();
+        var exactLabelMatch = driveRows.FirstOrDefault(row =>
+            string.Equals(row.Label, trimmed, StringComparison.OrdinalIgnoreCase));
+        if (exactLabelMatch is not null)
+        {
+            return exactLabelMatch;
+        }
+
+        if (Path.IsPathFullyQualified(trimmed))
+        {
+            return null;
+        }
+
         return driveRows.FirstOrDefault(row =>
-            string.Equals(row.Label, trimmed, StringComparison.OrdinalIgnoreCase) ||
             row.Label.EndsWith(" " + trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
