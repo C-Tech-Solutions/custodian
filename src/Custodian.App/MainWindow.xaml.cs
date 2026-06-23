@@ -2580,15 +2580,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private IEnumerable<FileSystemEntry> SelectedEntriesForPortableCopy()
-    {
-        var selectedRows = SelectedDetailRows().Select(row => row.Entry).ToList();
-        if (selectedRows.Count > 0)
-        {
-            return selectedRows;
-        }
+        => PortableCopyEntriesFromSelectedRows(SelectedDetailRows());
 
-        return _selectedEntry is null ? [] : [_selectedEntry];
-    }
+    internal static IReadOnlyList<FileSystemEntry> PortableCopyEntriesFromSelectedRows(IEnumerable<DetailRow> selectedRows)
+        => selectedRows.Select(row => row.Entry).ToList();
 
     private void ShowPortableCopySkippedSummary(PortableCopyResult result)
     {

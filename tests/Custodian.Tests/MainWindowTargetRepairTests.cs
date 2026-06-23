@@ -1,6 +1,7 @@
 using Custodian.App;
 using Custodian.App.Services;
 using Custodian.Core.Model;
+using Custodian.Core.Presentation;
 
 public sealed class MainWindowTargetRepairTests
 {
@@ -112,5 +113,31 @@ public sealed class MainWindowTargetRepairTests
 
         Assert.NotNull(match);
         Assert.Same(exactTarget, match.PortableTarget);
+    }
+
+    [Fact]
+    public void PortableCopyEntriesFromSelectedRowsRequiresExplicitRows()
+    {
+        var entries = MainWindow.PortableCopyEntriesFromSelectedRows([]);
+
+        Assert.Empty(entries);
+    }
+
+    [Fact]
+    public void PortableCopyEntriesFromSelectedRowsReturnsSelectedRowEntries()
+    {
+        var entry = new FileSystemEntry
+        {
+            Name = "photo.jpg",
+            FullPath = "Pixel/Internal storage/DCIM/photo.jpg",
+            LogicalSizeBytes = 1024,
+            AllocatedSizeBytes = 1024
+        };
+        var row = DetailRow.From(entry, parentBytes: 1024);
+
+        var entries = MainWindow.PortableCopyEntriesFromSelectedRows([row]);
+
+        var selectedEntry = Assert.Single(entries);
+        Assert.Same(entry, selectedEntry);
     }
 }
