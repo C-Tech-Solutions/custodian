@@ -21,6 +21,8 @@ internal sealed class PortableDeviceService
 {
     private const string PathSeparator = "/";
     private const string LockedDeviceDetail = "Unlock the phone and choose USB File Transfer mode.";
+    private const int MaxStorageDiscoveryDepth = 4;
+    private const int MaxStorageDiscoveryObjects = 512;
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(PortableDeviceService).FullName!);
 
     public Task<IReadOnlyList<PortableDeviceTarget>> GetTargetsAsync(CancellationToken cancellationToken = default)
@@ -66,18 +68,20 @@ internal sealed class PortableDeviceService
             manager.RefreshDeviceList();
 
             var targets = new List<PortableDeviceTarget>();
+            var localVolumeLabels = GetLocalVolumeLabels();
             foreach (var deviceId in GetDeviceIds(manager))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var deviceName = GetDeviceName(manager, deviceId);
                 try
                 {
-                    targets.AddRange(GetDeviceStorageTargets(deviceId, deviceName, cancellationToken));
+                    var storageRoots = GetDeviceStorageRoots(deviceId, cancellationToken);
+                    targets.AddRange(BuildTargetsForDevice(deviceId, deviceName, storageRoots, localVolumeLabels));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Logger.LogInformation(ex, "Portable device {DeviceName} is not exposing readable storage.", deviceName);
-                    targets.Add(PortableDeviceTarget.Unavailable(deviceId, deviceName, LockedDeviceDetail));
+                    targets.AddRange(BuildTargetsForDevice(deviceId, deviceName, [], localVolumeLabels));
                 }
             }
 
@@ -94,9 +98,8 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private static IReadOnlyList<PortableDeviceTarget> GetDeviceStorageTargets(
+    private static IReadOnlyList<PortableStorageObject> GetDeviceStorageRoots(
         string deviceId,
-        string deviceName,
         CancellationToken cancellationToken)
     {
         PortableDeviceApi.IPortableDevice? device = null;
@@ -110,54 +113,11 @@ internal sealed class PortableDeviceService
             properties = content.Properties();
             keys = CreatePropertyKeys(includeStorage: true);
 
-            var targets = new List<PortableDeviceTarget>();
-            foreach (var objectId in EnumerateChildIds(content, PortableDeviceApi.WPD_DEVICE_OBJECT_ID, cancellationToken))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                PortableObjectProperties item;
-                try
-                {
-                    item = ReadObjectProperties(properties, keys, objectId);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    Logger.LogInformation(ex, "Failed to read properties for object {ObjectId} on device {DeviceName}.", objectId, deviceName);
-                    continue;
-                }
-
-                if (!item.IsStorage)
-                {
-                    continue;
-                }
-
-                var storageName = FirstNonEmpty(item.Name, item.OriginalFileName, item.StorageDescription, "Portable storage");
-                var displayPath = CombinePortablePath(deviceName, storageName);
-                var targetId = BuildTargetId(deviceId, objectId);
-                var capacity = item.CapacityBytes;
-                var free = item.FreeBytes;
-                var detail = capacity > 0
-                    ? $"{SizeFormatter.Format(Math.Max(0, capacity.Value - (free ?? 0)))} used"
-                    : "Portable device storage";
-
-                targets.Add(new PortableDeviceTarget(
-                    targetId,
-                    deviceId,
-                    deviceName,
-                    objectId,
-                    storageName,
-                    displayPath,
-                    capacity,
-                    free,
-                    IsAvailable: true,
-                    detail));
-            }
-
-            if (targets.Count == 0)
-            {
-                targets.Add(PortableDeviceTarget.Unavailable(deviceId, deviceName, LockedDeviceDetail));
-            }
-
-            return targets;
+            return DiscoverStorageRoots(
+                PortableDeviceApi.WPD_DEVICE_OBJECT_ID,
+                parentObjectId => EnumerateChildIds(content, parentObjectId, cancellationToken),
+                objectId => ReadObjectProperties(properties, keys, objectId),
+                cancellationToken);
         }
         finally
         {
@@ -190,14 +150,14 @@ internal sealed class PortableDeviceService
             properties = content.Properties();
             keys = CreatePropertyKeys(includeStorage: false);
 
-                var root = new FileSystemEntry
-                {
-                    Name = target.StorageName,
-                    FullPath = target.DisplayPath,
-                    IsDirectory = true,
-                    Attributes = "PortableDevice",
-                    PortableObjectId = target.StorageObjectId
-                };
+            var root = new FileSystemEntry
+            {
+                Name = target.StorageName,
+                FullPath = target.DisplayPath,
+                IsDirectory = true,
+                Attributes = "PortableDevice",
+                PortableObjectId = target.StorageObjectId
+            };
 
             ScanChildren(content, properties, keys, target.StorageObjectId, root, target.DisplayPath, skipped, counters, throttle, cancellationToken);
             watch.Stop();
@@ -292,6 +252,48 @@ internal sealed class PortableDeviceService
                 skipped.Add(new SkippedEntry(CombinePortablePath(parentDisplayPath, childId), ex.Message));
             }
         }
+    }
+
+    internal static IReadOnlyList<PortableDeviceTarget> BuildTargetsForDevice(
+        string deviceId,
+        string deviceName,
+        IReadOnlyList<PortableStorageObject> storageRoots,
+        IReadOnlySet<string> localVolumeLabels)
+    {
+        if (storageRoots.Count == 0)
+        {
+            return ShouldCreateUnavailableTarget(deviceId, deviceName, localVolumeLabels)
+                ? [PortableDeviceTarget.Unavailable(deviceId, deviceName, LockedDeviceDetail)]
+                : [];
+        }
+
+        var targets = new List<PortableDeviceTarget>(storageRoots.Count);
+        foreach (var storageRoot in storageRoots)
+        {
+            var item = storageRoot.Properties;
+            var storageName = FirstNonEmpty(item.Name, item.OriginalFileName, item.StorageDescription, "Portable storage");
+            var displayPath = CombinePortablePath(deviceName, storageName);
+            var targetId = BuildTargetId(deviceId, storageRoot.ObjectId);
+            var capacity = item.CapacityBytes;
+            var free = item.FreeBytes;
+            var detail = capacity > 0
+                ? $"{SizeFormatter.Format(Math.Max(0, capacity.Value - (free ?? 0)))} used"
+                : "Portable device storage";
+
+            targets.Add(new PortableDeviceTarget(
+                targetId,
+                deviceId,
+                deviceName,
+                storageRoot.ObjectId,
+                storageName,
+                displayPath,
+                capacity,
+                free,
+                IsAvailable: true,
+                detail));
+        }
+
+        return targets;
     }
 
     private static async Task<PortableCopyResult> CopyToPcCoreAsync(
@@ -401,6 +403,173 @@ internal sealed class PortableDeviceService
 
         return keys;
     }
+
+    internal static IReadOnlyList<PortableStorageObject> DiscoverStorageRoots(
+        string rootObjectId,
+        Func<string, IReadOnlyList<string>> enumerateChildren,
+        Func<string, PortableObjectProperties> readProperties,
+        CancellationToken cancellationToken)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var roots = new List<PortableStorageObject>();
+        var queue = new Queue<(string ObjectId, int Depth)>();
+
+        foreach (var objectId in enumerateChildren(rootObjectId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!visited.Add(objectId))
+            {
+                continue;
+            }
+
+            PortableObjectProperties item;
+            try
+            {
+                item = readProperties(objectId);
+            }
+            catch (Exception ex) when (IsPortableDeviceException(ex))
+            {
+                Logger.LogDebug(ex, "Failed to read properties for portable object {ObjectId}.", objectId);
+                continue;
+            }
+
+            if (item.IsStorage)
+            {
+                roots.Add(new PortableStorageObject(objectId, item));
+            }
+            else if (item.CanContainStorage)
+            {
+                queue.Enqueue((objectId, 1));
+            }
+        }
+
+        if (roots.Count > 0)
+        {
+            return roots;
+        }
+
+        var inspected = visited.Count;
+        while (queue.Count > 0 && inspected < MaxStorageDiscoveryObjects)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (parentObjectId, depth) = queue.Dequeue();
+            if (depth >= MaxStorageDiscoveryDepth)
+            {
+                continue;
+            }
+
+            IReadOnlyList<string> childIds;
+            try
+            {
+                childIds = enumerateChildren(parentObjectId);
+            }
+            catch (Exception ex) when (IsPortableDeviceException(ex))
+            {
+                Logger.LogDebug(ex, "Failed to enumerate child portable objects under {ObjectId}.", parentObjectId);
+                continue;
+            }
+
+            foreach (var childId in childIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!visited.Add(childId))
+                {
+                    continue;
+                }
+
+                inspected++;
+                PortableObjectProperties item;
+                try
+                {
+                    item = readProperties(childId);
+                }
+                catch (Exception ex) when (IsPortableDeviceException(ex))
+                {
+                    Logger.LogDebug(ex, "Failed to read properties for portable object {ObjectId}.", childId);
+                    continue;
+                }
+
+                if (item.IsStorage)
+                {
+                    roots.Add(new PortableStorageObject(childId, item));
+                }
+                else if (item.CanContainStorage && inspected < MaxStorageDiscoveryObjects)
+                {
+                    queue.Enqueue((childId, depth + 1));
+                }
+            }
+        }
+
+        return roots;
+    }
+
+    internal static IReadOnlySet<string> CreateLocalVolumeLabelSet(IEnumerable<string?> labels)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var label in labels)
+        {
+            var normalized = NormalizeVolumeLabel(label);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                set.Add(normalized);
+            }
+        }
+
+        return set;
+    }
+
+    internal static bool IsLocalVolumeProjection(
+        string deviceId,
+        string deviceName,
+        IReadOnlySet<string> localVolumeLabels,
+        bool hasReadableStorage)
+    {
+        if (hasReadableStorage ||
+            !deviceId.StartsWith(@"SWD\WPDBUSENUM\", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedName = NormalizeVolumeLabel(deviceName);
+        return !string.IsNullOrWhiteSpace(normalizedName) &&
+            localVolumeLabels.Any(label =>
+                string.Equals(normalizedName, label, StringComparison.OrdinalIgnoreCase) ||
+                normalizedName.EndsWith(" " + label, StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static bool ShouldCreateUnavailableTarget(
+        string deviceId,
+        string deviceName,
+        IReadOnlySet<string> localVolumeLabels)
+        => !IsLocalVolumeProjection(deviceId, deviceName, localVolumeLabels, hasReadableStorage: false);
+
+    private static IReadOnlySet<string> GetLocalVolumeLabels()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return CreateLocalVolumeLabelSet([]);
+        }
+
+        return CreateLocalVolumeLabelSet(DriveInfo
+            .GetDrives()
+            .Where(drive => drive.DriveType is DriveType.Fixed or DriveType.Removable)
+            .Select(TryGetVolumeLabel));
+    }
+
+    private static string? TryGetVolumeLabel(DriveInfo drive)
+    {
+        try
+        {
+            return drive.IsReady ? drive.VolumeLabel : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string NormalizeVolumeLabel(string? label)
+        => string.IsNullOrWhiteSpace(label) ? string.Empty : label.Trim();
 
     private static IReadOnlyList<string> GetDeviceIds(PortableDeviceApi.IPortableDeviceManager manager)
     {
@@ -763,7 +932,9 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private sealed record PortableObjectProperties(
+    internal sealed record PortableStorageObject(string ObjectId, PortableObjectProperties Properties);
+
+    internal sealed record PortableObjectProperties(
         string? Name,
         string? OriginalFileName,
         Guid? ContentType,
@@ -782,7 +953,17 @@ internal sealed class PortableDeviceService
             IsStorage;
 
         public bool IsStorage =>
-            FunctionalCategory == PortableDeviceApi.WPD_FUNCTIONAL_CATEGORY_STORAGE;
+            FunctionalCategory == PortableDeviceApi.WPD_FUNCTIONAL_CATEGORY_STORAGE ||
+            HasStorageMetadata;
+
+        public bool CanContainStorage =>
+            IsFolder ||
+            ContentType is null;
+
+        private bool HasStorageMetadata =>
+            !string.IsNullOrWhiteSpace(StorageDescription) ||
+            CapacityBytesValue is not null ||
+            FreeBytesValue is not null;
 
         public long? SizeBytes => ToLong(SizeBytesValue);
         public long? CapacityBytes => ToLong(CapacityBytesValue);

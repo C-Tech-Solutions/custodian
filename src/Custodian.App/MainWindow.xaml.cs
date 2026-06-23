@@ -3359,6 +3359,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
+            var previousPathText = PathBox.Text?.Trim() ?? string.Empty;
+            var previousSelectedTarget = DriveList.SelectedItem as TargetRow;
             var driveRowsTask = Task.Run(BuildDriveRows);
             var portableTargetsTask = _portableDevices.GetTargetsAsync();
             await Task.WhenAll(driveRowsTask, portableTargetsTask);
@@ -3387,11 +3389,75 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             RefreshEmptyStateTargets();
             await RefreshRecycleBinTargetUsageAsync();
+            RepairLocalVolumeProjectionSelection(rows, previousPathText, previousSelectedTarget);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to refresh drive and target list.");
         }
+    }
+
+    private void RepairLocalVolumeProjectionSelection(
+        IReadOnlyList<DriveRow> driveRows,
+        string previousPathText,
+        TargetRow? previousSelectedTarget)
+    {
+        if (previousSelectedTarget?.Kind != TargetKind.PortableDevice &&
+            ModeBox.IsEnabled)
+        {
+            return;
+        }
+
+        var repairDrive = FindDriveByVolumeLabel(driveRows, previousPathText);
+        if (repairDrive is null && previousSelectedTarget?.Kind == TargetKind.PortableDevice)
+        {
+            repairDrive = FindDriveByVolumeLabel(driveRows, previousSelectedTarget.DisplayPath) ??
+                FindDriveByVolumeLabel(driveRows, previousSelectedTarget.Label);
+        }
+
+        if (repairDrive is null)
+        {
+            return;
+        }
+
+        var target = TargetRows.FirstOrDefault(row =>
+            row.Kind == TargetKind.Drive &&
+            string.Equals(row.RootPath, repairDrive.RootPath, StringComparison.OrdinalIgnoreCase));
+        if (target is null)
+        {
+            return;
+        }
+
+        _suppressTargetSelection = true;
+        try
+        {
+            DriveList.SelectedItem = target;
+        }
+        finally
+        {
+            _suppressTargetSelection = false;
+        }
+
+        PathBox.Text = repairDrive.RootPath;
+        SetPortableScanControls(isPortableTarget: false);
+        if (_activeScan is null && _currentScan is null && !_isRecycleBinViewActive)
+        {
+            ShowStartScanPrompt(repairDrive.RootPath);
+        }
+    }
+
+    private static DriveRow? FindDriveByVolumeLabel(IEnumerable<DriveRow> driveRows, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            Path.IsPathFullyQualified(text))
+        {
+            return null;
+        }
+
+        var trimmed = text.Trim();
+        return driveRows.FirstOrDefault(row =>
+            string.Equals(row.Label, trimmed, StringComparison.OrdinalIgnoreCase) ||
+            row.Label.EndsWith(" " + trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
     private async void RefreshTargets_Click(object sender, RoutedEventArgs e)
