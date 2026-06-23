@@ -288,9 +288,8 @@ internal sealed class PortableDeviceService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var targets = new List<PortableDeviceTarget>(storageItems.Count);
-        for (var index = 0; index < storageItems.Count; index++)
+        foreach (var storageItem in storageItems)
         {
-            var storageItem = storageItems[index];
             var storageRoot = storageItem.StorageRoot;
             var item = storageItem.Properties;
             var storageName = storageItem.StorageName;
@@ -298,7 +297,7 @@ internal sealed class PortableDeviceService
             var storageTargetKey = storageItem.StorageTargetKey;
             if (storageItem.UsesStorageNameFallback && duplicateFallbackKeys.Contains(storageTargetKey))
             {
-                storageTargetKey = $"{storageTargetKey}:{storageRoot.ObjectId}:{index}";
+                storageTargetKey = $"{storageTargetKey}:{storageRoot.ObjectId}";
             }
 
             var targetId = BuildTargetId(deviceId, storageTargetKey);

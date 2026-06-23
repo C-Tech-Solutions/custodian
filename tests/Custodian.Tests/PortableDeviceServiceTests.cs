@@ -144,6 +144,34 @@ public sealed class PortableDeviceServiceTests
         Assert.Equal("storage-b", targets[1].StorageObjectId);
     }
 
+    [Fact]
+    public void BuildTargetsForDeviceKeepsDuplicateStorageFallbackIdsStableAcrossEnumerationOrder()
+    {
+        var firstOrder = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [
+                new PortableDeviceService.PortableStorageObject("storage-a", Storage("Portable storage")),
+                new PortableDeviceService.PortableStorageObject("storage-b", Storage("Portable storage"))
+            ],
+            EmptyLabels());
+        var secondOrder = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [
+                new PortableDeviceService.PortableStorageObject("storage-b", Storage("Portable storage")),
+                new PortableDeviceService.PortableStorageObject("storage-a", Storage("Portable storage"))
+            ],
+            EmptyLabels());
+
+        Assert.Equal(
+            firstOrder.Single(target => target.StorageObjectId == "storage-a").TargetId,
+            secondOrder.Single(target => target.StorageObjectId == "storage-a").TargetId);
+        Assert.Equal(
+            firstOrder.Single(target => target.StorageObjectId == "storage-b").TargetId,
+            secondOrder.Single(target => target.StorageObjectId == "storage-b").TargetId);
+    }
+
     private static IReadOnlySet<string> EmptyLabels()
         => PortableDeviceService.CreateLocalVolumeLabelSet([]);
 
