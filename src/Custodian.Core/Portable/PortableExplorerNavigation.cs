@@ -247,8 +247,18 @@ public static class PortableExplorerNavigator
         string expectedSegment,
         string expectedObjectId)
     {
-        return parent.GetChildren().FirstOrDefault(child =>
-            ObjectIdentityMatches(child.IdentityText, expectedObjectId) ||
+        var children = parent.GetChildren();
+        if (!string.IsNullOrWhiteSpace(expectedObjectId))
+        {
+            var identityMatch = children.FirstOrDefault(child =>
+                ObjectIdentityMatches(child.IdentityText, expectedObjectId));
+            if (identityMatch is not null)
+            {
+                return identityMatch;
+            }
+        }
+
+        return children.FirstOrDefault(child =>
             NamesMatch(child.Name, expectedSegment, allowContains: false));
     }
 

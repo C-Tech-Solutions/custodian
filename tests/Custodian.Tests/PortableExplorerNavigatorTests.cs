@@ -94,6 +94,24 @@ public sealed class PortableExplorerNavigatorTests
     }
 
     [Fact]
+    public void OpenPrefersPortableObjectIdentityBeforeNameMatchForFinalItem()
+    {
+        var (thisPc, _, _) = BuildTree(out _, out var camera, out var photo);
+        var wrongPhoto = new FakeExplorerNode("photo.jpg", isFolder: false)
+        {
+            IdentityText = "shell://phone/wrong-photo"
+        };
+        camera.Children.Insert(0, wrongPhoto);
+        var entry = File("Pixel/Internal storage/DCIM/Camera/photo.jpg", "photo-object");
+
+        var result = PortableExplorerNavigator.Open(ScanResult(), entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.OpenedExactItem, result.Kind);
+        Assert.Equal(0, wrongPhoto.InvokeDefaultCount);
+        Assert.Equal(1, photo.InvokeDefaultCount);
+    }
+
+    [Fact]
     public void RevealExactFileSelectsTheItem()
     {
         var (thisPc, _, _) = BuildTree(out _, out _, out var photo);

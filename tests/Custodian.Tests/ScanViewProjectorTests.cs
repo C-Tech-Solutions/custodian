@@ -135,6 +135,16 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void TryFindDirectoryByPathReturnsFalseForNullPath()
+    {
+        var root = Directory("Pixel/Internal shared storage", 200, 0, 0);
+
+        var found = ScanViewProjector.TryFindDirectoryByPath(root, null!, out _);
+
+        Assert.False(found);
+    }
+
+    [Fact]
     public void TryFindParentReturnsFalseForNullArguments()
     {
         var root = Directory(@"C:\", 0, 0, 0);

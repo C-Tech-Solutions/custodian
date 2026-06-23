@@ -517,8 +517,14 @@ public static class ScanViewProjector
         return -StringComparer.OrdinalIgnoreCase.Compare(left.FullPath, right.FullPath);
     }
 
-    private static bool TryBuildPath(FileSystemEntry root, string fullPath, out List<FileSystemEntry> path)
+    private static bool TryBuildPath(FileSystemEntry root, string? fullPath, out List<FileSystemEntry> path)
     {
+        path = [];
+        if (string.IsNullOrEmpty(fullPath))
+        {
+            return false;
+        }
+
         if (TryBuildFileSystemPath(root, fullPath, out path))
         {
             return true;

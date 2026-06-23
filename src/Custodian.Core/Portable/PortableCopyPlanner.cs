@@ -4,7 +4,10 @@ namespace Custodian.Core.Portable;
 
 public static class PortableCopyPlanner
 {
-    private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
+    private static readonly HashSet<char> InvalidFileNameChars = new(
+        Enumerable.Range(0, 32)
+            .Select(value => (char)value)
+            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' }));
     private static readonly HashSet<string> ReservedWindowsFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON",
@@ -246,7 +249,7 @@ public static class PortableCopyPlanner
         char[]? chars = null;
         for (var index = 0; index < name.Length; index++)
         {
-            if (Array.IndexOf(InvalidFileNameChars, name[index]) >= 0)
+            if (InvalidFileNameChars.Contains(name[index]))
             {
                 chars ??= name.ToCharArray();
                 chars[index] = '_';
@@ -269,13 +272,13 @@ public static class PortableCopyPlanner
 
     private static string RenameReservedDeviceName(string name)
     {
-        var extension = Path.GetExtension(name);
-        var baseName = string.IsNullOrEmpty(extension)
+        var periodIndex = name.IndexOf('.');
+        var baseName = periodIndex < 0
             ? name
-            : name[..^extension.Length];
+            : name[..periodIndex];
 
         return !string.IsNullOrWhiteSpace(baseName) && ReservedWindowsFileNames.Contains(baseName)
-            ? $"{baseName}_{extension}"
+            ? (periodIndex < 0 ? $"{name}_" : $"{baseName}_{name[periodIndex..]}")
             : name;
     }
 

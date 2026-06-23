@@ -2540,8 +2540,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ShowPortableDeviceModificationBlockedMessage()
         => ShowToast("Portable device items can be opened in Explorer and copied to the PC, but not deleted or modified on the phone.");
 
-    private static bool IsPortableTargetId(string value)
-        => value.StartsWith("wpd:", StringComparison.OrdinalIgnoreCase);
+    private static bool IsPortableTargetId(string? value)
+        => value is not null && value.StartsWith("wpd:", StringComparison.OrdinalIgnoreCase);
 
     private static FileSystemEntry ResolveCachedSelection(ScanResult result, CachedScanState? restoreState)
     {

@@ -194,8 +194,11 @@ public sealed class PortableCopyPlannerTests
     }
 
     [Theory]
+    [InlineData("A:B", "A_B")]
+    [InlineData("A?B", "A_B")]
     [InlineData("CON", "CON_")]
     [InlineData("con.txt", "con_.txt")]
+    [InlineData("CON.tar.gz", "CON_.tar.gz")]
     [InlineData("NUL.", "NUL_")]
     [InlineData("COM1.jpg", "COM1_.jpg")]
     [InlineData("LPT9", "LPT9_")]
