@@ -59,6 +59,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly PortableDeviceService _portableDevices = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
+    private readonly MouseHistoryNavigationService _mouseHistoryNavigation;
     private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _activePortableCopy;
     private Task? _activePortableCopyTask;
@@ -129,6 +130,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InitializeComponent();
         DataContext = this;
         _launchPath = launchPath;
+        _mouseHistoryNavigation = new MouseHistoryNavigationService(
+            () => !_isRecycleBinViewActive && _backStack.Count > 0 && _selectedEntry is not null,
+            GoBack,
+            () => !_isRecycleBinViewActive && _forwardStack.Count > 0 && _selectedEntry is not null,
+            GoForward);
 
         _settings = UiSettingsStore.Load();
         ApplySettingsEarly();
@@ -161,6 +167,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SeedPathFromSettings();
         InstallKeyBindings();
+        PreviewMouseUp += _mouseHistoryNavigation.HandlePreviewMouseUp;
         ApplySettingsLate();
 
         UpdateChartModeVisibility();
@@ -1223,8 +1230,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await _navigationGate.WaitAsync();
         try
         {
-            if (_backStack.Count == 0 || _selectedEntry is null) return;
-            _forwardStack.Push(_selectedEntry);
+            var selectedEntry = _selectedEntry;
+            if (_backStack.Count == 0 || selectedEntry is null || _isRecycleBinViewActive) return;
+            _forwardStack.Push(selectedEntry);
             await NavigateToFolderCoreAsync(_backStack.Pop(), addHistory: false, clearForward: false);
         }
         finally
@@ -1241,8 +1249,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await _navigationGate.WaitAsync();
         try
         {
-            if (_forwardStack.Count == 0 || _selectedEntry is null) return;
-            _backStack.Push(_selectedEntry);
+            var selectedEntry = _selectedEntry;
+            if (_forwardStack.Count == 0 || selectedEntry is null || _isRecycleBinViewActive) return;
+            _backStack.Push(selectedEntry);
             await NavigateToFolderCoreAsync(_forwardStack.Pop(), addHistory: false, clearForward: false);
         }
         finally

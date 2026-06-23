@@ -36,6 +36,34 @@ public sealed class RecursiveScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task RecursiveScanReturnsBeforeTraversalCompletes()
+    {
+        var fileSystem = new TestRecursiveScanFileSystem
+        {
+            DirectoryEnumerationDelay = TimeSpan.FromMilliseconds(750)
+        };
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        var watch = Stopwatch.StartNew();
+        var scanTask = provider.ScanAsync(new ScanOptions(_root, ScanMode.Recursive), null, CancellationToken.None);
+        var returnedAfter = watch.Elapsed;
+
+        Assert.True(returnedAfter < TimeSpan.FromMilliseconds(250), $"ScanAsync returned after {returnedAfter.TotalMilliseconds:n0} ms.");
+        await scanTask;
+    }
+
+    [Fact]
+    public async Task RecursiveScanHonorsCancellation()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "note.txt"), "hello");
+        using var cts = new CancellationTokenSource();
+        var progress = new InlineProgress<ScanProgress>(_ => cts.Cancel());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            new DiskScanner().ScanAsync(new ScanOptions(_root, ScanMode.Recursive), progress, cts.Token));
+    }
+
+    [Fact]
     public async Task ScannerReportsReparsePointsAsSkippedByDefault()
     {
         var target = Path.Combine(_root, "target");
@@ -51,6 +79,80 @@ public sealed class RecursiveScannerTests : IDisposable
         var result = await new DiskScanner().ScanAsync(new ScanOptions(_root, ScanMode.Recursive));
 
         Assert.Contains(result.SkippedEntries, e => e.Path.EndsWith("link", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ScannerAvoidsAllocatedSizeProbeForCloudPlaceholders()
+    {
+        var cloudFile = Path.Combine(_root, "cloud-placeholder.bin");
+        await File.WriteAllBytesAsync(cloudFile, new byte[42]);
+        var fileSystem = new TestRecursiveScanFileSystem
+        {
+            ThrowOnAllocatedSize = true
+        };
+        fileSystem.AttributeOverrides[cloudFile] =
+            FileAttributes.Archive |
+            FileAttributes.Offline |
+            (FileAttributes)0x00400000;
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CollectAllocatedSize: true),
+            null,
+            CancellationToken.None);
+
+        var entry = Assert.Single(result.Root.Children);
+        Assert.Equal(cloudFile, entry.FullPath);
+        Assert.Equal(42, entry.LogicalSizeBytes);
+        Assert.Equal(42, entry.AllocatedSizeBytes);
+        Assert.Equal(0, fileSystem.AllocatedSizeCalls);
+        Assert.Empty(result.SkippedEntries);
+    }
+
+    [Fact]
+    public async Task ScannerUsesAllocatedSizeProbeForUnpinnedLocalFiles()
+    {
+        var unpinnedFile = Path.Combine(_root, "unpinned-local.bin");
+        await File.WriteAllBytesAsync(unpinnedFile, new byte[42]);
+        var fileSystem = new TestRecursiveScanFileSystem();
+        fileSystem.AttributeOverrides[unpinnedFile] =
+            FileAttributes.Archive |
+            (FileAttributes)0x00100000;
+        fileSystem.AllocatedSizeOverrides[unpinnedFile] = 7;
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CollectAllocatedSize: true),
+            null,
+            CancellationToken.None);
+
+        var entry = Assert.Single(result.Root.Children);
+        Assert.Equal(unpinnedFile, entry.FullPath);
+        Assert.Equal(42, entry.LogicalSizeBytes);
+        Assert.Equal(7, entry.AllocatedSizeBytes);
+        Assert.Equal(1, fileSystem.AllocatedSizeCalls);
+        Assert.Empty(result.SkippedEntries);
+    }
+
+    [Fact]
+    public async Task ScannerSkipsFileWhenMetadataCannotBeRead()
+    {
+        var readableFile = Path.Combine(_root, "readable.txt");
+        var brokenFile = Path.Combine(_root, "metadata-fails.txt");
+        await File.WriteAllTextAsync(readableFile, "hello");
+        await File.WriteAllTextAsync(brokenFile, "hidden");
+        var fileSystem = new TestRecursiveScanFileSystem();
+        fileSystem.LengthFailures[brokenFile] = new IOException("metadata unavailable");
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        var result = await provider.ScanAsync(new ScanOptions(_root, ScanMode.Recursive), null, CancellationToken.None);
+
+        Assert.Equal(1, result.Root.FileCount);
+        Assert.Contains(result.Root.Children, entry => entry.FullPath == readableFile);
+        Assert.DoesNotContain(result.Root.Children, entry => entry.FullPath == brokenFile);
+        Assert.Contains(result.SkippedEntries, entry =>
+            entry.Path == brokenFile &&
+            entry.Reason.Contains("metadata unavailable", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -168,6 +270,77 @@ public sealed class RecursiveScannerTests : IDisposable
         catch
         {
             return false;
+        }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value)
+            => handler(value);
+    }
+
+    private sealed class TestRecursiveScanFileSystem : IRecursiveScanFileSystem
+    {
+        public Dictionary<string, FileAttributes> AttributeOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, Exception> LengthFailures { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, long> AllocatedSizeOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public TimeSpan DirectoryEnumerationDelay { get; set; }
+
+        public bool ThrowOnAllocatedSize { get; set; }
+
+        public int AllocatedSizeCalls { get; private set; }
+
+        public bool DirectoryExists(string path)
+            => Directory.Exists(path);
+
+        public IEnumerable<DirectoryInfo> EnumerateDirectories(DirectoryInfo directory)
+        {
+            if (DirectoryEnumerationDelay > TimeSpan.Zero)
+            {
+                Thread.Sleep(DirectoryEnumerationDelay);
+            }
+
+            return directory.EnumerateDirectories();
+        }
+
+        public IEnumerable<FileInfo> EnumerateFiles(DirectoryInfo directory)
+            => directory.EnumerateFiles();
+
+        public FileAttributes GetAttributes(FileSystemInfo info)
+            => AttributeOverrides.TryGetValue(info.FullName, out var attributes)
+                ? attributes
+                : info.Attributes;
+
+        public DateTimeOffset GetLastWriteTimeUtc(FileSystemInfo info)
+            => info.LastWriteTimeUtc;
+
+        public long GetLength(FileInfo file)
+        {
+            if (LengthFailures.TryGetValue(file.FullName, out var exception))
+            {
+                throw exception;
+            }
+
+            return file.Length;
+        }
+
+        public long GetAllocatedSize(string path, long fallbackLength)
+        {
+            AllocatedSizeCalls++;
+            if (ThrowOnAllocatedSize)
+            {
+                throw new IOException("Allocated size probe should not run.");
+            }
+
+            if (AllocatedSizeOverrides.TryGetValue(path, out var allocatedSize))
+            {
+                return allocatedSize;
+            }
+
+            return fallbackLength;
         }
     }
 }
