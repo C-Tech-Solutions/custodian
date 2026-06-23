@@ -52,6 +52,9 @@ public static class PortableExplorerNavigator
 {
     public static IReadOnlyList<string> GetRelativeSegments(ScanResult result, FileSystemEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(entry);
+
         var rootPath = NormalizePortablePath(result.DisplayRootPath);
         var entryPath = NormalizePortablePath(entry.FullPath);
         if (string.IsNullOrWhiteSpace(entryPath))

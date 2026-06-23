@@ -531,8 +531,13 @@ internal sealed class PortableDeviceService
         values.SetUnsignedIntegerValue(in key, value);
     }
 
-    private static string? TryGetString(PortableDeviceApi.IPortableDeviceValues values, PROPERTYKEY key)
+    private static string? TryGetString(PortableDeviceApi.IPortableDeviceValues? values, PROPERTYKEY key)
     {
+        if (values is null)
+        {
+            return null;
+        }
+
         try
         {
             return values.GetStringValue(in key);
@@ -543,8 +548,13 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private static Guid? TryGetGuid(PortableDeviceApi.IPortableDeviceValues values, PROPERTYKEY key)
+    private static Guid? TryGetGuid(PortableDeviceApi.IPortableDeviceValues? values, PROPERTYKEY key)
     {
+        if (values is null)
+        {
+            return null;
+        }
+
         try
         {
             return values.GetGuidValue(in key);
@@ -555,8 +565,13 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private static ulong? TryGetUnsignedLong(PortableDeviceApi.IPortableDeviceValues values, PROPERTYKEY key)
+    private static ulong? TryGetUnsignedLong(PortableDeviceApi.IPortableDeviceValues? values, PROPERTYKEY key)
     {
+        if (values is null)
+        {
+            return null;
+        }
+
         try
         {
             return values.GetUnsignedLargeIntegerValue(in key);
@@ -567,8 +582,13 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private static bool? TryGetBool(PortableDeviceApi.IPortableDeviceValues values, PROPERTYKEY key)
+    private static bool? TryGetBool(PortableDeviceApi.IPortableDeviceValues? values, PROPERTYKEY key)
     {
+        if (values is null)
+        {
+            return null;
+        }
+
         try
         {
             return values.GetBoolValue(in key);
@@ -579,8 +599,32 @@ internal sealed class PortableDeviceService
         }
     }
 
-    private static DateTimeOffset? TryGetDate(PortableDeviceApi.IPortableDeviceValues values, PROPERTYKEY key)
+    private static DateTimeOffset? TryGetDate(PortableDeviceApi.IPortableDeviceValues? values, PROPERTYKEY key)
     {
+        if (values is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var variant = values.GetValue(in key);
+            if (variant.Value is DateTime date)
+            {
+                return date.Kind == DateTimeKind.Unspecified
+                    ? new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Local))
+                    : new DateTimeOffset(date);
+            }
+
+            if (variant.Value is DateTimeOffset dateTimeOffset)
+            {
+                return dateTimeOffset;
+            }
+        }
+        catch (Exception ex) when (IsPortableDeviceException(ex))
+        {
+        }
+
         var value = TryGetString(values, key);
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -851,6 +895,7 @@ internal sealed class PortableDeviceService
             }
 
             var bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
+            Marshal.WriteInt32(bytesReadPointer, 0);
             try
             {
                 stream.Read(readBuffer, count, bytesReadPointer);

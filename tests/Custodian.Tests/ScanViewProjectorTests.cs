@@ -135,6 +135,16 @@ public sealed class ScanViewProjectorTests
     }
 
     [Fact]
+    public void TryFindParentReturnsFalseForNullArguments()
+    {
+        var root = Directory(@"C:\", 0, 0, 0);
+        var child = Directory(@"C:\Child", 0, 0, 0);
+
+        Assert.False(ScanViewProjector.TryFindParent(null!, child, out _));
+        Assert.False(ScanViewProjector.TryFindParent(root, null!, out _));
+    }
+
+    [Fact]
     public void FolderJumpRowsMatchNameAndFullPath()
     {
         var result = NestedResult();

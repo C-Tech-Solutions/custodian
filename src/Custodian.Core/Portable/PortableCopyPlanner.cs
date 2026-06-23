@@ -11,6 +11,8 @@ public static class PortableCopyPlanner
         string destinationRoot,
         ISet<string>? existingPaths = null)
     {
+        ArgumentNullException.ThrowIfNull(selectedEntries);
+
         if (string.IsNullOrWhiteSpace(destinationRoot))
         {
             throw new ArgumentException("Destination folder is required.", nameof(destinationRoot));

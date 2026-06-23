@@ -50,6 +50,14 @@ public sealed class PortableCopyPlannerTests
     }
 
     [Fact]
+    public void BuildPlanRejectsNullSelections()
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");
+
+        Assert.Throws<ArgumentNullException>(() => PortableCopyPlanner.BuildPlan(null!, destination));
+    }
+
+    [Fact]
     public void BuildPlanCopiesRootSelectionUnderRootFolderName()
     {
         var destination = Path.Combine(Path.GetTempPath(), $"custodian-copy-plan-{Guid.NewGuid():N}");

@@ -209,6 +209,12 @@ public static class ScanViewProjector
 
     public static bool TryFindParent(FileSystemEntry root, FileSystemEntry child, out FileSystemEntry parent)
     {
+        parent = null!;
+        if (root is null || child is null)
+        {
+            return false;
+        }
+
         if (child.IsDirectory)
         {
             if (TryBuildPath(root, child.FullPath, out var directoryPath) && directoryPath.Count > 1)
@@ -225,7 +231,6 @@ public static class ScanViewProjector
             return true;
         }
 
-        parent = null!;
         return false;
     }
 

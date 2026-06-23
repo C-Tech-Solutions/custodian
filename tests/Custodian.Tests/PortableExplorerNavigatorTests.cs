@@ -22,6 +22,16 @@ public sealed class PortableExplorerNavigatorTests
     }
 
     [Fact]
+    public void GetRelativeSegmentsRejectsNullArguments()
+    {
+        var result = ScanResult();
+        var entry = Directory("Pixel/Internal storage/DCIM");
+
+        Assert.Throws<ArgumentNullException>(() => PortableExplorerNavigator.GetRelativeSegments(null!, entry));
+        Assert.Throws<ArgumentNullException>(() => PortableExplorerNavigator.GetRelativeSegments(result, null!));
+    }
+
+    [Fact]
     public void OpenStorageRootSelectedOpensStorageRoot()
     {
         var (thisPc, _, storage) = BuildTree();
