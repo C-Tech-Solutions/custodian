@@ -1016,7 +1016,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             PathBox.Text = row.DisplayPath;
-            SetPortableScanControls(row.IsAvailable);
+            SetPortableScanControls(isPortableTarget: true);
 
             if (!row.IsAvailable)
             {
@@ -1080,7 +1080,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SelectTargetWithoutNavigation(target);
         PathBox.Text = target.Kind == TargetKind.PortableDevice ? target.DisplayPath : target.RootPath;
-        SetPortableScanControls(target.Kind == TargetKind.PortableDevice && target.IsAvailable);
+        SetPortableScanControls(target.Kind == TargetKind.PortableDevice);
         await StartScanAsync();
     }
 

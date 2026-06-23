@@ -891,7 +891,6 @@ internal sealed class PortableDeviceService
     private sealed class PortableDeviceReadStream(System.Runtime.InteropServices.ComTypes.IStream stream) : Stream
     {
         private System.Runtime.InteropServices.ComTypes.IStream? _stream = stream;
-        private IntPtr _bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
 
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -920,14 +919,13 @@ internal sealed class PortableDeviceService
                 throw new ArgumentOutOfRangeException(nameof(count));
             }
 
+            var currentStream = _stream ?? throw new ObjectDisposedException(nameof(PortableDeviceReadStream));
             if (count == 0)
             {
                 return 0;
             }
 
-            ObjectDisposedException.ThrowIf(_bytesReadPointer == IntPtr.Zero, this);
-            var currentStream = _stream ?? throw new ObjectDisposedException(nameof(PortableDeviceReadStream));
-
+            IntPtr bytesReadPointer = IntPtr.Zero;
             byte[]? rentedBuffer = null;
             var readBuffer = buffer;
             if (offset != 0)
@@ -936,11 +934,12 @@ internal sealed class PortableDeviceService
                 readBuffer = rentedBuffer;
             }
 
-            Marshal.WriteInt32(_bytesReadPointer, 0);
             try
             {
-                currentStream.Read(readBuffer, count, _bytesReadPointer);
-                var bytesRead = Marshal.ReadInt32(_bytesReadPointer);
+                bytesReadPointer = Marshal.AllocCoTaskMem(sizeof(int));
+                Marshal.WriteInt32(bytesReadPointer, 0);
+                currentStream.Read(readBuffer, count, bytesReadPointer);
+                var bytesRead = Marshal.ReadInt32(bytesReadPointer);
                 if (offset != 0 && bytesRead > 0)
                 {
                     Buffer.BlockCopy(readBuffer, 0, buffer, offset, bytesRead);
@@ -950,6 +949,11 @@ internal sealed class PortableDeviceService
             }
             finally
             {
+                if (bytesReadPointer != IntPtr.Zero)
+                {
+                    Marshal.FreeCoTaskMem(bytesReadPointer);
+                }
+
                 if (rentedBuffer is not null)
                 {
                     ArrayPool<byte>.Shared.Return(rentedBuffer);
@@ -963,12 +967,6 @@ internal sealed class PortableDeviceService
 
         protected override void Dispose(bool disposing)
         {
-            var bytesReadPointer = Interlocked.Exchange(ref _bytesReadPointer, IntPtr.Zero);
-            if (bytesReadPointer != IntPtr.Zero)
-            {
-                Marshal.FreeCoTaskMem(bytesReadPointer);
-            }
-
             if (disposing)
             {
                 var streamToRelease = Interlocked.Exchange(ref _stream, null);
@@ -976,15 +974,6 @@ internal sealed class PortableDeviceService
             }
 
             base.Dispose(disposing);
-            if (disposing)
-            {
-                GC.SuppressFinalize(this);
-            }
-        }
-
-        ~PortableDeviceReadStream()
-        {
-            Dispose(disposing: false);
         }
     }
 

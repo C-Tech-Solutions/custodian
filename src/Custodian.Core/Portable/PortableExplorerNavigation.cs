@@ -51,35 +51,46 @@ public interface IPortableExplorerNode
 public static class PortableExplorerNavigator
 {
     public static IReadOnlyList<string> GetRelativeSegments(ScanResult result, FileSystemEntry entry)
+        => TryGetRelativeSegments(result, entry, out var segments)
+            ? segments
+            : [];
+
+    public static bool TryGetRelativeSegments(
+        ScanResult result,
+        FileSystemEntry entry,
+        out IReadOnlyList<string> segments)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(entry);
 
+        segments = [];
         var rootPath = NormalizePortablePath(result.DisplayRootPath);
         var entryPath = NormalizePortablePath(entry.FullPath);
         if (string.IsNullOrWhiteSpace(entryPath))
         {
-            return [];
+            return false;
         }
 
         if (string.IsNullOrWhiteSpace(rootPath))
         {
-            return SplitPortablePath(entryPath);
+            segments = SplitPortablePath(entryPath);
+            return true;
         }
 
         if (string.Equals(entryPath, rootPath, StringComparison.OrdinalIgnoreCase))
         {
-            return [];
+            return true;
         }
 
         if (entryPath.Length > rootPath.Length &&
             entryPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) &&
             entryPath[rootPath.Length] == '/')
         {
-            return SplitPortablePath(entryPath[(rootPath.Length + 1)..]);
+            segments = SplitPortablePath(entryPath[(rootPath.Length + 1)..]);
+            return true;
         }
 
-        return [];
+        return false;
     }
 
     public static PortableExplorerOpenResult Open(
@@ -102,7 +113,11 @@ public static class PortableExplorerNavigator
                 : TryOpenThisPc(thisPc);
         }
 
-        var segments = GetRelativeSegments(result, entry);
+        if (!TryGetRelativeSegments(result, entry, out var segments))
+        {
+            return PortableExplorerOpenResult.Failed("Selected phone item is not part of the current scan.");
+        }
+
         var current = storage;
         IPortableExplorerNode? parent = null;
         for (var index = 0; index < segments.Count; index++)

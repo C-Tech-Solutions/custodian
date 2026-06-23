@@ -32,6 +32,18 @@ public sealed class PortableExplorerNavigatorTests
     }
 
     [Fact]
+    public void TryGetRelativeSegmentsRejectsEntryOutsideStorageRoot()
+    {
+        var result = ScanResult();
+        var entry = File(".jpg", string.Empty);
+
+        var matched = PortableExplorerNavigator.TryGetRelativeSegments(result, entry, out var segments);
+
+        Assert.False(matched);
+        Assert.Empty(segments);
+    }
+
+    [Fact]
     public void OpenStorageRootSelectedOpensStorageRoot()
     {
         var (thisPc, _, storage) = BuildTree();
@@ -127,6 +139,18 @@ public sealed class PortableExplorerNavigatorTests
 
         Assert.Equal(PortableExplorerOpenResultKind.OpenedThisPc, result.Kind);
         Assert.Equal(1, thisPc.OpenCount);
+    }
+
+    [Fact]
+    public void OpenRejectsEntryOutsideScanTree()
+    {
+        var (thisPc, _, storage) = BuildTree();
+        var entry = File(".jpg", string.Empty);
+
+        var result = PortableExplorerNavigator.Open(ScanResult(), entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.Failed, result.Kind);
+        Assert.Equal(0, storage.OpenCount);
     }
 
     private static ScanResult ScanResult() => new()
