@@ -7,7 +7,6 @@ namespace Custodian.Core.Scanning;
 public sealed class RecursiveScanProvider : IDiskScanProvider
 {
     private const FileAttributes FileAttributeRecallOnOpen = (FileAttributes)0x00040000;
-    private const FileAttributes FileAttributeUnpinned = (FileAttributes)0x00100000;
     private const FileAttributes FileAttributeRecallOnDataAccess = (FileAttributes)0x00400000;
 
     private readonly IRecursiveScanFileSystem _fileSystem;
@@ -250,8 +249,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
     {
         return attributes.HasFlag(FileAttributes.Offline) ||
             attributes.HasFlag(FileAttributeRecallOnOpen) ||
-            attributes.HasFlag(FileAttributeRecallOnDataAccess) ||
-            attributes.HasFlag(FileAttributeUnpinned);
+            attributes.HasFlag(FileAttributeRecallOnDataAccess);
     }
 
     private static bool IsRecoverableMetadataException(Exception ex)

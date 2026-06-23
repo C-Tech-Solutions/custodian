@@ -93,7 +93,7 @@ public sealed class RecursiveScannerTests : IDisposable
         fileSystem.AttributeOverrides[cloudFile] =
             FileAttributes.Archive |
             FileAttributes.Offline |
-            (FileAttributes)0x00100000;
+            (FileAttributes)0x00400000;
         var provider = new RecursiveScanProvider(fileSystem);
 
         var result = await provider.ScanAsync(
@@ -106,6 +106,31 @@ public sealed class RecursiveScannerTests : IDisposable
         Assert.Equal(42, entry.LogicalSizeBytes);
         Assert.Equal(42, entry.AllocatedSizeBytes);
         Assert.Equal(0, fileSystem.AllocatedSizeCalls);
+        Assert.Empty(result.SkippedEntries);
+    }
+
+    [Fact]
+    public async Task ScannerUsesAllocatedSizeProbeForUnpinnedLocalFiles()
+    {
+        var unpinnedFile = Path.Combine(_root, "unpinned-local.bin");
+        await File.WriteAllBytesAsync(unpinnedFile, new byte[42]);
+        var fileSystem = new TestRecursiveScanFileSystem();
+        fileSystem.AttributeOverrides[unpinnedFile] =
+            FileAttributes.Archive |
+            (FileAttributes)0x00100000;
+        fileSystem.AllocatedSizeOverrides[unpinnedFile] = 7;
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CollectAllocatedSize: true),
+            null,
+            CancellationToken.None);
+
+        var entry = Assert.Single(result.Root.Children);
+        Assert.Equal(unpinnedFile, entry.FullPath);
+        Assert.Equal(42, entry.LogicalSizeBytes);
+        Assert.Equal(7, entry.AllocatedSizeBytes);
+        Assert.Equal(1, fileSystem.AllocatedSizeCalls);
         Assert.Empty(result.SkippedEntries);
     }
 
@@ -260,6 +285,8 @@ public sealed class RecursiveScannerTests : IDisposable
 
         public Dictionary<string, Exception> LengthFailures { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, long> AllocatedSizeOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public TimeSpan DirectoryEnumerationDelay { get; set; }
 
         public bool ThrowOnAllocatedSize { get; set; }
@@ -306,6 +333,11 @@ public sealed class RecursiveScannerTests : IDisposable
             if (ThrowOnAllocatedSize)
             {
                 throw new IOException("Allocated size probe should not run.");
+            }
+
+            if (AllocatedSizeOverrides.TryGetValue(path, out var allocatedSize))
+            {
+                return allocatedSize;
             }
 
             return fallbackLength;

@@ -59,6 +59,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly PortableDeviceService _portableDevices = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
+    private readonly MouseHistoryNavigationService _mouseHistoryNavigation;
     private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _activePortableCopy;
     private Task? _activePortableCopyTask;
@@ -129,6 +130,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InitializeComponent();
         DataContext = this;
         _launchPath = launchPath;
+        _mouseHistoryNavigation = new MouseHistoryNavigationService(
+            () => !_isRecycleBinViewActive && _backStack.Count > 0 && _selectedEntry is not null,
+            GoBack,
+            () => !_isRecycleBinViewActive && _forwardStack.Count > 0 && _selectedEntry is not null,
+            GoForward);
 
         _settings = UiSettingsStore.Load();
         ApplySettingsEarly();
@@ -161,7 +167,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SeedPathFromSettings();
         InstallKeyBindings();
-        PreviewMouseUp += MainWindow_PreviewMouseUp;
+        PreviewMouseUp += _mouseHistoryNavigation.HandlePreviewMouseUp;
         ApplySettingsLate();
 
         UpdateChartModeVisibility();
@@ -1216,25 +1222,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void Forward_Click(object sender, RoutedEventArgs e) => GoForward();
     private void Up_Click(object sender, RoutedEventArgs e) => GoUp();
 
-    private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton == MouseButton.XButton1 && CanGoBack())
-        {
-            e.Handled = true;
-            GoBack();
-        }
-        else if (e.ChangedButton == MouseButton.XButton2 && CanGoForward())
-        {
-            e.Handled = true;
-            GoForward();
-        }
-    }
-
     private void GoBack()
         => RunUiAction(GoBackAsync, "Navigation failed");
-
-    private bool CanGoBack()
-        => !_isRecycleBinViewActive && _backStack.Count > 0 && _selectedEntry is not null;
 
     private async Task GoBackAsync()
     {
@@ -1254,9 +1243,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void GoForward()
         => RunUiAction(GoForwardAsync, "Navigation failed");
-
-    private bool CanGoForward()
-        => !_isRecycleBinViewActive && _forwardStack.Count > 0 && _selectedEntry is not null;
 
     private async Task GoForwardAsync()
     {
