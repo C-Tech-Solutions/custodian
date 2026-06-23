@@ -267,13 +267,40 @@ internal sealed class PortableDeviceService
                 : [];
         }
 
-        var targets = new List<PortableDeviceTarget>(storageRoots.Count);
-        foreach (var storageRoot in storageRoots)
+        var storageItems = storageRoots.Select(storageRoot =>
         {
             var item = storageRoot.Properties;
             var storageName = FirstNonEmpty(item.Name, item.OriginalFileName, item.StorageDescription, "Portable storage");
+            var usesStorageNameFallback = string.IsNullOrWhiteSpace(item.PersistentUniqueId);
+            var storageTargetKey = usesStorageNameFallback ? storageName : item.PersistentUniqueId!;
+            return (
+                StorageRoot: storageRoot,
+                Properties: item,
+                StorageName: storageName,
+                StorageTargetKey: storageTargetKey,
+                UsesStorageNameFallback: usesStorageNameFallback);
+        }).ToList();
+        var duplicateFallbackKeys = storageItems
+            .Where(item => item.UsesStorageNameFallback)
+            .GroupBy(item => item.StorageTargetKey, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var targets = new List<PortableDeviceTarget>(storageItems.Count);
+        for (var index = 0; index < storageItems.Count; index++)
+        {
+            var storageItem = storageItems[index];
+            var storageRoot = storageItem.StorageRoot;
+            var item = storageItem.Properties;
+            var storageName = storageItem.StorageName;
             var displayPath = CombinePortablePath(deviceName, storageName);
-            var storageTargetKey = FirstNonEmpty(item.PersistentUniqueId, storageName, storageRoot.ObjectId);
+            var storageTargetKey = storageItem.StorageTargetKey;
+            if (storageItem.UsesStorageNameFallback && duplicateFallbackKeys.Contains(storageTargetKey))
+            {
+                storageTargetKey = $"{storageTargetKey}:{storageRoot.ObjectId}:{index}";
+            }
+
             var targetId = BuildTargetId(deviceId, storageTargetKey);
             var capacity = item.CapacityBytes;
             var free = item.FreeBytes;

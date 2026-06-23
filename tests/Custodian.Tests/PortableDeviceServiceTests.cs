@@ -126,6 +126,24 @@ public sealed class PortableDeviceServiceTests
         Assert.Equal("storage-v2", second[0].StorageObjectId);
     }
 
+    [Fact]
+    public void BuildTargetsForDeviceDisambiguatesDuplicateStorageNameFallbackIds()
+    {
+        var targets = PortableDeviceService.BuildTargetsForDevice(
+            UsbPhoneId,
+            "Colten's S23 Ultra",
+            [
+                new PortableDeviceService.PortableStorageObject("storage-a", Storage("Portable storage")),
+                new PortableDeviceService.PortableStorageObject("storage-b", Storage("Portable storage"))
+            ],
+            EmptyLabels());
+
+        Assert.Equal(2, targets.Count);
+        Assert.NotEqual(targets[0].TargetId, targets[1].TargetId);
+        Assert.Equal("storage-a", targets[0].StorageObjectId);
+        Assert.Equal("storage-b", targets[1].StorageObjectId);
+    }
+
     private static IReadOnlySet<string> EmptyLabels()
         => PortableDeviceService.CreateLocalVolumeLabelSet([]);
 
