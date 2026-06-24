@@ -9,6 +9,8 @@ local inspection without depending on third-party desktop utilities. It ships as
 a self-updating desktop app, a portable desktop app, and a CLI for repeatable
 server or workstation workflows.
 
+![Custodian disk scan overview](docs/screenshots/custodian-overview-pie.png)
+
 ## Why Custodian?
 
 - **Find space quickly** with folder trees, sortable detail grids, largest-file
@@ -29,8 +31,45 @@ server or workstation workflows.
   delete, empty-bin actions, and confirmation prompts.
 - **Keep results portable** with `.custodian-scan` SQLite save files plus CSV
   and JSON export from the desktop app or CLI.
+- **Handle untrusted scan data defensively** with CSV formula neutralization,
+  remote-path confirmation before opening saved entries, hardened SQLite
+  connection handling, and redacted update-source logging.
 - **Stay updated** through Velopack-powered GitHub Releases for installed
   desktop builds.
+
+## Screenshots
+
+| Scan overview | Treemap distribution |
+| --- | --- |
+| ![Custodian scan overview with pie chart](docs/screenshots/custodian-overview-pie.png) | ![Custodian treemap distribution](docs/screenshots/custodian-overview-treemap.png) |
+
+| Scan in progress | Folder drilldown |
+| --- | --- |
+| ![Custodian scan progress state](docs/screenshots/custodian-scan-progress.png) | ![Custodian folder drilldown with bars](docs/screenshots/custodian-drilldown-bars.png) |
+
+The desktop app keeps targets, scan navigation, sortable detail rows, summary
+metrics, and charts visible in one workspace so repeated cleanup passes do not
+require jumping between windows.
+
+## What's New In 1.4.0
+
+- New application logo and icon set.
+- Read-only Android / MTP storage scanning with safe copy-to-PC actions.
+- Session scan cache, scan navigation, chart zoom, and What's New prompts from
+  recent releases are now part of the stable release line.
+- Security hardening for exported CSV, saved-scan launch behavior, update-source
+  logging, and SQLite connection strings.
+- GitHub Actions build/test and vulnerable-package scanning for release PRs.
+- MIT license and expanded release documentation.
+
+## Privacy And Safety
+
+Custodian is built for local and locked-down environments. Scans run on the
+machine where the app is launched; Custodian does not upload file metadata to a
+cloud service. Android / MTP support is read-only for phone storage, and copy
+operations write only to the PC destination you choose. Opening entries from a
+saved scan prompts before touching network or remote paths, because saved scan
+files can come from untrusted sources.
 
 ## Download
 
@@ -107,7 +146,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.3.0
+.\scripts\publish-velopack.ps1 -Version 1.4.0
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -153,7 +192,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.3.0 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.4.0 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's
