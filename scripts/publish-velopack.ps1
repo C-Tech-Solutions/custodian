@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).ProviderPath
+$repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $publishRoot = Join-Path $repo "artifacts\velopack-publish"
 $appOut = Join-Path $publishRoot "Custodian"
 $output = Join-Path $repo $OutputRoot
