@@ -2178,16 +2178,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var path = SelectedPath();
         if (path is null) return;
-        if (Directory.Exists(path))
+        var isRemotePath = PathClassificationService.IsRemotePath(path);
+        if (!ConfirmLaunchIfRemote(path, isRemotePath))
         {
-            if (ConfirmLaunchIfRemote(path))
-            {
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
-            }
-
             return;
         }
-        if (File.Exists(path) && ConfirmLaunchIfRemote(path))
+
+        if (Directory.Exists(path))
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            return;
+        }
+        if (File.Exists(path))
         {
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         }
@@ -2197,9 +2199,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // controllable, and a crafted file can point an entry at a remote/UNC executable.
     // Shell-executing such a file would run an attacker-hosted binary, so require explicit
     // confirmation before opening anything that is not on a local fixed/removable drive.
-    private bool ConfirmLaunchIfRemote(string path)
+    private bool ConfirmLaunchIfRemote(string path, bool isRemotePath)
     {
-        if (!PathClassificationService.IsRemotePath(path))
+        if (!isRemotePath)
         {
             return true;
         }

@@ -53,6 +53,7 @@ jobs:
       - name: Scan for vulnerable packages
         shell: bash
         run: |
+          set -o pipefail
           dotnet list Custodian.slnx package --vulnerable --include-transitive 2>&1 | tee vuln.txt
           if grep -qiE "has the following vulnerable packages" vuln.txt; then
             echo "::error::Vulnerable NuGet packages detected. See the log above."
