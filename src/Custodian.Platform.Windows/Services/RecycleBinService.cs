@@ -4,24 +4,24 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using Custodian.App.Logging;
 using Custodian.Core.Model;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
-internal enum RecycleBinMoveResult
+public enum RecycleBinMoveResult
 {
     Completed,
     Cancelled
 }
 
-internal sealed record RecycleBinOperationResult(int RequestedCount, int ActedOnCount)
+public sealed record RecycleBinOperationResult(int RequestedCount, int ActedOnCount)
 {
     public int SkippedCount => Math.Max(0, RequestedCount - ActedOnCount);
 }
 
-internal static class RecycleBinService
+public static class RecycleBinService
 {
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(RecycleBinService).FullName!);
 

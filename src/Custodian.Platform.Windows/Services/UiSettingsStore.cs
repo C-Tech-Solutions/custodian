@@ -1,9 +1,9 @@
 using System.IO;
 using System.Text.Json;
-using Custodian.App.Logging;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
 public sealed class UiSettings
 {

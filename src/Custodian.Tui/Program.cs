@@ -1,10 +1,9 @@
-using Custodian.App.Services;
 using Custodian.Platform.Windows.Logging;
 using Custodian.Platform.Windows.Services;
 using Microsoft.Extensions.Logging;
 using Velopack;
 
-namespace Custodian.App;
+namespace Custodian.Tui;
 
 internal static class Program
 {
@@ -12,7 +11,7 @@ internal static class Program
     public static void Main(string[] args)
     {
         AppLogging.Initialize();
-        var logger = AppLogging.CreateLogger("Custodian.App.Program");
+        var logger = AppLogging.CreateLogger("Custodian.Tui.Program");
 
         try
         {
@@ -24,13 +23,12 @@ internal static class Program
                 .SetAutoApplyOnStartup(false)
                 .Run(null);
 
-            var app = new App();
-            app.InitializeComponent();
-            app.Run(new MainWindow(launchPath));
+            var options = TuiLaunchOptions.Parse(args, launchPath);
+            TuiApplication.Run(options);
         }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "Unhandled exception terminated the application.");
+            logger.LogCritical(ex, "Unhandled exception terminated the TUI.");
             throw;
         }
         finally

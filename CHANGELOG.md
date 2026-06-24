@@ -4,7 +4,14 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
-No unreleased changes yet.
+### Added
+
+- Added a standalone full-screen terminal UI with scan/open/save/export workflows, terminal-native charts, session cache restore, Recycle Bin inspection, Android/MTP scan and copy actions, update checks, and elevation settings.
+
+### Changed
+
+- Moved Windows platform services into a shared project so the desktop app and TUI use the same MTP, Recycle Bin, update, elevation, logging, and settings behavior.
+- Updated portable, Velopack, and legacy installer packaging to include `tui\Custodian.Tui.exe`.
 
 ## 1.4.0 - 2026-06-24
 

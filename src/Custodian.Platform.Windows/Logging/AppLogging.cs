@@ -2,7 +2,7 @@ using System.IO;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Custodian.App.Logging;
+namespace Custodian.Platform.Windows.Logging;
 
 /// <summary>
 /// Application-wide logging composition root. Initialized once in <c>Program.Main</c>.

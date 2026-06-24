@@ -1,5 +1,5 @@
 using System.IO;
-using Custodian.App.Logging;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Custodian.App.Services;

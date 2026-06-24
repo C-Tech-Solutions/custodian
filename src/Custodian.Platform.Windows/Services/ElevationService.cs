@@ -4,9 +4,9 @@ using System.Security.Principal;
 using Custodian.Core.Scanning;
 using Microsoft.Win32;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
-internal static class ElevationService
+public static class ElevationService
 {
     private const string LaunchPathArgument = "--custodian-path";
     private const string CompatibilityLayersSubKey = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";

@@ -1,4 +1,4 @@
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
 public sealed record PortableDeviceTarget(
     string TargetId,

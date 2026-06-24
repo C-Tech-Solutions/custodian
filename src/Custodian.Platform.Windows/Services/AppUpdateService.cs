@@ -1,14 +1,14 @@
 using System.Reflection;
-using Custodian.App.Logging;
 using Custodian.Core.Updates;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 using Velopack;
 using Velopack.Locators;
 using Velopack.Sources;
 
-namespace Custodian.App;
+namespace Custodian.Platform.Windows.Services;
 
-internal sealed class AppUpdateService
+public sealed class AppUpdateService
 {
     private const string RepositoryUrl = "https://github.com/ctech1313/custodian";
     private const string UpdateSourceOverrideVariable = "CUSTODIAN_UPDATE_SOURCE";
@@ -166,7 +166,7 @@ internal sealed class AppUpdateService
     }
 }
 
-internal sealed record AppUpdateCheckResult(
+public sealed record AppUpdateCheckResult(
     AppUpdateStatus Status,
     UpdateInfo? UpdateInfo = null,
     VelopackAsset? PendingRestartAsset = null)

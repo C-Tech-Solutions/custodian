@@ -2,6 +2,7 @@ using Custodian.App;
 using Custodian.App.Services;
 using Custodian.Core.Model;
 using Custodian.Core.Presentation;
+using Custodian.Platform.Windows.Services;
 
 public sealed class MainWindowTargetRepairTests
 {

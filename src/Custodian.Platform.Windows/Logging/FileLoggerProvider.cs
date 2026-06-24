@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
-namespace Custodian.App.Logging;
+namespace Custodian.Platform.Windows.Logging;
 
 /// <summary>
 /// Minimal rolling file logger. Writes one line per entry to a daily file under the

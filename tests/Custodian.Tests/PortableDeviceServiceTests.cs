@@ -1,6 +1,6 @@
-using Custodian.App.Services;
+using Custodian.Platform.Windows.Services;
 using Vanara.PInvoke;
-using PortableObjectProperties = Custodian.App.Services.PortableDeviceService.PortableObjectProperties;
+using PortableObjectProperties = Custodian.Platform.Windows.Services.PortableDeviceService.PortableObjectProperties;
 using PROPVARIANT = Vanara.PInvoke.Ole32.PROPVARIANT;
 
 public sealed class PortableDeviceServiceTests
