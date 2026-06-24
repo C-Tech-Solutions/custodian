@@ -71,6 +71,7 @@ internal static class TuiApplication
         private bool _collectAllocatedSize;
         private bool _recycleView;
         private bool _suppressTargetSelection;
+        private bool _checkingForUpdates;
 
         public MainView(TuiLaunchOptions options, IApplication app)
         {
@@ -436,7 +437,12 @@ internal static class TuiApplication
                 _pathField.Text = path;
                 SetStatus($"Opened scan: {result.DisplayRootPathOrRoot()}.");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException)
+            {
+                Logger.LogInformation("Open scan cancelled.");
+                SetStatus("Open cancelled.");
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex, "Open scan failed for {Path}.", path);
                 SetStatus("Open failed: " + ex.Message);
@@ -544,9 +550,9 @@ internal static class TuiApplication
             if (!string.IsNullOrWhiteSpace(filter))
             {
                 rows = rows
-                    .Where(row => row.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                        row.FullPath.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                        row.Kind.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    .Where(row => (row.Name ?? string.Empty).Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                        (row.FullPath ?? string.Empty).Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                        (row.Kind ?? string.Empty).Contains(filter, StringComparison.OrdinalIgnoreCase))
                     .ToList();
             }
 
@@ -671,10 +677,9 @@ internal static class TuiApplication
 
                 if (mode == PortableExplorerOpenMode.Reveal)
                 {
-                    Process.Start(new ProcessStartInfo("explorer.exe")
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
                     {
-                        UseShellExecute = true,
-                        ArgumentList = { $"/select,{path}" }
+                        UseShellExecute = true
                     });
                 }
                 else
@@ -853,8 +858,18 @@ internal static class TuiApplication
             {
                 var entries = await RecycleBinService.GetItemsAsync();
                 var usage = await RecycleBinService.GetUsageAsync();
+                if (!_recycleView)
+                {
+                    return;
+                }
+
                 UpdateUi(() =>
                 {
+                    if (!_recycleView)
+                    {
+                        return;
+                    }
+
                     _recycleRows.Clear();
                     foreach (var row in RecycleBinViewProjector.Rows(entries)
                         .OrderByDescending(row => row.DateDeletedValue)
@@ -905,6 +920,13 @@ internal static class TuiApplication
 
         private async Task CheckForUpdatesAsync()
         {
+            if (_checkingForUpdates)
+            {
+                SetStatus("Update check already running.");
+                return;
+            }
+
+            _checkingForUpdates = true;
             SetStatus("Checking for updates...");
             try
             {
@@ -934,6 +956,10 @@ internal static class TuiApplication
             {
                 Logger.LogWarning(ex, "Update check failed.");
                 SetStatus("Update check failed: " + ex.Message);
+            }
+            finally
+            {
+                _checkingForUpdates = false;
             }
         }
 

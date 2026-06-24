@@ -29,8 +29,13 @@ internal static class TerminalChartRenderer
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static string Truncate(string text, int length)
+    private static string Truncate(string? text, int length)
     {
+        if (text is null)
+        {
+            return string.Empty;
+        }
+
         if (text.Length <= length)
         {
             return text;
