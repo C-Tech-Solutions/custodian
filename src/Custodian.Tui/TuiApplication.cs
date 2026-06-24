@@ -945,19 +945,30 @@ internal static class TuiApplication
             {
                 var result = await _updates.CheckForUpdatesAsync();
                 SetStatus(result.Status.Message);
+                if (result.Status.Kind == AppUpdateStatusKind.ReadyToRestart)
+                {
+                    PromptInstallUpdate(result, "Update ready. Install now? The TUI will close; launch it again after the update finishes.");
+                    return;
+                }
+
                 if (result.Status.Kind == AppUpdateStatusKind.Available &&
                     MessageBox.Query(_app, "Update", result.Status.Message + Environment.NewLine + "Download now?", "Download", "Cancel") == 0)
                 {
+                    if (_activeOperation is not null)
+                    {
+                        SetStatus("Finish or stop the active operation before downloading updates.");
+                        return;
+                    }
+
                     var cts = StartOperation();
                     try
                     {
                         await _updates.DownloadUpdatesAsync(result, new Progress<AppUpdateStatus>(status => SetStatus(status.Message)), cts.Token);
-                        var pending = await _updates.CheckForUpdatesAsync();
-                        if (MessageBox.Query(_app, "Update", "Update downloaded. Install now? The TUI will close; launch it again after the update finishes.", "Install", "Later") == 0)
-                        {
-                            _updates.ApplyUpdatesWithoutRestart(pending);
-                            _app.RequestStop();
-                        }
+                        PromptInstallUpdate(result, "Update downloaded. Install now? The TUI will close; launch it again after the update finishes.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        SetStatus("Update download cancelled.");
                     }
                     finally
                     {
@@ -974,6 +985,18 @@ internal static class TuiApplication
             {
                 _checkingForUpdates = false;
             }
+        }
+
+        private void PromptInstallUpdate(AppUpdateCheckResult update, string message)
+        {
+            if (MessageBox.Query(_app, "Update", message, "Install", "Later") != 0)
+            {
+                SetStatus(update.Status.Message);
+                return;
+            }
+
+            _updates.ApplyUpdatesWithoutRestart(update);
+            _app.RequestStop();
         }
 
         private void ToggleAdminLaunch()
