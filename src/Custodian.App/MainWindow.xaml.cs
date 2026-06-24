@@ -2180,7 +2180,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (path is null) return;
         if (Directory.Exists(path))
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            if (ConfirmLaunchIfRemote(path))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            }
+
             return;
         }
         if (File.Exists(path) && ConfirmLaunchIfRemote(path))
@@ -2195,7 +2199,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // confirmation before opening anything that is not on a local fixed/removable drive.
     private bool ConfirmLaunchIfRemote(string path)
     {
-        if (!IsRemotePath(path))
+        if (!PathClassificationService.IsRemotePath(path))
         {
             return true;
         }
@@ -2207,30 +2211,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
         return answer == MessageBoxResult.Yes;
-    }
-
-    private static bool IsRemotePath(string path)
-    {
-        if (path.StartsWith(@"\\", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        try
-        {
-            var root = Path.GetPathRoot(path);
-            if (string.IsNullOrEmpty(root))
-            {
-                return false;
-            }
-
-            return new DriveInfo(root).DriveType == DriveType.Network;
-        }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
-        {
-            // If the drive cannot be classified, be conservative and treat it as remote.
-            return true;
-        }
     }
 
     private void RevealSelected_Click(object sender, RoutedEventArgs e)
@@ -4049,17 +4029,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var row in rows)
         {
             await writer.WriteLineAsync(string.Join(',',
-                Csv(row.Kind), Csv(row.Name), Csv(row.LogicalSize), Csv(row.AllocatedSize),
-                Csv(row.PercentText), row.FileCount, row.DirectoryCount, Csv(row.FullPath)));
+                CsvFieldFormatter.Format(row.Kind),
+                CsvFieldFormatter.Format(row.Name),
+                CsvFieldFormatter.Format(row.LogicalSize),
+                CsvFieldFormatter.Format(row.AllocatedSize),
+                CsvFieldFormatter.Format(row.PercentText),
+                row.FileCount,
+                row.DirectoryCount,
+                CsvFieldFormatter.Format(row.FullPath)));
         }
-    }
-
-    private static string Csv(string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
-            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-        return value;
     }
 
     private static void ReplaceCollection<T>(BulkObservableCollection<T> collection, IEnumerable<T> items)

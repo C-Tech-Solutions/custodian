@@ -103,9 +103,8 @@ internal sealed class AppUpdateService
             // updater to an arbitrary feed, so record a loud warning: in a normal install it
             // should never be set, and an unexpected value here is a supply-chain red flag.
             logger.LogWarning(
-                "Update source overridden via {Variable} to '{Source}'. Updates will be fetched from this location instead of the official GitHub releases. This should only be set for local testing.",
-                UpdateSourceOverrideVariable,
-                sourceOverride);
+                "Update source overridden via {Variable}. Updates will be fetched from an override source instead of the official GitHub releases. This should only be set for local testing.",
+                UpdateSourceOverrideVariable);
             return new UpdateManager(sourceOverride, options, logger, locator);
         }
 

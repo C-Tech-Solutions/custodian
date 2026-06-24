@@ -78,6 +78,21 @@ public sealed class ScanExporterTests
         Assert.Contains("'" + maliciousName[0], text);
     }
 
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("", "")]
+    [InlineData("plain", "plain")]
+    [InlineData("has,comma", "\"has,comma\"")]
+    [InlineData("=SUM(1)", "'=SUM(1)")]
+    [InlineData("+1+1", "'+1+1")]
+    [InlineData("-2+3", "'-2+3")]
+    [InlineData("@cmd", "'@cmd")]
+    [InlineData("\tleading-tab", "'\tleading-tab")]
+    public void CsvFieldFormatterFormatsSharedExportFields(string? value, string expected)
+    {
+        Assert.Equal(expected, CsvFieldFormatter.Format(value));
+    }
+
     [Fact]
     public async Task CsvWritesUtf8Bom()
     {
