@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices;
 using Custodian.Core.Model;
 using Microsoft.Win32.SafeHandles;
@@ -89,6 +90,10 @@ internal sealed class NtfsRecordSizeResolver
 
     private (long LogicalSize, long AllocatedSize) ResolveFromFileInfo(string fullPath)
     {
+        if (fullPath == null || fullPath.Contains(".."))
+        {
+            throw new ArgumentException("Invalid file path");
+        }
         var info = new FileInfo(fullPath);
         var length = info.Length;
         var allocated = _options.CollectAllocatedSize ? FileSizeUtilities.GetAllocatedSize(fullPath, length) : length;
