@@ -1,6 +1,6 @@
 namespace Custodian.Platform.Windows.Services;
 
-public sealed record PortableDeviceTarget(
+internal sealed record PortableDeviceTarget(
     string TargetId,
     string DeviceId,
     string DeviceName,

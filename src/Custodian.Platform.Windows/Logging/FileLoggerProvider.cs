@@ -10,7 +10,7 @@ namespace Custodian.Platform.Windows.Logging;
 /// configured directory. Designed to be dependency-free (no third-party sink) so it
 /// cannot conflict with the pinned Velopack / .NET runtime versions.
 /// </summary>
-public sealed class FileLoggerProvider : ILoggerProvider
+internal sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _directory;
     private readonly LogLevel _minLevel;

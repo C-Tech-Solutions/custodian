@@ -6,7 +6,7 @@ using Microsoft.Win32;
 
 namespace Custodian.Platform.Windows.Services;
 
-public static class ElevationService
+internal static class ElevationService
 {
     private const string LaunchPathArgument = "--custodian-path";
     private const string CompatibilityLayersSubKey = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";

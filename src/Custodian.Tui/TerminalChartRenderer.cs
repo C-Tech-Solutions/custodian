@@ -4,9 +4,9 @@ namespace Custodian.Tui;
 
 internal static class TerminalChartRenderer
 {
-    public static string Render(ChartDataset dataset, int width = 40)
+    public static string Render(ChartDataset? dataset, int width = 40)
     {
-        if (dataset.TotalBytes <= 0 || dataset.Slices.Count == 0)
+        if (dataset is null || dataset.TotalBytes <= 0 || dataset.Slices.Count == 0)
         {
             return "No chart data.";
         }

@@ -9,7 +9,7 @@ namespace Custodian.Platform.Windows.Logging;
 /// Until DI is introduced (later phase), this is the single ambient factory the App
 /// layer pulls loggers from. Safe to call before initialization — returns a no-op logger.
 /// </summary>
-public static class AppLogging
+internal static class AppLogging
 {
     private static ILoggerFactory? _factory;
 

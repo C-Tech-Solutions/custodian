@@ -8,7 +8,7 @@ using Velopack.Sources;
 
 namespace Custodian.Platform.Windows.Services;
 
-public sealed class AppUpdateService
+internal sealed class AppUpdateService
 {
     private const string RepositoryUrl = "https://github.com/ctech1313/custodian";
     private const string UpdateSourceOverrideVariable = "CUSTODIAN_UPDATE_SOURCE";
@@ -71,6 +71,12 @@ public sealed class AppUpdateService
     }
 
     public void ApplyUpdatesAndRestart(AppUpdateCheckResult update)
+        => ApplyUpdates(update, restart: true);
+
+    public void ApplyUpdatesWithoutRestart(AppUpdateCheckResult update)
+        => ApplyUpdates(update, restart: false);
+
+    private void ApplyUpdates(AppUpdateCheckResult update, bool restart)
     {
         var asset = update.PendingRestartAsset ?? update.UpdateInfo?.TargetFullRelease;
         if (asset is null)
@@ -81,7 +87,7 @@ public sealed class AppUpdateService
         _manager.WaitExitThenApplyUpdates(
             asset,
             silent: true,
-            restart: true,
+            restart: restart,
             Environment.GetCommandLineArgs().Skip(1).ToArray());
     }
 
@@ -166,7 +172,7 @@ public sealed class AppUpdateService
     }
 }
 
-public sealed record AppUpdateCheckResult(
+internal sealed record AppUpdateCheckResult(
     AppUpdateStatus Status,
     UpdateInfo? UpdateInfo = null,
     VelopackAsset? PendingRestartAsset = null)

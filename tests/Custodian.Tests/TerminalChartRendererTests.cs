@@ -7,6 +7,14 @@ namespace Custodian.Tests;
 public sealed class TerminalChartRendererTests
 {
     [Fact]
+    public void RenderHandlesMissingData()
+    {
+        var output = TerminalChartRenderer.Render(null, width: 40);
+
+        Assert.Equal("No chart data.", output);
+    }
+
+    [Fact]
     public void RenderShowsRankedBarsAndSizes()
     {
         var root = new FileSystemEntry

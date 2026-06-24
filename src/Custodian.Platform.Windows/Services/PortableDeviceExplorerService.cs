@@ -7,7 +7,7 @@ using Microsoft.CSharp.RuntimeBinder;
 
 namespace Custodian.Platform.Windows.Services;
 
-public static class PortableDeviceExplorerService
+internal static class PortableDeviceExplorerService
 {
     private const int ShellSpecialFolderMyComputer = 17;
 

@@ -276,9 +276,17 @@ internal static class TuiApplication
         {
             SetStatus("Loading targets...");
             var targets = new List<TargetLine>();
-            foreach (var drive in DriveInfo.GetDrives().OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase))
+            try
             {
-                targets.Add(CreateDriveTargetLine(drive));
+                foreach (var drive in DriveInfo.GetDrives().OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    targets.Add(CreateDriveTargetLine(drive));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Logger.LogWarning(ex, "Unable to enumerate local drives.");
+                SetStatus("Local drives unavailable: " + ex.Message);
             }
 
             try
@@ -713,8 +721,13 @@ internal static class TuiApplication
                 "Cancel") == 0;
         }
 
-        private static bool IsRemotePath(string path)
+        private static bool IsRemotePath(string? path)
         {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
             if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
                 (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsUnc))
             {
@@ -940,9 +953,9 @@ internal static class TuiApplication
                     {
                         await _updates.DownloadUpdatesAsync(result, new Progress<AppUpdateStatus>(status => SetStatus(status.Message)), cts.Token);
                         var pending = await _updates.CheckForUpdatesAsync();
-                        if (MessageBox.Query(_app, "Update", "Update downloaded. Restart Custodian now?", "Restart", "Later") == 0)
+                        if (MessageBox.Query(_app, "Update", "Update downloaded. Install now? The TUI will close; launch it again after the update finishes.", "Install", "Later") == 0)
                         {
-                            _updates.ApplyUpdatesAndRestart(pending);
+                            _updates.ApplyUpdatesWithoutRestart(pending);
                             _app.RequestStop();
                         }
                     }

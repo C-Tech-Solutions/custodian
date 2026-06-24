@@ -10,18 +10,18 @@ using Microsoft.Extensions.Logging;
 
 namespace Custodian.Platform.Windows.Services;
 
-public enum RecycleBinMoveResult
+internal enum RecycleBinMoveResult
 {
     Completed,
     Cancelled
 }
 
-public sealed record RecycleBinOperationResult(int RequestedCount, int ActedOnCount)
+internal sealed record RecycleBinOperationResult(int RequestedCount, int ActedOnCount)
 {
     public int SkippedCount => Math.Max(0, RequestedCount - ActedOnCount);
 }
 
-public static class RecycleBinService
+internal static class RecycleBinService
 {
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(RecycleBinService).FullName!);
 

@@ -17,7 +17,7 @@ using PROPVARIANT = Vanara.PInvoke.Ole32.PROPVARIANT;
 
 namespace Custodian.Platform.Windows.Services;
 
-public sealed class PortableDeviceService
+internal sealed class PortableDeviceService
 {
     private const string PathSeparator = "/";
     private const string LockedDeviceDetail = "Unlock the phone and choose USB File Transfer mode.";
