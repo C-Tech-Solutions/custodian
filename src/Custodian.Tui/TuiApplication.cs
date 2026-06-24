@@ -278,10 +278,7 @@ internal static class TuiApplication
             var targets = new List<TargetLine>();
             try
             {
-                foreach (var drive in DriveInfo.GetDrives().OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase))
-                {
-                    targets.Add(CreateDriveTargetLine(drive));
-                }
+                targets.AddRange(await Task.Run(CreateDriveTargetLines));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {
@@ -325,6 +322,17 @@ internal static class TuiApplication
             });
         }
 
+        private static IReadOnlyList<TargetLine> CreateDriveTargetLines()
+        {
+            var targets = new List<TargetLine>();
+            foreach (var drive in DriveInfo.GetDrives().OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                targets.Add(CreateDriveTargetLine(drive));
+            }
+
+            return targets;
+        }
+
         private static TargetLine CreateDriveTargetLine(DriveInfo drive)
         {
             string detail;
@@ -363,7 +371,7 @@ internal static class TuiApplication
             }
 
             var mode = ParseMode(_scanMode);
-            var cts = StartOperation();
+            var cts = await StartOperationAsync();
             SetStatus($"Scanning {path}...");
             try
             {
@@ -388,7 +396,7 @@ internal static class TuiApplication
             }
             finally
             {
-                EndOperation(cts);
+                await EndOperationAsync(cts);
             }
         }
 
@@ -400,8 +408,8 @@ internal static class TuiApplication
                 return;
             }
 
-            _pathField.Text = target.DisplayPath;
-            var cts = StartOperation();
+            UpdateUi(() => _pathField.Text = target.DisplayPath);
+            var cts = await StartOperationAsync();
             SetStatus($"Scanning phone storage {target.DisplayPath}...");
             try
             {
@@ -423,7 +431,7 @@ internal static class TuiApplication
             }
             finally
             {
-                EndOperation(cts);
+                await EndOperationAsync(cts);
             }
         }
 
@@ -435,14 +443,14 @@ internal static class TuiApplication
                 return;
             }
 
-            var cts = StartOperation();
+            var cts = await StartOperationAsync();
             try
             {
                 SetStatus($"Opening {path}...");
                 var result = await _store.LoadAsync(path, cts.Token);
                 ApplyScan(result, result.Root);
                 RememberScan(result, result.Root, _detailMode, _chartScope);
-                _pathField.Text = path;
+                UpdateUi(() => _pathField.Text = path);
                 SetStatus($"Opened scan: {result.DisplayRootPathOrRoot()}.");
             }
             catch (OperationCanceledException)
@@ -457,7 +465,7 @@ internal static class TuiApplication
             }
             finally
             {
-                EndOperation(cts);
+                await EndOperationAsync(cts);
             }
         }
 
@@ -646,15 +654,15 @@ internal static class TuiApplication
             }
 
             var entry = line.Row.Entry;
-            if (_currentScan?.SourceKind != ScanSourceKind.PortableDevice && !CanUseLocalFileSystemPath(line.Row))
-            {
-                SetStatus("Open is only available for real file and folder rows.");
-                return;
-            }
-
             if (entry.IsDirectory)
             {
                 SelectEntry(entry, pushHistory: true);
+                return;
+            }
+
+            if (_currentScan?.SourceKind != ScanSourceKind.PortableDevice && !CanUseLocalFileSystemPath(line.Row))
+            {
+                SetStatus("Open is only available for existing file rows.");
                 return;
             }
 
@@ -772,7 +780,7 @@ internal static class TuiApplication
                 return;
             }
 
-            if (MessageBox.Query(_app, "Recycle", $"Move '{line.Row.Name}' to the Recycle Bin?", "Move", "Cancel") != 0)
+            if (MessageBox.Query(_app, "Recycle", $"Move '{line.Row.Name}' to the Recycle Bin?{Environment.NewLine}{line.Row.FullPath}", "Move", "Cancel") != 0)
             {
                 return;
             }
@@ -784,7 +792,7 @@ internal static class TuiApplication
                 SetStatus(result == RecycleBinMoveResult.Completed ? "Moved to Recycle Bin." : "Recycle operation cancelled.");
                 if (result == RecycleBinMoveResult.Completed && !string.IsNullOrWhiteSpace(refreshPath))
                 {
-                    _pathField.Text = refreshPath;
+                    await InvokeUiAsync(() => _pathField.Text = refreshPath);
                     await StartScanFromPathAsync(useSelectedTarget: false);
                 }
             }
@@ -805,7 +813,8 @@ internal static class TuiApplication
 
             try
             {
-                return Path.IsPathFullyQualified(row.FullPath);
+                return Path.IsPathFullyQualified(row.FullPath) &&
+                    (File.Exists(row.FullPath) || Directory.Exists(row.FullPath));
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
             {
@@ -836,7 +845,7 @@ internal static class TuiApplication
                 return;
             }
 
-            var cts = StartOperation();
+            var cts = await StartOperationAsync();
             try
             {
                 var progress = new Progress<PortableCopyProgress>(p =>
@@ -856,22 +865,25 @@ internal static class TuiApplication
             }
             finally
             {
-                EndOperation(cts);
+                await EndOperationAsync(cts);
             }
         }
 
         private async Task ShowRecycleBinAsync()
         {
-            _recycleView = true;
-            _detailList.Visible = false;
-            _recycleList.Visible = true;
+            await InvokeUiAsync(() =>
+            {
+                _recycleView = true;
+                _detailList.Visible = false;
+                _recycleList.Visible = true;
+            });
             SetStatus("Loading Recycle Bin...");
 
             try
             {
                 var entries = await RecycleBinService.GetItemsAsync();
                 var usage = await RecycleBinService.GetUsageAsync();
-                if (!_recycleView)
+                if (!await QueryUiAsync(() => _recycleView))
                 {
                     return;
                 }
@@ -947,24 +959,24 @@ internal static class TuiApplication
                 SetStatus(result.Status.Message);
                 if (result.Status.Kind == AppUpdateStatusKind.ReadyToRestart)
                 {
-                    PromptInstallUpdate(result, "Update ready. Install now? The TUI will close; launch it again after the update finishes.");
+                    await PromptInstallUpdateAsync(result, "Update ready. Install now? The TUI will close; launch it again after the update finishes.");
                     return;
                 }
 
                 if (result.Status.Kind == AppUpdateStatusKind.Available &&
-                    MessageBox.Query(_app, "Update", result.Status.Message + Environment.NewLine + "Download now?", "Download", "Cancel") == 0)
+                    await ShowQueryAsync("Update", result.Status.Message + Environment.NewLine + "Download now?", "Download", "Cancel") == 0)
                 {
-                    if (_activeOperation is not null)
+                    if (await QueryUiAsync(() => _activeOperation is not null))
                     {
                         SetStatus("Finish or stop the active operation before downloading updates.");
                         return;
                     }
 
-                    var cts = StartOperation();
+                    var cts = await StartOperationAsync(cancelExisting: false);
                     try
                     {
                         await _updates.DownloadUpdatesAsync(result, new Progress<AppUpdateStatus>(status => SetStatus(status.Message)), cts.Token);
-                        PromptInstallUpdate(result, "Update downloaded. Install now? The TUI will close; launch it again after the update finishes.");
+                        await PromptInstallUpdateAsync(result, "Update downloaded. Install now? The TUI will close; launch it again after the update finishes.");
                     }
                     catch (OperationCanceledException)
                     {
@@ -972,7 +984,7 @@ internal static class TuiApplication
                     }
                     finally
                     {
-                        EndOperation(cts);
+                        await EndOperationAsync(cts);
                     }
                 }
             }
@@ -987,16 +999,19 @@ internal static class TuiApplication
             }
         }
 
-        private void PromptInstallUpdate(AppUpdateCheckResult update, string message)
+        private async Task PromptInstallUpdateAsync(AppUpdateCheckResult update, string message)
         {
-            if (MessageBox.Query(_app, "Update", message, "Install", "Later") != 0)
+            if (await ShowQueryAsync("Update", message, "Install", "Later") != 0)
             {
                 SetStatus(update.Status.Message);
                 return;
             }
 
-            _updates.ApplyUpdatesWithoutRestart(update);
-            _app.RequestStop();
+            await InvokeUiAsync(() =>
+            {
+                _updates.ApplyUpdatesWithoutRestart(update);
+                _app.RequestStop();
+            });
         }
 
         private void ToggleAdminLaunch()
@@ -1177,42 +1192,47 @@ internal static class TuiApplication
                 ? _recycleRows[index]
                 : null;
 
-        private CancellationTokenSource StartOperation()
+        private async Task<CancellationTokenSource> StartOperationAsync(bool cancelExisting = true)
         {
-            StopActiveOperation();
             var cts = new CancellationTokenSource();
-            _activeOperation = cts;
-            UpdateUi(() =>
+            await InvokeUiAsync(() =>
             {
+                if (cancelExisting)
+                {
+                    _activeOperation?.Cancel();
+                }
+
+                _activeOperation = cts;
                 _scanButton.Enabled = false;
                 _stopButton.Enabled = true;
             });
+
             return cts;
         }
 
         private void StopActiveOperation()
         {
-            _activeOperation?.Cancel();
+            UpdateUi(() => _activeOperation?.Cancel());
         }
 
-        private void EndOperation(CancellationTokenSource cts)
+        private Task EndOperationAsync(CancellationTokenSource cts)
         {
-            var endedCurrent = ReferenceEquals(_activeOperation, cts);
-            if (ReferenceEquals(_activeOperation, cts))
+            return InvokeUiAsync(() =>
             {
-                _activeOperation = null;
-            }
+                var endedCurrent = ReferenceEquals(_activeOperation, cts);
+                if (endedCurrent)
+                {
+                    _activeOperation = null;
+                }
 
-            cts.Dispose();
-            if (endedCurrent || _activeOperation is null)
-            {
-                UpdateUi(() =>
+                cts.Dispose();
+                if (endedCurrent || _activeOperation is null)
                 {
                     _scanButton.Enabled = true;
                     _stopButton.Enabled = false;
                     _progressLabel.Text = string.Empty;
-                });
-            }
+                }
+            });
         }
 
         private void ReportProgress(ScanProgress progress)
@@ -1235,6 +1255,34 @@ internal static class TuiApplication
             _app.Invoke(action);
         }
 
+        private Task InvokeUiAsync(Action action)
+            => QueryUiAsync(() =>
+            {
+                action();
+                return true;
+            });
+
+        private Task<T> QueryUiAsync<T>(Func<T> query)
+        {
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            UpdateUi(() =>
+            {
+                try
+                {
+                    completion.TrySetResult(query());
+                }
+                catch (Exception ex)
+                {
+                    completion.TrySetException(ex);
+                }
+            });
+
+            return completion.Task;
+        }
+
+        private Task<int?> ShowQueryAsync(string title, string message, params string[] buttons)
+            => QueryUiAsync(() => MessageBox.Query(_app, title, message, buttons));
+
         private void RememberCurrentState()
         {
             if (_currentScan is not null && _selectedEntry is not null)
@@ -1245,25 +1293,28 @@ internal static class TuiApplication
 
         private void RememberScan(ScanResult result, FileSystemEntry selected, DetailMode detailMode, ChartScope chartScope)
         {
-            var key = ScanCacheKey(result);
-            if (_sessionScanCache.ContainsKey(key))
+            UpdateUi(() =>
             {
-                _sessionScanCacheOrder.Remove(key);
-            }
-
-            _sessionScanCache[key] = new CachedScan(result, selected, detailMode, chartScope);
-            _sessionScanCacheOrder.AddFirst(key);
-            while (_sessionScanCacheOrder.Count > MaxSessionScanCacheEntries)
-            {
-                var last = _sessionScanCacheOrder.Last?.Value;
-                if (last is null)
+                var key = ScanCacheKey(result);
+                if (_sessionScanCache.ContainsKey(key))
                 {
-                    break;
+                    _sessionScanCacheOrder.Remove(key);
                 }
 
-                _sessionScanCache.Remove(last);
-                _sessionScanCacheOrder.RemoveLast();
-            }
+                _sessionScanCache[key] = new CachedScan(result, selected, detailMode, chartScope);
+                _sessionScanCacheOrder.AddFirst(key);
+                while (_sessionScanCacheOrder.Count > MaxSessionScanCacheEntries)
+                {
+                    var last = _sessionScanCacheOrder.Last?.Value;
+                    if (last is null)
+                    {
+                        break;
+                    }
+
+                    _sessionScanCache.Remove(last);
+                    _sessionScanCacheOrder.RemoveLast();
+                }
+            });
         }
 
         private static string ScanCacheKey(ScanResult result)
