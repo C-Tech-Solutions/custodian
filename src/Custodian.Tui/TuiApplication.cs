@@ -8,7 +8,9 @@ using Custodian.Core.Presentation;
 using Custodian.Core.Scanning;
 using Custodian.Core.Storage;
 using Custodian.Core.Updates;
+using Custodian.Platform.Windows.Logging;
 using Custodian.Platform.Windows.Services;
+using Microsoft.Extensions.Logging;
 using Terminal.Gui.App;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -30,6 +32,7 @@ internal static class TuiApplication
     private sealed class MainView : Window
     {
         private const int MaxSessionScanCacheEntries = 8;
+        private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainView).FullName!);
         private readonly DiskScanner _scanner = new();
         private readonly PortableDeviceService _portableDevices = new();
         private readonly ScanStore _store = new();
@@ -67,6 +70,7 @@ internal static class TuiApplication
         private string _scanMode = "auto";
         private bool _collectAllocatedSize;
         private bool _recycleView;
+        private bool _suppressTargetSelection;
 
         public MainView(TuiLaunchOptions options, IApplication app)
         {
@@ -106,7 +110,7 @@ internal static class TuiApplication
             _detailModeButton = CommandButton("View: Contents", Pos.Right(_allocatedButton) + 1, 2, ToggleDetailMode);
             _chartScopeButton = CommandButton("Chart: Selected", Pos.Right(_detailModeButton) + 1, 2, ToggleChartScope);
 
-            _scanButton = CommandButton("Scan", 0, 4, () => _ = StartScanFromPathAsync(autoStart: true));
+            _scanButton = CommandButton("Scan", 0, 4, () => _ = StartScanFromPathAsync(useSelectedTarget: true));
             _stopButton = CommandButton("Stop", Pos.Right(_scanButton) + 1, 4, StopActiveOperation);
             var openButton = CommandButton("Open", Pos.Right(_stopButton) + 1, 4, () => _ = OpenScanAsync(PathText()));
             var saveButton = CommandButton("Save", Pos.Right(openButton) + 1, 4, () => _ = SaveScanAsync());
@@ -133,6 +137,15 @@ internal static class TuiApplication
                 Width = Dim.Percent(24),
                 Height = Dim.Fill(3)
             };
+            _targetList.ValueChanged += (_, _) =>
+            {
+                if (!_suppressTargetSelection)
+                {
+                    SelectTarget();
+                }
+            };
+            _targetList.Accepting += (_, _) => SelectTarget();
+
             _detailList = new ListView
             {
                 X = Pos.Right(_targetList) + 1,
@@ -140,6 +153,8 @@ internal static class TuiApplication
                 Width = Dim.Percent(48),
                 Height = Dim.Fill(3)
             };
+            _detailList.Accepting += (_, _) => _ = OpenOrDrillSelectedAsync();
+
             _recycleList = new ListView
             {
                 X = Pos.Right(_targetList) + 1,
@@ -148,6 +163,7 @@ internal static class TuiApplication
                 Height = Dim.Fill(3),
                 Visible = false
             };
+            _recycleList.Accepting += (_, _) => _ = RestoreSelectedRecycleEntryAsync();
             _summaryText = new TextView
             {
                 X = Pos.Right(_detailList) + 1,
@@ -247,7 +263,7 @@ internal static class TuiApplication
 
             if (_options.AutoScan && !string.IsNullOrWhiteSpace(_options.TargetPath))
             {
-                await StartScanFromPathAsync(autoStart: true);
+                await StartScanFromPathAsync(useSelectedTarget: false);
             }
         }
 
@@ -257,10 +273,7 @@ internal static class TuiApplication
             var targets = new List<TargetLine>();
             foreach (var drive in DriveInfo.GetDrives().OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase))
             {
-                var detail = drive.IsReady
-                    ? $"{drive.VolumeLabel} {SizeFormatter.Format(Math.Max(0, drive.TotalSize - drive.AvailableFreeSpace))} used"
-                    : "not ready";
-                targets.Add(new TargetLine($"{drive.Name,-8} {detail}", drive.Name, null));
+                targets.Add(CreateDriveTargetLine(drive));
             }
 
             try
@@ -273,6 +286,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogWarning(ex, "Unable to enumerate portable-device targets.");
                 SetStatus("Phone targets unavailable: " + ex.Message);
             }
 
@@ -284,26 +298,51 @@ internal static class TuiApplication
                     _targets.Add(target);
                 }
 
-                _targetList.SetSource<TargetLine>(_targets);
+                _suppressTargetSelection = true;
+                try
+                {
+                    _targetList.SetSource<TargetLine>(_targets);
+                }
+                finally
+                {
+                    _suppressTargetSelection = false;
+                }
+
                 SetStatus($"Loaded {_targets.Count:n0} target(s).");
             });
         }
 
-        private async Task StartScanFromPathAsync(bool autoStart)
+        private static TargetLine CreateDriveTargetLine(DriveInfo drive)
         {
-            var selectedTarget = SelectedTarget();
-            if (!autoStart && selectedTarget is not null)
+            string detail;
+            try
             {
-                _pathField.Text = selectedTarget.Path;
+                detail = drive.IsReady
+                    ? $"{drive.VolumeLabel} {SizeFormatter.Format(Math.Max(0, drive.TotalSize - drive.AvailableFreeSpace))} used"
+                    : "not ready";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Logger.LogWarning(ex, "Unable to read drive details for {Drive}.", drive.Name);
+                detail = "unavailable";
             }
 
-            if (selectedTarget?.PortableTarget is { } portableTarget)
+            return new TargetLine($"{drive.Name,-8} {detail}", drive.Name, null);
+        }
+
+        private async Task StartScanFromPathAsync(bool useSelectedTarget)
+        {
+            var selectedTarget = useSelectedTarget ? SelectedTarget() : null;
+            var shouldUseSelectedTarget = selectedTarget is not null &&
+                string.Equals(PathText(), selectedTarget.Path, StringComparison.OrdinalIgnoreCase);
+
+            if (shouldUseSelectedTarget && selectedTarget?.PortableTarget is { } portableTarget)
             {
                 await StartPortableScanAsync(portableTarget);
                 return;
             }
 
-            var path = PathText();
+            var path = shouldUseSelectedTarget && selectedTarget is not null ? selectedTarget.Path : PathText();
             if (string.IsNullOrWhiteSpace(path))
             {
                 SetStatus("Enter a path first.");
@@ -326,10 +365,12 @@ internal static class TuiApplication
             }
             catch (OperationCanceledException)
             {
+                Logger.LogInformation("Scan cancelled.");
                 SetStatus("Scan cancelled.");
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Scan failed for path {Path}.", path);
                 SetStatus("Scan failed: " + ex.Message);
             }
             finally
@@ -359,10 +400,12 @@ internal static class TuiApplication
             }
             catch (OperationCanceledException)
             {
+                Logger.LogInformation("Phone scan cancelled.");
                 SetStatus("Phone scan cancelled.");
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Phone scan failed for target {Target}.", target.DisplayPath);
                 SetStatus("Phone scan failed: " + ex.Message);
             }
             finally
@@ -391,6 +434,7 @@ internal static class TuiApplication
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.LogError(ex, "Open scan failed for {Path}.", path);
                 SetStatus("Open failed: " + ex.Message);
             }
             finally
@@ -415,6 +459,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Save scan failed for {Path}.", path);
                 SetStatus("Save failed: " + ex.Message);
             }
         }
@@ -443,6 +488,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Export failed for {Path}.", path);
                 SetStatus("Export failed: " + ex.Message);
             }
         }
@@ -465,8 +511,6 @@ internal static class TuiApplication
         private void RefreshAll()
         {
             RefreshDetails();
-            RefreshSummary();
-            RefreshChart();
         }
 
         private void RefreshDetails()
@@ -584,6 +628,12 @@ internal static class TuiApplication
             }
 
             var entry = line.Row.Entry;
+            if (_currentScan?.SourceKind != ScanSourceKind.PortableDevice && !CanUseLocalFileSystemPath(line.Row))
+            {
+                SetStatus("Open is only available for real file and folder rows.");
+                return;
+            }
+
             if (entry.IsDirectory)
             {
                 SelectEntry(entry, pushHistory: true);
@@ -610,6 +660,11 @@ internal static class TuiApplication
                 }
 
                 var path = entry.FullPath;
+                if (!ConfirmLaunchIfRemote(path))
+                {
+                    return;
+                }
+
                 if (mode == PortableExplorerOpenMode.Reveal)
                 {
                     Process.Start(new ProcessStartInfo("explorer.exe")
@@ -627,10 +682,51 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogWarning(ex, "Open failed for entry {EntryPath}.", entry.FullPath);
                 SetStatus("Open failed: " + ex.Message);
             }
 
             await Task.CompletedTask;
+        }
+
+        private bool ConfirmLaunchIfRemote(string path)
+        {
+            if (!IsRemotePath(path))
+            {
+                return true;
+            }
+
+            return MessageBox.Query(
+                _app,
+                "Confirm Open",
+                $"This item is on a network or remote location:{Environment.NewLine}{Environment.NewLine}{path}{Environment.NewLine}{Environment.NewLine}Opening it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. Open it anyway?",
+                "Open",
+                "Cancel") == 0;
+        }
+
+        private static bool IsRemotePath(string path)
+        {
+            if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
+                (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsUnc))
+            {
+                return true;
+            }
+
+            try
+            {
+                var root = Path.GetPathRoot(path);
+                if (string.IsNullOrWhiteSpace(root))
+                {
+                    return false;
+                }
+
+                return new DriveInfo(root).DriveType == DriveType.Network;
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Logger.LogWarning(ex, "Unable to classify launch path {Path}; treating it as remote.", path);
+                return true;
+            }
         }
 
         private async Task MoveSelectedToRecycleBinAsync()
@@ -648,20 +744,51 @@ internal static class TuiApplication
                 return;
             }
 
+            if (!CanUseLocalFileSystemPath(line.Row))
+            {
+                SetStatus("Recycle is only available for real file and folder rows.");
+                return;
+            }
+
             if (MessageBox.Query(_app, "Recycle", $"Move '{line.Row.Name}' to the Recycle Bin?", "Move", "Cancel") != 0)
             {
                 return;
             }
 
+            var refreshPath = _currentScan?.RootPath;
             try
             {
                 var result = RecycleBinService.MoveToRecycleBin(line.Row.FullPath, IntPtr.Zero);
                 SetStatus(result == RecycleBinMoveResult.Completed ? "Moved to Recycle Bin." : "Recycle operation cancelled.");
-                await StartScanFromPathAsync(autoStart: true);
+                if (result == RecycleBinMoveResult.Completed && !string.IsNullOrWhiteSpace(refreshPath))
+                {
+                    _pathField.Text = refreshPath;
+                    await StartScanFromPathAsync(useSelectedTarget: false);
+                }
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Recycle failed for {Path}.", line.Row.FullPath);
                 SetStatus("Recycle failed: " + ex.Message);
+            }
+        }
+
+        private static bool CanUseLocalFileSystemPath(DetailRow row)
+        {
+            if (string.Equals(row.Kind, "Extension", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(row.FullPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                return Path.IsPathFullyQualified(row.FullPath);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+            {
+                Logger.LogWarning(ex, "Unable to validate detail row path {Path}.", row.FullPath);
+                return false;
             }
         }
 
@@ -697,6 +824,7 @@ internal static class TuiApplication
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.LogError(ex, "Phone copy failed to destination {Destination}.", destination);
                 SetStatus("Phone copy failed: " + ex.Message);
             }
             finally
@@ -731,6 +859,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Recycle Bin load failed.");
                 SetStatus("Recycle Bin load failed: " + ex.Message);
             }
         }
@@ -757,6 +886,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Recycle Bin restore failed for {Name}.", line.Row.Name);
                 SetStatus("Restore failed: " + ex.Message);
             }
         }
@@ -790,6 +920,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogWarning(ex, "Update check failed.");
                 SetStatus("Update check failed: " + ex.Message);
             }
         }
@@ -804,6 +935,7 @@ internal static class TuiApplication
             }
             catch (Exception ex)
             {
+                Logger.LogError(ex, "Admin launch setting failed.");
                 SetStatus("Admin setting failed: " + ex.Message);
             }
         }
@@ -1062,8 +1194,9 @@ internal static class TuiApplication
             {
                 return ScanPathUtility.NormalizeRoot(path);
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.LogWarning(ex, "Unable to normalize scan cache key for {Path}.", path);
                 return path;
             }
         }
