@@ -207,3 +207,9 @@ After compiling the Inno installer, sign it with:
 ```powershell
 .\scripts\sign-azure-artifact.ps1 -Path .\artifacts\installer\CustodianSetup.exe
 ```
+
+## License
+
+Custodian is released under the [MIT License](LICENSE).
+
+Copyright (c) 2026 C-Tech Solutions LLC.
