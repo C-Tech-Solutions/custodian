@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
@@ -450,7 +451,7 @@ internal static class TuiApplication
                 var result = await _store.LoadAsync(path, cts.Token);
                 ApplyScan(result, result.Root);
                 RememberScan(result, result.Root, _detailMode, _chartScope);
-                UpdateUi(() => _pathField.Text = path);
+                UpdateUi(() => _pathField.Text = result.DisplayRootPathOrRoot());
                 SetStatus($"Opened scan: {result.DisplayRootPathOrRoot()}.");
             }
             catch (OperationCanceledException)
@@ -788,7 +789,7 @@ internal static class TuiApplication
             var refreshPath = _currentScan?.RootPath;
             try
             {
-                var result = RecycleBinService.MoveToRecycleBin(line.Row.FullPath, IntPtr.Zero);
+                var result = RecycleBinService.MoveToRecycleBin(line.Row.FullPath, GetConsoleOwnerHandle());
                 SetStatus(result == RecycleBinMoveResult.Completed ? "Moved to Recycle Bin." : "Recycle operation cancelled.");
                 if (result == RecycleBinMoveResult.Completed && !string.IsNullOrWhiteSpace(refreshPath))
                 {
@@ -1391,8 +1392,13 @@ internal static class TuiApplication
 
         private string AllocatedLabel() => _collectAllocatedSize ? "Allocated: On" : "Allocated: Off";
 
-        private static string Truncate(string text, int length)
+        private static string Truncate(string? text, int length)
         {
+            if (text is null)
+            {
+                return string.Empty;
+            }
+
             if (text.Length <= length)
             {
                 return text;
@@ -1400,6 +1406,27 @@ internal static class TuiApplication
 
             return length <= 3 ? text[..length] : text[..(length - 3)] + "...";
         }
+
+        private static IntPtr GetConsoleOwnerHandle()
+        {
+            try
+            {
+                using var process = Process.GetCurrentProcess();
+                if (process.MainWindowHandle != IntPtr.Zero)
+                {
+                    return process.MainWindowHandle;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+            {
+                Logger.LogWarning(ex, "Unable to get current process main window handle for Recycle Bin ownership.");
+            }
+
+            return GetConsoleWindow();
+        }
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetConsoleWindow();
 
         private sealed record CachedScan(ScanResult Result, FileSystemEntry Selected, DetailMode DetailMode, ChartScope ChartScope);
     }

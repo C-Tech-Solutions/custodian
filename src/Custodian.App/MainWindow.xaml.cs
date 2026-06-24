@@ -2765,7 +2765,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                             scanCached: IsScanCached(drive.RootPath),
                             scanActive: IsScanActive(drive.RootPath))
                         : target;
-                if (!EqualityComparer<TargetRow>.Default.Equals(target, replacement))
+                if (!TargetRowsEquivalent(target, replacement))
                 {
                     TargetRows[i] = replacement;
 
@@ -2789,6 +2789,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _suppressTargetSelection = false;
         }
     }
+
+    private static bool TargetRowsEquivalent(TargetRow left, TargetRow right)
+        => EqualityComparer<TargetRow>.Default.Equals(left, right) &&
+            EqualityComparer<PortableDeviceTarget?>.Default.Equals(left.PortableTarget, right.PortableTarget);
 
     private void SetViewMode(DetailViewMode mode)
     {
