@@ -22,6 +22,7 @@ $publishRoot = Join-Path $repo "artifacts\velopack-publish"
 $appOut = Join-Path $publishRoot "Custodian"
 $output = Join-Path $repo $OutputRoot
 $signScript = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
+$packageIcon = Join-Path $repo "src\Custodian.App\Assets\Custodian.ico"
 
 function Get-NumericVersion {
     param(
@@ -95,6 +96,10 @@ if (!$PreserveExistingReleases -and (Test-Path $output)) {
 New-Item -ItemType Directory -Force -Path $appOut | Out-Null
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
+if (!(Test-Path -LiteralPath $packageIcon -PathType Leaf)) {
+    throw "Velopack package icon was not found at '$packageIcon'."
+}
+
 dotnet tool restore --tool-manifest (Join-Path $repo "dotnet-tools.json")
 
 dotnet publish (Join-Path $repo "src\Custodian.App\Custodian.App.csproj") `
@@ -130,6 +135,7 @@ $vpkArgs = @(
     "--packAuthors", "Custodian",
     "--runtime", $Runtime,
     "--channel", $Channel,
+    "--icon", $packageIcon,
     "--shortcuts", "Desktop,StartMenuRoot",
     "--outputDir", $output
 )
