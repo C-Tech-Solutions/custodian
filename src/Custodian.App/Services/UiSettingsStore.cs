@@ -20,6 +20,7 @@ public sealed class UiSettings
     public string LastPath { get; set; } = string.Empty;
     public bool AutoRelaunchAsAdministrator { get; set; }
     public bool AutoUpdateOnStartup { get; set; } = true;
+    public string? LastSeenWhatsNewVersion { get; set; }
     public List<string> RecentPaths { get; set; } = [];
 }
 

@@ -10,6 +10,8 @@ All notable changes to Custodian are tracked here.
 - Added read-only Android phone storage scanning through Windows Portable Devices / MTP in the desktop app.
 - Added portable-device source metadata to saved scan files while preserving compatibility with existing `.custodian-scan` files.
 - Added phone scan actions to open selected phone folders/files in Explorer and copy selected phone files or folders to the PC.
+- Added Help > What's New? to open release notes for the running app version.
+- Added a one-time first-launch prompt that highlights What's New? after each app version update.
 
 ### Changed
 
