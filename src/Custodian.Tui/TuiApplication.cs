@@ -128,7 +128,11 @@ internal static class TuiApplication
             var recycleButton = CommandButton("Recycle Bin", Pos.Right(targetsButton) + 1, 6, () => _ = ShowRecycleBinAsync());
             var updateButton = CommandButton("Updates", Pos.Right(recycleButton) + 1, 6, () => _ = CheckForUpdatesAsync());
             var adminButton = CommandButton("Admin", Pos.Right(updateButton) + 1, 6, ToggleAdminLaunch);
-            var quitButton = CommandButton("Quit", Pos.Right(adminButton) + 1, 6, _app.RequestStop);
+            var quitButton = CommandButton("Quit", Pos.Right(adminButton) + 1, 6, () =>
+            {
+                StopActiveOperation();
+                _app.RequestStop();
+            });
 
             _targetList = new ListView
             {
@@ -822,7 +826,12 @@ internal static class TuiApplication
                 var result = await _portableDevices.CopyToPcAsync(_currentScan, [line.Row.Entry], destination, progress, cts.Token);
                 SetStatus($"Copied {result.FilesCopied:n0} file(s), skipped {result.FilesSkipped:n0}.");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException)
+            {
+                Logger.LogInformation("Phone copy cancelled.");
+                SetStatus("Phone copy cancelled.");
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex, "Phone copy failed to destination {Destination}.", destination);
                 SetStatus("Phone copy failed: " + ex.Message);
@@ -843,19 +852,22 @@ internal static class TuiApplication
             try
             {
                 var entries = await RecycleBinService.GetItemsAsync();
-                _recycleRows.Clear();
-                foreach (var row in RecycleBinViewProjector.Rows(entries)
-                    .OrderByDescending(row => row.DateDeletedValue)
-                    .Select(row => new RecycleLine(row)))
-                {
-                    _recycleRows.Add(row);
-                }
-
-                _recycleList.SetSource<RecycleLine>(_recycleRows);
                 var usage = await RecycleBinService.GetUsageAsync();
-                _summaryText.Text = $"Recycle Bin{Environment.NewLine}{usage.ItemCount:n0} item(s){Environment.NewLine}{SizeFormatter.Format(usage.SizeBytes)}";
-                _chartText.Text = "Enter on a row restores it. Use Recycle Bin view for destructive cleanup with confirmation in the desktop app.";
-                SetStatus($"Recycle Bin loaded: {_recycleRows.Count:n0} item(s).");
+                UpdateUi(() =>
+                {
+                    _recycleRows.Clear();
+                    foreach (var row in RecycleBinViewProjector.Rows(entries)
+                        .OrderByDescending(row => row.DateDeletedValue)
+                        .Select(row => new RecycleLine(row)))
+                    {
+                        _recycleRows.Add(row);
+                    }
+
+                    _recycleList.SetSource<RecycleLine>(_recycleRows);
+                    _summaryText.Text = $"Recycle Bin{Environment.NewLine}{usage.ItemCount:n0} item(s){Environment.NewLine}{SizeFormatter.Format(usage.SizeBytes)}";
+                    _chartText.Text = "Enter on a row restores it. Use Recycle Bin view for destructive cleanup with confirmation in the desktop app.";
+                    _statusLabel.Text = Truncate($"Recycle Bin loaded: {_recycleRows.Count:n0} item(s).", 120);
+                });
             }
             catch (Exception ex)
             {
@@ -952,10 +964,15 @@ internal static class TuiApplication
             var cacheKey = target.PortableTarget?.TargetId ?? NormalizeCacheKey(target.Path);
             if (_sessionScanCache.TryGetValue(cacheKey, out var cached))
             {
+                _recycleView = false;
+                _recycleList.Visible = false;
+                _detailList.Visible = true;
                 _currentScan = cached.Result;
                 _selectedEntry = cached.Selected;
                 _detailMode = cached.DetailMode;
                 _chartScope = cached.ChartScope;
+                _backStack.Clear();
+                _forwardStack.Clear();
                 RefreshButtonText();
                 RefreshAll();
                 SetStatus("Restored cached scan.");
@@ -1118,18 +1135,22 @@ internal static class TuiApplication
 
         private void EndOperation(CancellationTokenSource cts)
         {
+            var endedCurrent = ReferenceEquals(_activeOperation, cts);
             if (ReferenceEquals(_activeOperation, cts))
             {
                 _activeOperation = null;
             }
 
             cts.Dispose();
-            UpdateUi(() =>
+            if (endedCurrent || _activeOperation is null)
             {
-                _scanButton.Enabled = true;
-                _stopButton.Enabled = false;
-                _progressLabel.Text = string.Empty;
-            });
+                UpdateUi(() =>
+                {
+                    _scanButton.Enabled = true;
+                    _stopButton.Enabled = false;
+                    _progressLabel.Text = string.Empty;
+                });
+            }
         }
 
         private void ReportProgress(ScanProgress progress)
