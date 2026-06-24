@@ -48,6 +48,36 @@ public sealed class ScanExporterTests
         Assert.Contains(",.bin,", text);
     }
 
+    [Theory]
+    [InlineData("=cmd|'/c calc'!A1")]
+    [InlineData("+1+1")]
+    [InlineData("-2+3")]
+    [InlineData("@SUM(1)")]
+    [InlineData("\tleading-tab")]
+    public async Task CsvNeutralizesFormulaTriggersInAttackerControlledNames(string maliciousName)
+    {
+        var root = MakeDirectory(@"C:\", 0);
+        root.Children.Add(new FileSystemEntry
+        {
+            Name = maliciousName,
+            FullPath = "C:\\" + maliciousName,
+            IsDirectory = false,
+            Extension = ".txt",
+            FileCount = 1
+        });
+        var result = Result(root);
+        using var temp = new TempFile(".csv");
+
+        await ScanExporter.ExportCsvAsync(result, temp.Path);
+        var text = await ReadAllTextAsync(temp.Path);
+
+        // The dangerous leading character must be prefixed with ' so spreadsheets treat
+        // it as literal text rather than a formula. The raw value must not appear at the
+        // start of any field (i.e. right after a comma or a wrapping quote).
+        Assert.DoesNotContain("," + maliciousName, text);
+        Assert.Contains("'" + maliciousName[0], text);
+    }
+
     [Fact]
     public async Task CsvWritesUtf8Bom()
     {

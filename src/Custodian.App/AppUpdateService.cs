@@ -1,6 +1,7 @@
 using System.Reflection;
 using Custodian.App.Logging;
 using Custodian.Core.Updates;
+using Microsoft.Extensions.Logging;
 using Velopack;
 using Velopack.Locators;
 using Velopack.Sources;
@@ -98,6 +99,13 @@ internal sealed class AppUpdateService
         var sourceOverride = ReadEnvironmentValue(UpdateSourceOverrideVariable);
         if (sourceOverride is not null)
         {
+            // This override exists for local unsigned-update validation. It redirects the
+            // updater to an arbitrary feed, so record a loud warning: in a normal install it
+            // should never be set, and an unexpected value here is a supply-chain red flag.
+            logger.LogWarning(
+                "Update source overridden via {Variable} to '{Source}'. Updates will be fetched from this location instead of the official GitHub releases. This should only be set for local testing.",
+                UpdateSourceOverrideVariable,
+                sourceOverride);
             return new UpdateManager(sourceOverride, options, logger, locator);
         }
 

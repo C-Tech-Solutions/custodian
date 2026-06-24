@@ -2183,7 +2183,54 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
             return;
         }
-        if (File.Exists(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        if (File.Exists(path) && ConfirmLaunchIfRemote(path))
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+    }
+
+    // A loaded .custodian-scan is untrusted input: its entries' paths are attacker-
+    // controllable, and a crafted file can point an entry at a remote/UNC executable.
+    // Shell-executing such a file would run an attacker-hosted binary, so require explicit
+    // confirmation before opening anything that is not on a local fixed/removable drive.
+    private bool ConfirmLaunchIfRemote(string path)
+    {
+        if (!IsRemotePath(path))
+        {
+            return true;
+        }
+
+        var answer = WpfMessageBox.Show(
+            this,
+            $"This item is on a network or remote location:\n\n{path}\n\nOpening it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. Open it anyway?",
+            "Confirm opening remote item",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return answer == MessageBoxResult.Yes;
+    }
+
+    private static bool IsRemotePath(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            var root = Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(root))
+            {
+                return false;
+            }
+
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            // If the drive cannot be classified, be conservative and treat it as remote.
+            return true;
+        }
     }
 
     private void RevealSelected_Click(object sender, RoutedEventArgs e)

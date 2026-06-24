@@ -17,7 +17,7 @@ public sealed class ScanStore
         // Pooling is disabled so the file handle is released as soon as the connection is
         // disposed. With the default pool the handle lingers, causing the File.Delete above
         // (or an external rename/overwrite) to fail with a sharing violation.
-        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+        await using var connection = CreateConnection(path, SqliteOpenMode.ReadWriteCreate);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(connection, """
@@ -76,7 +76,7 @@ public sealed class ScanStore
 
     public async Task<ScanResult> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
-        await using var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
+        await using var connection = CreateConnection(path, SqliteOpenMode.ReadOnly);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         var metadata = await LoadMetadataAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -177,6 +177,22 @@ public sealed class ScanStore
         return Enum.TryParse<ScanSourceKind>(value, ignoreCase: true, out var sourceKind)
             ? sourceKind
             : ScanSourceKind.FileSystem;
+    }
+
+    // Build the connection through SqliteConnectionStringBuilder rather than string
+    // interpolation: a chosen file path may legally contain ';', which would otherwise be
+    // parsed as extra connection-string keywords (e.g. overriding Mode). The builder quotes
+    // the DataSource so the path is always treated as a literal value.
+    private static SqliteConnection CreateConnection(string path, SqliteOpenMode mode)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = mode,
+            Pooling = false
+        };
+
+        return new SqliteConnection(builder.ConnectionString);
     }
 
     private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)

@@ -44,11 +44,29 @@ public static class ScanExporter
 
     private static string Csv(string value)
     {
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
+        var sanitized = NeutralizeFormula(value);
+        if (sanitized.Contains('"') || sanitized.Contains(',') || sanitized.Contains('\n') || sanitized.Contains('\r'))
         {
-            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+            return "\"" + sanitized.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
         }
 
-        return value;
+        return sanitized;
+    }
+
+    // File names, paths, and attributes come from the scanned volume and are fully
+    // attacker-controllable. A value that begins with a spreadsheet formula trigger
+    // (=, +, -, @, tab, CR) is treated as a live formula by Excel/LibreOffice when the
+    // CSV is opened, enabling DDE/command execution. Prefix such values with a single
+    // quote so they are imported as literal text.
+    private static string NeutralizeFormula(string value)
+    {
+        if (value.Length == 0)
+        {
+            return value;
+        }
+
+        return value[0] is '=' or '+' or '-' or '@' or '\t' or '\r'
+            ? "'" + value
+            : value;
     }
 }

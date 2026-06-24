@@ -169,7 +169,6 @@ internal static class RecycleBinService
                         catch (Exception ex) when (IsShellMetadataException(ex))
                         {
                             Logger.LogWarning(ex, "Skipping an inaccessible Recycle Bin item during enumeration.");
-                            Debug.WriteLine($"Failed to load Recycle Bin item: {ex.Message}");
                         }
                     }
                     finally
