@@ -2178,12 +2178,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var path = SelectedPath();
         if (path is null) return;
+        var isRemotePath = PathClassificationService.IsRemotePath(path);
+        if (!ConfirmLaunchIfRemote(path, isRemotePath))
+        {
+            return;
+        }
+
         if (Directory.Exists(path))
         {
             Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
             return;
         }
-        if (File.Exists(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        if (File.Exists(path))
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+    }
+
+    // A loaded .custodian-scan is untrusted input: its entries' paths are attacker-
+    // controllable, and a crafted file can point an entry at a remote/UNC executable.
+    // Shell-executing such a file would run an attacker-hosted binary, so require explicit
+    // confirmation before opening anything that is not on a local fixed/removable drive.
+    private bool ConfirmLaunchIfRemote(string path, bool isRemotePath)
+    {
+        if (!isRemotePath)
+        {
+            return true;
+        }
+
+        var answer = WpfMessageBox.Show(
+            this,
+            $"This item is on a network or remote location:\n\n{path}\n\nOpening it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. Open it anyway?",
+            "Confirm opening remote item",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return answer == MessageBoxResult.Yes;
     }
 
     private void RevealSelected_Click(object sender, RoutedEventArgs e)
@@ -4002,17 +4031,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var row in rows)
         {
             await writer.WriteLineAsync(string.Join(',',
-                Csv(row.Kind), Csv(row.Name), Csv(row.LogicalSize), Csv(row.AllocatedSize),
-                Csv(row.PercentText), row.FileCount, row.DirectoryCount, Csv(row.FullPath)));
+                CsvFieldFormatter.Format(row.Kind),
+                CsvFieldFormatter.Format(row.Name),
+                CsvFieldFormatter.Format(row.LogicalSize),
+                CsvFieldFormatter.Format(row.AllocatedSize),
+                CsvFieldFormatter.Format(row.PercentText),
+                row.FileCount,
+                row.DirectoryCount,
+                CsvFieldFormatter.Format(row.FullPath)));
         }
-    }
-
-    private static string Csv(string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
-            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-        return value;
     }
 
     private static void ReplaceCollection<T>(BulkObservableCollection<T> collection, IEnumerable<T> items)

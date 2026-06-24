@@ -22,16 +22,16 @@ public static class ScanExporter
             cancellationToken.ThrowIfCancellationRequested();
             var line = string.Join(
                 ',',
-                Csv(entry.FullPath),
-                Csv(entry.Name),
+                CsvFieldFormatter.Format(entry.FullPath),
+                CsvFieldFormatter.Format(entry.Name),
                 entry.IsDirectory ? "Directory" : "File",
                 entry.LogicalSizeBytes,
                 entry.AllocatedSizeBytes,
                 entry.FileCount,
                 entry.DirectoryCount,
-                Csv(entry.Extension),
-                Csv(entry.Attributes),
-                Csv(entry.LastWriteTime?.UtcDateTime.ToString("O") ?? string.Empty));
+                CsvFieldFormatter.Format(entry.Extension),
+                CsvFieldFormatter.Format(entry.Attributes),
+                CsvFieldFormatter.Format(entry.LastWriteTime?.UtcDateTime.ToString("O") ?? string.Empty));
             await writer.WriteLineAsync(line);
         }
     }
@@ -42,13 +42,4 @@ public static class ScanExporter
         await JsonSerializer.SerializeAsync(stream, result, JsonOptions, cancellationToken).ConfigureAwait(false);
     }
 
-    private static string Csv(string value)
-    {
-        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
-        {
-            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
-        }
-
-        return value;
-    }
 }

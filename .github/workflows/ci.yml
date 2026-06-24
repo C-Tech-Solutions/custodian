@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    # WPF (Custodian.App) and the test project target net10.0-windows, so the
+    # build/test must run on Windows.
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        # --locked-mode enforces the committed packages.lock.json files
+        # (RestorePackagesWithLockFile=true) so CI fails on unexpected dependency drift.
+        run: dotnet restore Custodian.slnx --locked-mode
+
+      - name: Build
+        run: dotnet build Custodian.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Custodian.slnx -c Release --no-build
+
+  vulnerability-scan:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Custodian.slnx --locked-mode
+
+      - name: Scan for vulnerable packages
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet list Custodian.slnx package --vulnerable --include-transitive 2>&1 | tee vuln.txt
+          if grep -qiE "has the following vulnerable packages" vuln.txt; then
+            echo "::error::Vulnerable NuGet packages detected. See the log above."
+            exit 1
+          fi
+          echo "No vulnerable packages found."
