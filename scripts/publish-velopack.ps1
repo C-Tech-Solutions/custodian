@@ -22,7 +22,7 @@ $publishRoot = Join-Path $repo "artifacts\velopack-publish"
 $appOut = Join-Path $publishRoot "Custodian"
 $output = Join-Path $repo $OutputRoot
 $signScript = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
-$packageIcon = Join-Path $repo "src\Custodian.App\Assets\Custodian.ico"
+$packageIcon = Join-Path $repo.ProviderPath "src\Custodian.App\Assets\Custodian.ico"
 
 function Get-NumericVersion {
     param(
