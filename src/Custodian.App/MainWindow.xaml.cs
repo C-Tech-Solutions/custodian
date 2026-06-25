@@ -3545,9 +3545,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _suppressTargetSelection = true;
         try
         {
-            if (DriveList.SelectedItem is TargetRow selected && IsCloudFilteredTarget(selected))
+            var driveList = DriveList;
+            if (driveList?.SelectedItem is TargetRow selected && IsCloudFilteredTarget(selected))
             {
-                DriveList.SelectedItem = null;
+                driveList.SelectedItem = null;
             }
 
             for (var i = TargetRows.Count - 1; i >= 0; i--)

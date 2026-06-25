@@ -157,14 +157,14 @@ internal sealed class CloudProviderDiscoveryService
 
         try
         {
-            normalized = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
-            normalized = normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var root = Path.GetPathRoot(normalized);
+            var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
+            var root = Path.GetPathRoot(fullPath);
             if (string.IsNullOrWhiteSpace(root))
             {
                 return false;
             }
 
+            normalized = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             if (string.Equals(normalized, root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
             {
                 normalized = root;

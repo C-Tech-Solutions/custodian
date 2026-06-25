@@ -203,6 +203,31 @@ public sealed class RecursiveScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task CloudProviderScanSkipsHydrationProneNonReparseDirectories()
+    {
+        var offlineDirectory = Path.Combine(_root, "offline-folder");
+        Directory.CreateDirectory(offlineDirectory);
+        await File.WriteAllBytesAsync(Path.Combine(offlineDirectory, "online-only-child.bin"), new byte[10]);
+        var fileSystem = new TestRecursiveScanFileSystem();
+        fileSystem.AttributeOverrides[offlineDirectory] =
+            FileAttributes.Directory |
+            FileAttributes.Offline |
+            (FileAttributes)0x00400000;
+        var provider = new RecursiveScanProvider(fileSystem);
+        var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CloudProvider: metadata),
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.Root.LogicalSizeBytes);
+        Assert.Contains(result.SkippedEntries, entry =>
+            entry.Path == offlineDirectory &&
+            entry.Reason.Contains("cloud placeholder", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ScannerUsesAllocatedSizeProbeForUnpinnedLocalFiles()
     {
         var unpinnedFile = Path.Combine(_root, "unpinned-local.bin");

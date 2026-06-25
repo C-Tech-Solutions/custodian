@@ -75,6 +75,15 @@ public sealed class CloudProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void TryNormalizeRootPreservesDriveRootSeparator()
+    {
+        var normalized = CloudProviderDiscoveryService.TryNormalizeRoot(@"C:\", out var root);
+
+        Assert.True(normalized);
+        Assert.Equal(@"C:\", root);
+    }
+
+    [Fact]
     public void GetTargetsReturnsEmptyWhenEnvironmentIsUnsupported()
     {
         var env = new FakeCloudProviderEnvironment

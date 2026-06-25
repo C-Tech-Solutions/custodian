@@ -121,9 +121,9 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
                     continue;
                 }
 
-                if (ShouldSkipReparseDirectory(childDirectory, options, childAttributes))
+                if (ShouldSkipDirectory(childDirectory, options, childAttributes, out var skipReason))
                 {
-                    skipped.Add(new SkippedEntry(childDirectory.FullName, "Skipped reparse point"));
+                    skipped.Add(new SkippedEntry(childDirectory.FullName, skipReason));
                     continue;
                 }
 
@@ -248,14 +248,33 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         }
     }
 
-    private bool ShouldSkipReparseDirectory(DirectoryInfo directory, ScanOptions options, FileAttributes attributes)
+    private bool ShouldSkipDirectory(DirectoryInfo directory, ScanOptions options, FileAttributes attributes, out string reason)
     {
-        if (options.FollowReparsePoints || !attributes.HasFlag(FileAttributes.ReparsePoint))
+        reason = string.Empty;
+        if (options.FollowReparsePoints)
         {
             return false;
         }
 
-        return options.CloudProvider is null || !_fileSystem.IsCloudFilesReparsePoint(directory);
+        if (attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            if (options.CloudProvider is not null &&
+                _fileSystem.IsCloudFilesReparsePoint(directory))
+            {
+                return false;
+            }
+
+            reason = "Skipped reparse point";
+            return true;
+        }
+
+        if (options.CloudProvider is not null && HasHydrationProneAttributes(attributes))
+        {
+            reason = "Skipped cloud placeholder directory";
+            return true;
+        }
+
+        return false;
     }
 
     private static bool ShouldAvoidAllocatedSizeProbe(FileAttributes attributes)
