@@ -94,7 +94,7 @@ public sealed class MainWindowTargetRepairTests
             "Pixel",
             "Unlock the phone and choose USB File Transfer mode."));
 
-        var index = MainWindow.CloudTargetInsertIndex([recycleBin, drive, portable]);
+        var index = CloudTargetRowService.CloudTargetInsertIndex([recycleBin, drive, portable]);
 
         Assert.Equal(2, index);
     }
@@ -106,7 +106,7 @@ public sealed class MainWindowTargetRepairTests
     [InlineData("", false)]
     public void IsCloudDriveVolumeLabelRecognizesGoogleDrive(string volumeLabel, bool expected)
     {
-        Assert.Equal(expected, MainWindow.IsCloudDriveVolumeLabel(volumeLabel));
+        Assert.Equal(expected, CloudTargetRowService.IsCloudDriveVolumeLabel(volumeLabel));
     }
 
     [Fact]
@@ -120,7 +120,53 @@ public sealed class MainWindowTargetRepairTests
             50,
             IsCloudDrive: true));
 
-        Assert.True(MainWindow.IsCloudFilteredTarget(row));
+        Assert.True(CloudTargetRowService.IsCloudFilteredTarget(row));
+    }
+
+    [Fact]
+    public void CloudTargetRowServiceAddsAndRemovesVisibleCloudRows()
+    {
+        var localDrive = new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50);
+        var googleDrive = new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true);
+        var cloudTarget = new CloudProviderTarget(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive",
+            @"Personal - C:\Users\Me\OneDrive",
+            []);
+        var targetRows = new List<TargetRow>
+        {
+            TargetRow.RecycleBin(),
+            TargetRow.FromDrive(localDrive)
+        };
+        var recentPaths = new List<string>();
+
+        CloudTargetRowService.AddVisibleCloudTargetRows(
+            targetRows,
+            [localDrive, googleDrive],
+            [cloudTarget],
+            _ => false,
+            _ => false,
+            recentPaths.Add);
+
+        Assert.Equal(
+            [TargetKind.RecycleBin, TargetKind.Drive, TargetKind.Drive, TargetKind.CloudProvider],
+            targetRows.Select(row => row.Kind));
+        Assert.Contains(targetRows, row => row.Kind == TargetKind.Drive && row.IsCloudDrive);
+        Assert.Contains(targetRows, row => row.Kind == TargetKind.CloudProvider && row.CloudProviderTarget == cloudTarget);
+        Assert.Equal([@"G:\", @"C:\Users\Me\OneDrive"], recentPaths);
+
+        CloudTargetRowService.RemoveCloudTargetRows(targetRows);
+
+        Assert.Equal([TargetKind.RecycleBin, TargetKind.Drive], targetRows.Select(row => row.Kind));
+        Assert.Equal(@"C:\", targetRows[1].RootPath);
     }
 
     [Fact]

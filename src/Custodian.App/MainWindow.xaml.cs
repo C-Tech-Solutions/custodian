@@ -485,15 +485,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void PathBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (ModeBox.IsEnabled)
+        var text = PathBox.Text?.Trim() ?? string.Empty;
+        if (FindFilesystemTargetForScanText(TargetRows, DriveRows, text) is { } filesystemTarget)
         {
+            SetPortableScanControls(
+                isPortableTarget: false,
+                isCloudProviderTarget: filesystemTarget.Kind == TargetKind.CloudProvider || TextMatchesCloudProviderPath(text));
             return;
         }
 
-        var text = PathBox.Text?.Trim() ?? string.Empty;
-        if (FindFilesystemTargetForScanText(TargetRows, DriveRows, text) is not null)
+        if (TextMatchesCloudProviderPath(text))
         {
-            SetPortableScanControls(isPortableTarget: false);
+            SetPortableScanControls(isPortableTarget: false, isCloudProviderTarget: true);
+            return;
+        }
+
+        if (ModeBox.IsEnabled)
+        {
             return;
         }
 
@@ -746,7 +754,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        SetPortableScanControls(request.PortableTarget is not null);
+        SetPortableScanControls(request.PortableTarget is not null, request.CloudProvider is not null);
 
         var navigationVersion = BeginNavigation();
         var scanKey = request.RootKey;
@@ -971,6 +979,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (dialog.ShowDialog() == WinForms.DialogResult.OK)
         {
             PathBox.Text = dialog.SelectedPath;
+            SetPortableScanControls(
+                isPortableTarget: false,
+                isCloudProviderTarget: _cloudProviders.TryMatchPath(dialog.SelectedPath) is not null);
             AddRecentPath(dialog.SelectedPath);
         }
     }
@@ -1052,7 +1063,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 }
 
                 PathBox.Text = DisplayRootPath(loaded);
-                SetPortableScanControls(loaded.SourceKind == ScanSourceKind.PortableDevice);
+                SetPortableScanControls(loaded.SourceKind == ScanSourceKind.PortableDevice, loaded.CloudProvider is not null);
                 if (loaded.SourceKind == ScanSourceKind.FileSystem)
                 {
                     AddRecentPath(loaded.RootPath);
@@ -1168,7 +1179,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             PathBox.Text = row.RootPath;
-            SetPortableScanControls(isPortableTarget: false);
+            SetPortableScanControls(isPortableTarget: false, isCloudProviderTarget: row.Kind == TargetKind.CloudProvider);
             AddRecentPath(row.RootPath);
 
             if (_activeScan is { } activeScan && IsScanActive(row.RootPath))
@@ -1197,7 +1208,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SelectTargetWithoutNavigation(target);
         PathBox.Text = target.Kind == TargetKind.PortableDevice ? target.DisplayPath : target.RootPath;
-        SetPortableScanControls(target.Kind == TargetKind.PortableDevice);
+        SetPortableScanControls(target.Kind == TargetKind.PortableDevice, target.Kind == TargetKind.CloudProvider);
         await StartScanAsync();
     }
 
@@ -3455,7 +3466,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 }
             }
 
-            AddVisibleCloudTargetRows();
+            if (ShowCloudTargetsBox?.IsChecked != false)
+            {
+                CloudTargetRowService.AddVisibleCloudTargetRows(
+                    TargetRows,
+                    DriveRows,
+                    _cloudTargets,
+                    IsScanCached,
+                    IsScanActive,
+                    AddRecentPath);
+            }
 
             foreach (var target in portableTargets)
             {
@@ -3482,117 +3502,44 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        if (ShouldShowCloudTargets())
+        if (ShowCloudTargetsBox?.IsChecked != false)
         {
-            AddVisibleCloudTargetRows();
+            CloudTargetRowService.AddVisibleCloudTargetRows(
+                TargetRows,
+                DriveRows,
+                _cloudTargets,
+                IsScanCached,
+                IsScanActive,
+                AddRecentPath);
         }
         else
         {
-            RemoveCloudTargetRows();
+            _suppressTargetSelection = true;
+            try
+            {
+                var driveList = DriveList;
+                if (driveList?.SelectedItem is TargetRow selected && CloudTargetRowService.IsCloudFilteredTarget(selected))
+                {
+                    driveList.SelectedItem = null;
+                }
+
+                CloudTargetRowService.RemoveCloudTargetRows(TargetRows);
+            }
+            finally
+            {
+                _suppressTargetSelection = false;
+            }
         }
 
         RefreshEmptyStateTargets();
     }
-
-    private bool ShouldShowCloudTargets()
-        => ShowCloudTargetsBox?.IsChecked != false;
-
-    private void AddVisibleCloudTargetRows()
-    {
-        if (!ShouldShowCloudTargets())
-        {
-            return;
-        }
-
-        var insertIndex = CloudTargetInsertIndex(TargetRows);
-        foreach (var drive in DriveRows.Where(row => row.IsCloudDrive))
-        {
-            if (TargetRows.Any(row =>
-                    row.Kind == TargetKind.Drive &&
-                    string.Equals(row.RootPath, drive.RootPath, StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            TargetRows.Insert(insertIndex, TargetRow.FromDrive(
-                drive,
-                scanCached: IsScanCached(drive.RootPath),
-                scanActive: IsScanActive(drive.RootPath)));
-            insertIndex++;
-            AddRecentPath(drive.RootPath);
-        }
-
-        foreach (var target in _cloudTargets)
-        {
-            if (TargetRows.Any(row =>
-                    row.Kind == TargetKind.CloudProvider &&
-                    string.Equals(row.RootPath, target.RootPath, StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            TargetRows.Insert(insertIndex, TargetRow.FromCloudProvider(
-                target,
-                scanCached: IsScanCached(target.RootPath),
-                scanActive: IsScanActive(target.RootPath)));
-            insertIndex++;
-            AddRecentPath(target.RootPath);
-        }
-    }
-
-    private void RemoveCloudTargetRows()
-    {
-        _suppressTargetSelection = true;
-        try
-        {
-            var driveList = DriveList;
-            if (driveList?.SelectedItem is TargetRow selected && IsCloudFilteredTarget(selected))
-            {
-                driveList.SelectedItem = null;
-            }
-
-            for (var i = TargetRows.Count - 1; i >= 0; i--)
-            {
-                if (IsCloudFilteredTarget(TargetRows[i]))
-                {
-                    TargetRows.RemoveAt(i);
-                }
-            }
-        }
-        finally
-        {
-            _suppressTargetSelection = false;
-        }
-    }
-
-    internal static int CloudTargetInsertIndex(IEnumerable<TargetRow> targetRows)
-    {
-        var insertIndex = 0;
-        var index = 0;
-        foreach (var row in targetRows)
-        {
-            if (row.Kind is TargetKind.RecycleBin or TargetKind.Drive or TargetKind.CloudProvider)
-            {
-                insertIndex = index + 1;
-            }
-
-            index++;
-        }
-
-        return insertIndex;
-    }
-
-    internal static bool IsCloudFilteredTarget(TargetRow row)
-        => row.Kind == TargetKind.CloudProvider ||
-            (row.Kind == TargetKind.Drive && row.IsCloudDrive);
 
     private void RepairLocalVolumeProjectionSelection(
         IReadOnlyList<DriveRow> driveRows,
         string previousPathText,
         TargetRow? previousSelectedTarget)
     {
-        if (previousSelectedTarget?.Kind != TargetKind.PortableDevice &&
-            ModeBox.IsEnabled)
+        if (previousSelectedTarget?.Kind != TargetKind.PortableDevice)
         {
             return;
         }
@@ -3908,7 +3855,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     total <= 0 ? "Not ready" : $"{SizeFormatter.Format(used)} used",
                     total <= 0 ? string.Empty : $"{SizeFormatter.Format(free)} free",
                     percent,
-                    IsCloudDriveVolumeLabel(volumeLabel)));
+                    CloudTargetRowService.IsCloudDriveVolumeLabel(volumeLabel)));
             }
             catch (IOException ex)
             {
@@ -3929,9 +3876,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         return rows;
     }
-
-    internal static bool IsCloudDriveVolumeLabel(string? volumeLabel)
-        => string.Equals(volumeLabel?.Trim(), "Google Drive", StringComparison.OrdinalIgnoreCase);
 
     private void AddRecentPath(string path)
     {
@@ -3957,16 +3901,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ProgressBar.IsIndeterminate = scanning;
     }
 
-    private void SetPortableScanControls(bool isPortableTarget)
+    private bool TextMatchesCloudProviderPath(string text)
     {
-        ModeBox.IsEnabled = !isPortableTarget;
-        AllocatedSizeBox.IsEnabled = !isPortableTarget;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        return _cloudTargets.Any(target => CloudProviderDiscoveryService.IsPathWithinRoot(text, target.RootPath)) ||
+            _cloudProviders.TryMatchPath(text) is not null;
+    }
+
+    private void SetPortableScanControls(bool isPortableTarget, bool isCloudProviderTarget = false)
+    {
+        ModeBox.IsEnabled = !isPortableTarget && !isCloudProviderTarget;
+        AllocatedSizeBox.IsEnabled = !isPortableTarget && !isCloudProviderTarget;
         if (isPortableTarget)
         {
             ModeBox.SelectedIndex = 0;
             AllocatedSizeBox.IsChecked = false;
             ModeBox.ToolTip = "MTP phone scans use portable-device metadata enumeration.";
             AllocatedSizeBox.ToolTip = "Allocated size is not available over MTP.";
+        }
+        else if (isCloudProviderTarget)
+        {
+            ModeBox.SelectedIndex = 1;
+            AllocatedSizeBox.IsChecked = false;
+            ModeBox.ToolTip = "Cloud provider scans use recursive mode to avoid placeholder hydration.";
+            AllocatedSizeBox.ToolTip = "Allocated size is disabled for cloud provider scans.";
         }
         else
         {
