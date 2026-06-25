@@ -385,6 +385,7 @@ internal static class TuiApplication
 
             var mode = ParseMode(_scanMode);
             var cts = await StartOperationAsync();
+            await InvokeUiAsync(ShowDetailView);
             SetStatus($"Scanning {path}...");
             try
             {
@@ -432,6 +433,7 @@ internal static class TuiApplication
 
             UpdateUi(() => _pathField.Text = target.DisplayPath);
             var cts = await StartOperationAsync();
+            await InvokeUiAsync(ShowDetailView);
             SetStatus($"Scanning phone storage {target.DisplayPath}...");
             try
             {
@@ -559,10 +561,7 @@ internal static class TuiApplication
         {
             UpdateUi(() =>
             {
-                CancelRecycleLoad();
-                _recycleView = false;
-                _recycleList.Visible = false;
-                _detailList.Visible = true;
+                ShowDetailView();
                 _currentScan = result;
                 _selectedEntry = selected;
                 _backStack.Clear();
@@ -798,6 +797,12 @@ internal static class TuiApplication
 
         private async Task MoveSelectedToRecycleBinAsync()
         {
+            if (_recycleView)
+            {
+                SetStatus("Select a scan row before using Recycle.");
+                return;
+            }
+
             if (_currentScan?.SourceKind == ScanSourceKind.PortableDevice)
             {
                 SetStatus("Phone entries are read-only; delete is blocked.");
@@ -1108,10 +1113,7 @@ internal static class TuiApplication
             var cacheKey = target.PortableTarget?.TargetId ?? NormalizeCacheKey(target.Path);
             if (_sessionScanCache.TryGetValue(cacheKey, out var cached))
             {
-                CancelRecycleLoad();
-                _recycleView = false;
-                _recycleList.Visible = false;
-                _detailList.Visible = true;
+                ShowDetailView();
                 _currentScan = cached.Result;
                 _selectedEntry = cached.Selected;
                 _detailMode = cached.DetailMode;
@@ -1126,6 +1128,14 @@ internal static class TuiApplication
             {
                 SetStatus("Target selected. Press Scan to analyze.");
             }
+        }
+
+        private void ShowDetailView()
+        {
+            CancelRecycleLoad();
+            _recycleView = false;
+            _recycleList.Visible = false;
+            _detailList.Visible = true;
         }
 
         private void SelectEntry(FileSystemEntry entry, bool pushHistory)
