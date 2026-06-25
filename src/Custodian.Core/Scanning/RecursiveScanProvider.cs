@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Custodian.Core.Analysis;
@@ -363,18 +364,25 @@ internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
             return false;
         }
 
-        var buffer = new byte[16 * 1024];
-        return DeviceIoControl(
-                handle,
-                FsctlGetReparsePoint,
-                IntPtr.Zero,
-                0,
-                buffer,
-                buffer.Length,
-                out var bytesReturned,
-                IntPtr.Zero) &&
-            bytesReturned >= sizeof(uint) &&
-            IsCloudFilesReparseTag(BitConverter.ToUInt32(buffer, 0));
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            return DeviceIoControl(
+                    handle,
+                    FsctlGetReparsePoint,
+                    IntPtr.Zero,
+                    0,
+                    buffer,
+                    buffer.Length,
+                    out var bytesReturned,
+                    IntPtr.Zero) &&
+                bytesReturned >= sizeof(uint) &&
+                IsCloudFilesReparseTag(BitConverter.ToUInt32(buffer, 0));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     public DateTimeOffset GetLastWriteTimeUtc(FileSystemInfo info)
