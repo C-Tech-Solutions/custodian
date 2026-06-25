@@ -1028,16 +1028,17 @@ internal static class TuiApplication
             {
                 var result = await _updates.CheckForUpdatesAsync();
                 SetStatus(result.Status.Message);
-                if (result.Status.Kind == AppUpdateStatusKind.ReadyToRestart)
+                if ((result.Status.Kind == AppUpdateStatusKind.ReadyToRestart ||
+                    result.Status.Kind == AppUpdateStatusKind.Available) &&
+                    await QueryUiAsync(() => _activeOperation is not null))
                 {
-                    await PromptInstallUpdateAsync(result, "Update ready. Install now? The TUI will close; launch it again after the update finishes.");
+                    SetStatus("Finish or stop the active operation before applying updates.");
                     return;
                 }
 
-                if (result.Status.Kind == AppUpdateStatusKind.Available &&
-                    await QueryUiAsync(() => _activeOperation is not null))
+                if (result.Status.Kind == AppUpdateStatusKind.ReadyToRestart)
                 {
-                    SetStatus("Finish or stop the active operation before downloading updates.");
+                    await PromptInstallUpdateAsync(result, "Update ready. Install now? The TUI will close; launch it again after the update finishes.");
                     return;
                 }
 
