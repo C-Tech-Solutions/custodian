@@ -15,6 +15,11 @@ public sealed class DiskScanner
         var normalizedOptions = options with { RootPath = ScanPathUtility.NormalizeRoot(options.RootPath) };
         ValidateRoot(normalizedOptions.RootPath);
 
+        if (normalizedOptions.CloudProvider is not null)
+        {
+            return await _recursive.ScanAsync(normalizedOptions with { Mode = ScanMode.Recursive }, progress, cancellationToken).ConfigureAwait(false);
+        }
+
         if (normalizedOptions.Mode is ScanMode.Mft)
         {
             return await _mft.ScanAsync(normalizedOptions, progress, cancellationToken).ConfigureAwait(false);

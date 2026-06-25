@@ -20,9 +20,14 @@ internal enum ChartScope
     Extensions
 }
 
-internal sealed record TargetLine(string Label, string Path, PortableDeviceTarget? PortableTarget)
+internal sealed record TargetLine(
+    string Label,
+    string Path,
+    PortableDeviceTarget? PortableTarget,
+    CloudProviderTarget? CloudProviderTarget = null)
 {
     public bool IsPortable => PortableTarget is not null;
+    public bool IsCloudProvider => CloudProviderTarget is not null;
     public override string ToString() => Label;
 }
 

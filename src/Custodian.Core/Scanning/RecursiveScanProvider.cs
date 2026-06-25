@@ -1,6 +1,9 @@
+using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Custodian.Core.Analysis;
 using Custodian.Core.Model;
+using Microsoft.Win32.SafeHandles;
 
 namespace Custodian.Core.Scanning;
 
@@ -69,6 +72,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             SourceKind = ScanSourceKind.FileSystem,
             SourceId = root.FullPath,
             DisplayRootPath = root.FullPath,
+            CloudProvider = options.CloudProvider,
             Engine = Name,
             StartedAt = started,
             CompletedAt = DateTimeOffset.UtcNow,
@@ -118,9 +122,9 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
                     continue;
                 }
 
-                if (!options.FollowReparsePoints && childAttributes.HasFlag(FileAttributes.ReparsePoint))
+                if (ShouldSkipDirectory(childDirectory, options, childAttributes, out var skipReason))
                 {
-                    skipped.Add(new SkippedEntry(childDirectory.FullName, "Skipped reparse point"));
+                    skipped.Add(new SkippedEntry(childDirectory.FullName, skipReason));
                     continue;
                 }
 
@@ -245,12 +249,42 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         }
     }
 
-    private static bool ShouldAvoidAllocatedSizeProbe(FileAttributes attributes)
+    private bool ShouldSkipDirectory(DirectoryInfo directory, ScanOptions options, FileAttributes attributes, out string reason)
     {
-        return attributes.HasFlag(FileAttributes.Offline) ||
+        reason = string.Empty;
+        if (options.FollowReparsePoints)
+        {
+            return false;
+        }
+
+        if (attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            if (options.CloudProvider is not null &&
+                _fileSystem.IsCloudFilesReparsePoint(directory))
+            {
+                return false;
+            }
+
+            reason = "Skipped reparse point";
+            return true;
+        }
+
+        if (options.CloudProvider is not null && HasHydrationProneAttributes(attributes))
+        {
+            reason = "Skipped cloud placeholder directory";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ShouldAvoidAllocatedSizeProbe(FileAttributes attributes)
+        => HasHydrationProneAttributes(attributes);
+
+    private static bool HasHydrationProneAttributes(FileAttributes attributes)
+        => attributes.HasFlag(FileAttributes.Offline) ||
             attributes.HasFlag(FileAttributeRecallOnOpen) ||
             attributes.HasFlag(FileAttributeRecallOnDataAccess);
-    }
 
     private static bool IsRecoverableMetadataException(Exception ex)
         => ex is UnauthorizedAccessException or IOException or System.Security.SecurityException;
@@ -273,6 +307,8 @@ internal interface IRecursiveScanFileSystem
 
     FileAttributes GetAttributes(FileSystemInfo info);
 
+    bool IsCloudFilesReparsePoint(DirectoryInfo directory);
+
     DateTimeOffset GetLastWriteTimeUtc(FileSystemInfo info);
 
     long GetLength(FileInfo file);
@@ -282,6 +318,15 @@ internal interface IRecursiveScanFileSystem
 
 internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
 {
+    private const uint FileReadData = 0x00000001;
+    private const uint GenericFileShare = 0x00000001 | 0x00000002 | 0x00000004;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const uint FsctlGetReparsePoint = 0x000900A8;
+    private const uint IoReparseTagCloudMask = 0xFFFF0FFF;
+    private const uint IoReparseTagCloud = 0x9000001A;
+
     public static RecursiveScanFileSystem Instance { get; } = new();
 
     private RecursiveScanFileSystem()
@@ -300,6 +345,54 @@ internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
     public FileAttributes GetAttributes(FileSystemInfo info)
         => info.Attributes;
 
+    public bool IsCloudFilesReparsePoint(DirectoryInfo directory)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var handle = CreateFile(
+                directory.FullName,
+                FileReadData,
+                GenericFileShare,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                return false;
+            }
+
+            var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+            try
+            {
+                return DeviceIoControl(
+                        handle,
+                        FsctlGetReparsePoint,
+                        IntPtr.Zero,
+                        0,
+                        buffer,
+                        buffer.Length,
+                        out var bytesReturned,
+                        IntPtr.Zero) &&
+                    bytesReturned >= sizeof(uint) &&
+                    IsCloudFilesReparseTag(BitConverter.ToUInt32(buffer, 0));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
     public DateTimeOffset GetLastWriteTimeUtc(FileSystemInfo info)
         => info.LastWriteTimeUtc;
 
@@ -308,4 +401,28 @@ internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
 
     public long GetAllocatedSize(string path, long fallbackLength)
         => FileSizeUtilities.GetAllocatedSize(path, fallbackLength);
+
+    private static bool IsCloudFilesReparseTag(uint reparseTag)
+        => (reparseTag & IoReparseTagCloudMask) == IoReparseTagCloud;
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFile(
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        int nInBufferSize,
+        byte[] lpOutBuffer,
+        int nOutBufferSize,
+        out int lpBytesReturned,
+        IntPtr lpOverlapped);
 }

@@ -3,6 +3,10 @@
 - Run a recursive scan against a normal local folder and compare totals against the folder properties dialog.
 - Run Auto mode against a local NTFS drive from an elevated shell and confirm the UI reports `NTFS MFT` or records a clear fallback warning.
 - Run a scan against a UNC path and confirm it completes with the recursive engine.
+- Refresh Targets with OneDrive installed and confirm a OneDrive target appears without requiring sign-in inside Custodian.
+- Toggle the Targets Cloud checkbox off and on and confirm OneDrive and mounted cloud-drive target rows, such as Google Drive, hide and return while normal drives and phone targets remain listed.
+- Scan a small OneDrive folder from the GUI and confirm the engine reports `Recursive`, cancellation remains responsive, save/open works, and CSV/JSON exports include OneDrive provider metadata.
+- In the TUI, refresh targets and confirm the OneDrive target appears, scans with the recursive engine, and exports CSV/JSON with provider metadata.
 - Scan one drive, scan another drive, switch back to the first drive, and confirm the cached scan restores without rescanning.
 - Start scanning one drive, switch to another cached drive, and confirm the running drive keeps a `Scanning` badge until it completes.
 - Click an uncached drive and confirm the empty state shows a Start Scan prompt without starting automatically.

@@ -17,7 +17,7 @@ public sealed class ScanExporterTests
         var lines = await ReadAllLinesAsync(temp.Path);
 
         Assert.Equal(
-            "Path,Name,Type,LogicalSizeBytes,AllocatedSizeBytes,FileCount,DirectoryCount,Extension,Attributes,LastWriteUtc",
+            "Path,Name,Type,LogicalSizeBytes,AllocatedSizeBytes,FileCount,DirectoryCount,Extension,Attributes,LastWriteUtc,CloudProviderId,CloudProviderName,CloudProviderAccountLabel,CloudProviderRootPath",
             lines[0]);
 
         var entryCount = result.Root.Flatten().Count();
@@ -126,7 +126,24 @@ public sealed class ScanExporterTests
         var lines = await ReadAllLinesAsync(temp.Path);
 
         var row = lines.Single(l => l.StartsWith(@"C:\no-timestamp.txt", StringComparison.Ordinal));
-        Assert.EndsWith(",", row); // trailing LastWriteUtc column is empty
+        Assert.Contains(",,", row); // empty LastWriteUtc followed by empty provider fields
+    }
+
+    [Fact]
+    public async Task CsvWritesCloudProviderMetadataOnRows()
+    {
+        var result = SampleResult();
+        result.CloudProvider = new CloudProviderMetadata(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive");
+        using var temp = new TempFile(".csv");
+
+        await ScanExporter.ExportCsvAsync(result, temp.Path);
+        var lines = await ReadAllLinesAsync(temp.Path);
+
+        Assert.EndsWith(@",onedrive,OneDrive,Personal,C:\Users\Me\OneDrive", lines[1]);
     }
 
     [Fact]
@@ -144,6 +161,7 @@ public sealed class ScanExporterTests
 
         Assert.Equal(result.RootPath, root.GetProperty("RootPath").GetString());
         Assert.Equal(result.Engine, root.GetProperty("Engine").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("CloudProvider").ValueKind);
 
         // The whole tree is serialized, including nested children and their fields.
         var writtenPaths = new List<string>();
@@ -159,6 +177,27 @@ public sealed class ScanExporterTests
                 CollectPaths(child, into);
             }
         }
+    }
+
+    [Fact]
+    public async Task JsonWritesCloudProviderMetadata()
+    {
+        var result = SampleResult();
+        result.CloudProvider = new CloudProviderMetadata(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive");
+        using var temp = new TempFile(".json");
+
+        await ScanExporter.ExportJsonAsync(result, temp.Path);
+        using var document = JsonDocument.Parse(await System.IO.File.ReadAllBytesAsync(temp.Path));
+
+        var provider = document.RootElement.GetProperty("CloudProvider");
+        Assert.Equal("onedrive", provider.GetProperty("ProviderId").GetString());
+        Assert.Equal("OneDrive", provider.GetProperty("ProviderName").GetString());
+        Assert.Equal("Personal", provider.GetProperty("AccountLabel").GetString());
+        Assert.Equal(@"C:\Users\Me\OneDrive", provider.GetProperty("RootPath").GetString());
     }
 
     private static async Task<string> ReadAllTextAsync(string path)

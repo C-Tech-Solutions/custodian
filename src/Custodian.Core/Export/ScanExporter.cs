@@ -15,8 +15,9 @@ public static class ScanExporter
     {
         await using var stream = File.Create(path);
         await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        await writer.WriteLineAsync("Path,Name,Type,LogicalSizeBytes,AllocatedSizeBytes,FileCount,DirectoryCount,Extension,Attributes,LastWriteUtc");
+        await writer.WriteLineAsync("Path,Name,Type,LogicalSizeBytes,AllocatedSizeBytes,FileCount,DirectoryCount,Extension,Attributes,LastWriteUtc,CloudProviderId,CloudProviderName,CloudProviderAccountLabel,CloudProviderRootPath");
 
+        var provider = result.CloudProvider;
         foreach (var entry in result.Root.Flatten())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -31,7 +32,11 @@ public static class ScanExporter
                 entry.DirectoryCount,
                 CsvFieldFormatter.Format(entry.Extension),
                 CsvFieldFormatter.Format(entry.Attributes),
-                CsvFieldFormatter.Format(entry.LastWriteTime?.UtcDateTime.ToString("O") ?? string.Empty));
+                CsvFieldFormatter.Format(entry.LastWriteTime?.UtcDateTime.ToString("O") ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.ProviderId ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.ProviderName ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.AccountLabel ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.RootPath ?? string.Empty));
             await writer.WriteLineAsync(line);
         }
     }

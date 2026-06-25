@@ -63,6 +63,149 @@ public sealed class MainWindowTargetRepairTests
         Assert.Equal(@"D:\", match.RootPath);
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\Me\OneDrive")]
+    [InlineData("OneDrive - Personal")]
+    public void FindFilesystemTargetForScanTextResolvesCloudProviderTarget(string text)
+    {
+        var cloudTarget = new CloudProviderTarget(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive",
+            @"Personal - C:\Users\Me\OneDrive",
+            []);
+        var row = TargetRow.FromCloudProvider(cloudTarget);
+
+        var match = MainWindow.FindFilesystemTargetForScanText([row], [], text);
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.CloudProvider, match.Kind);
+        Assert.Same(cloudTarget, match.CloudProviderTarget);
+    }
+
+    [Fact]
+    public void CloudTargetInsertIndexPlacesCloudRowsAfterLocalDrives()
+    {
+        var recycleBin = TargetRow.RecycleBin();
+        var drive = TargetRow.FromDrive(new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50));
+        var portable = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "wpd:phone",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+
+        var index = CloudTargetRowService.CloudTargetInsertIndex([recycleBin, drive, portable]);
+
+        Assert.Equal(2, index);
+    }
+
+    [Theory]
+    [InlineData("Google Drive", true)]
+    [InlineData(" google drive ", true)]
+    [InlineData("Library", false)]
+    [InlineData("", false)]
+    public void IsCloudDriveVolumeLabelRecognizesGoogleDrive(string volumeLabel, bool expected)
+    {
+        Assert.Equal(expected, CloudTargetRowService.IsCloudDriveVolumeLabel(volumeLabel));
+    }
+
+    [Fact]
+    public void IsCloudFilteredTargetIncludesGoogleDriveRows()
+    {
+        var row = TargetRow.FromDrive(new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true));
+
+        Assert.True(CloudTargetRowService.IsCloudFilteredTarget(row));
+    }
+
+    [Fact]
+    public void GoogleDriveTargetRowsCarryCloudMetadata()
+    {
+        var row = TargetRow.FromDrive(new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true));
+
+        Assert.NotNull(row.CloudProvider);
+        Assert.Equal("google-drive", row.CloudProvider.ProviderId);
+        Assert.Equal("Google Drive", row.CloudProvider.ProviderName);
+        Assert.Equal(@"G:\", row.CloudProvider.RootPath);
+    }
+
+    [Fact]
+    public void FindFilesystemTargetForScanTextPreservesGoogleDriveMetadata()
+    {
+        var drive = new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true);
+        var row = TargetRow.FromDrive(drive);
+
+        var match = MainWindow.FindFilesystemTargetForScanText([row], [drive], @"G:\ Google Drive");
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.Drive, match.Kind);
+        Assert.NotNull(match.CloudProvider);
+        Assert.Equal("google-drive", match.CloudProvider.ProviderId);
+    }
+
+    [Fact]
+    public void CloudTargetRowServiceAddsAndRemovesVisibleCloudRows()
+    {
+        var localDrive = new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50);
+        var googleDrive = new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true);
+        var cloudTarget = new CloudProviderTarget(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive",
+            @"Personal - C:\Users\Me\OneDrive",
+            []);
+        var targetRows = new List<TargetRow>
+        {
+            TargetRow.RecycleBin(),
+            TargetRow.FromDrive(localDrive)
+        };
+        var recentPaths = new List<string>();
+
+        CloudTargetRowService.AddVisibleCloudTargetRows(
+            targetRows,
+            [localDrive, googleDrive],
+            [cloudTarget],
+            _ => false,
+            _ => false,
+            recentPaths.Add);
+
+        Assert.Equal(
+            [TargetKind.RecycleBin, TargetKind.Drive, TargetKind.Drive, TargetKind.CloudProvider],
+            targetRows.Select(row => row.Kind));
+        Assert.Contains(targetRows, row => row.Kind == TargetKind.Drive && row.IsCloudDrive);
+        Assert.Contains(targetRows, row => row.Kind == TargetKind.CloudProvider && row.CloudProviderTarget == cloudTarget);
+        Assert.Equal([@"G:\", @"C:\Users\Me\OneDrive"], recentPaths);
+
+        CloudTargetRowService.RemoveCloudTargetRows(targetRows);
+
+        Assert.Equal([TargetKind.RecycleBin, TargetKind.Drive], targetRows.Select(row => row.Kind));
+        Assert.Equal(@"C:\", targetRows[1].RootPath);
+    }
+
     [Fact]
     public void PortableTargetMatchesScanUsesStableTargetIdWhenStorageObjectIdChanges()
     {

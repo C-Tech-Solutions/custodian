@@ -21,6 +21,8 @@ and a CLI for repeatable server or workstation workflows.
   scope while Custodian stays open.
 - **Choose the right scanner** with Auto mode, recursive scanning for folders
   and network shares, and optional NTFS MFT scanning for local NTFS volumes.
+- **Scan OneDrive safely** through provider-aware targets that use local Windows
+  metadata only and avoid intentional Files On-Demand hydration.
 - **Inspect Android phone storage** when Windows exposes an unlocked phone
   through USB File Transfer / MTP, with read-only metadata scans of each
   readable storage root plus safe copy-to-PC actions.
@@ -66,10 +68,13 @@ require jumping between windows.
 
 Custodian is built for local and locked-down environments. Scans run on the
 machine where the app is launched; Custodian does not upload file metadata to a
-cloud service. Android / MTP support is read-only for phone storage, and copy
-operations write only to the PC destination you choose. Opening entries from a
-saved scan prompts before touching network or remote paths, because saved scan
-files can come from untrusted sources.
+cloud service. OneDrive support discovers local sync roots from Windows metadata
+and scans them as local folders; it does not authenticate to OneDrive, call cloud
+APIs, upload data, or intentionally download online-only placeholders. Android /
+MTP support is read-only for phone storage, and copy operations write only to the
+PC destination you choose. Opening entries from a saved scan prompts before
+touching network or remote paths, because saved scan files can come from
+untrusted sources.
 
 ## Download
 
@@ -99,7 +104,8 @@ Release assets include:
 
 ## Desktop Workflow
 
-1. Choose a drive, folder, UNC path, or connected phone storage root.
+1. Choose a drive, folder, OneDrive sync root, UNC path, or connected phone
+   storage root.
 2. Pick Auto, Recursive, or MFT scanning.
 3. Scan and inspect space by folder, file, extension, or chart slice.
 4. Switch to another drive and return to any cached scan without rescanning.
@@ -114,6 +120,14 @@ elevation before future launches instead of starting normally and relaunching.
 Drive targets show whether a scan is currently running or already cached for
 the session. Uncached drives show a Start Scan prompt instead of clearing the
 workspace without direction.
+
+OneDrive roots appear under Targets when Windows exposes a local sync folder,
+including common personal/business account roots and Known Folder Move folders
+under that root. The desktop Targets pane includes a Cloud toggle for hiding or
+showing cloud-provider rows and mounted cloud drives without changing manual
+path scans. OneDrive targets use the recursive scanner even when Auto or MFT is
+selected, and saved scans/exports carry provider metadata so the source remains
+clear later.
 
 Connected Android phones appear under Targets when Windows exposes readable MTP
 storage. If a phone is locked or left in charging-only mode, Custodian shows a

@@ -59,6 +59,10 @@ public sealed class ScanStore
         await InsertMetadataAsync(connection, "portable_storage_object_id", result.PortableStorageObjectId, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "portable_device_name", result.PortableDeviceName, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "portable_storage_name", result.PortableStorageName, cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "cloud_provider_id", result.CloudProvider?.ProviderId ?? string.Empty, cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "cloud_provider_name", result.CloudProvider?.ProviderName ?? string.Empty, cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "cloud_provider_account_label", result.CloudProvider?.AccountLabel ?? string.Empty, cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "cloud_provider_root_path", result.CloudProvider?.RootPath ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "engine", result.Engine, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "started_at", result.StartedAt.ToString("O"), cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "completed_at", result.CompletedAt.ToString("O"), cancellationToken).ConfigureAwait(false);
@@ -152,6 +156,7 @@ public sealed class ScanStore
             PortableStorageObjectId = metadata.GetValueOrDefault("portable_storage_object_id") ?? string.Empty,
             PortableDeviceName = metadata.GetValueOrDefault("portable_device_name") ?? string.Empty,
             PortableStorageName = metadata.GetValueOrDefault("portable_storage_name") ?? string.Empty,
+            CloudProvider = LoadCloudProviderMetadata(metadata),
             Engine = metadata["engine"],
             StartedAt = DateTimeOffset.Parse(metadata["started_at"]),
             CompletedAt = DateTimeOffset.Parse(metadata["completed_at"]),
@@ -177,6 +182,25 @@ public sealed class ScanStore
         return Enum.TryParse<ScanSourceKind>(value, ignoreCase: true, out var sourceKind)
             ? sourceKind
             : ScanSourceKind.FileSystem;
+    }
+
+    private static CloudProviderMetadata? LoadCloudProviderMetadata(IReadOnlyDictionary<string, string> metadata)
+    {
+        var providerId = metadata.GetValueOrDefault("cloud_provider_id") ?? string.Empty;
+        var providerName = metadata.GetValueOrDefault("cloud_provider_name") ?? string.Empty;
+        var rootPath = metadata.GetValueOrDefault("cloud_provider_root_path") ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(providerId) ||
+            string.IsNullOrWhiteSpace(providerName) ||
+            string.IsNullOrWhiteSpace(rootPath))
+        {
+            return null;
+        }
+
+        return new CloudProviderMetadata(
+            providerId,
+            providerName,
+            metadata.GetValueOrDefault("cloud_provider_account_label") ?? string.Empty,
+            rootPath);
     }
 
     // Build the connection through SqliteConnectionStringBuilder rather than string
