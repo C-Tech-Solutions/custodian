@@ -115,6 +115,15 @@ public sealed class CloudProviderDiscoveryServiceTests
         Assert.Equal(@"C:\", root);
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\Me\OneDrive", @"C:\Users\Me\OneDrive", true)]
+    [InlineData(@"C:\Users\Me\OneDrive\Pictures", @"C:\Users\Me\OneDrive", true)]
+    [InlineData(@"C:\Users\Me\OneDrive Backup", @"C:\Users\Me\OneDrive", false)]
+    public void IsNormalizedPathWithinRootMatchesOnlyContainedPaths(string normalizedPath, string normalizedRoot, bool expected)
+    {
+        Assert.Equal(expected, CloudProviderDiscoveryService.IsNormalizedPathWithinRoot(normalizedPath, normalizedRoot));
+    }
+
     [Fact]
     public void GetTargetsReturnsEmptyWhenEnvironmentIsUnsupported()
     {

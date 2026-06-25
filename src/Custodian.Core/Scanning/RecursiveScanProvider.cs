@@ -351,37 +351,44 @@ internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
             return false;
         }
 
-        using var handle = CreateFile(
-            directory.FullName,
-            0,
-            GenericFileShare,
-            IntPtr.Zero,
-            OpenExisting,
-            FileFlagBackupSemantics | FileFlagOpenReparsePoint,
-            IntPtr.Zero);
-        if (handle.IsInvalid)
-        {
-            return false;
-        }
-
-        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
         try
         {
-            return DeviceIoControl(
-                    handle,
-                    FsctlGetReparsePoint,
-                    IntPtr.Zero,
-                    0,
-                    buffer,
-                    buffer.Length,
-                    out var bytesReturned,
-                    IntPtr.Zero) &&
-                bytesReturned >= sizeof(uint) &&
-                IsCloudFilesReparseTag(BitConverter.ToUInt32(buffer, 0));
+            using var handle = CreateFile(
+                directory.FullName,
+                0,
+                GenericFileShare,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                return false;
+            }
+
+            var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+            try
+            {
+                return DeviceIoControl(
+                        handle,
+                        FsctlGetReparsePoint,
+                        IntPtr.Zero,
+                        0,
+                        buffer,
+                        buffer.Length,
+                        out var bytesReturned,
+                        IntPtr.Zero) &&
+                    bytesReturned >= sizeof(uint) &&
+                    IsCloudFilesReparseTag(BitConverter.ToUInt32(buffer, 0));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
-        finally
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            return false;
         }
     }
 

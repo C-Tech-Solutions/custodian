@@ -3904,13 +3904,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private CloudProviderMetadata? TryMatchCloudProviderPath(string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrWhiteSpace(text) ||
+            !CloudProviderDiscoveryService.TryNormalizeRoot(text, out var normalizedPath))
         {
             return null;
         }
 
         var cloudDrive = DriveRows
-            .Where(row => row.IsCloudDrive && CloudProviderDiscoveryService.IsPathWithinRoot(text, row.RootPath))
+            .Where(row => row.IsCloudDrive && CloudProviderDiscoveryService.IsNormalizedPathWithinRoot(normalizedPath, row.RootPath))
             .OrderByDescending(row => row.RootPath.Length)
             .FirstOrDefault();
         if (cloudDrive is not null)
@@ -3919,7 +3920,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var cloudTarget = _cloudTargets
-            .Where(target => CloudProviderDiscoveryService.IsPathWithinRoot(text, target.RootPath))
+            .Where(target => CloudProviderDiscoveryService.IsNormalizedPathWithinRoot(normalizedPath, target.RootPath))
             .OrderByDescending(target => target.RootPath.Length)
             .FirstOrDefault();
         if (cloudTarget is not null)

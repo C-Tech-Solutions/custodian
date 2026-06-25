@@ -100,7 +100,7 @@ internal sealed class CloudProviderDiscoveryService
         }
 
         return GetTargets()
-            .Where(target => IsPathWithinRoot(normalizedPath, target.RootPath))
+            .Where(target => IsNormalizedPathWithinRoot(normalizedPath, target.RootPath))
             .OrderByDescending(target => target.RootPath.Length)
             .FirstOrDefault()
             ?.ToMetadata();
@@ -144,6 +144,11 @@ internal sealed class CloudProviderDiscoveryService
             return false;
         }
 
+        return IsNormalizedPathWithinRoot(normalizedPath, normalizedRoot);
+    }
+
+    internal static bool IsNormalizedPathWithinRoot(string normalizedPath, string normalizedRoot)
+    {
         if (string.Equals(normalizedPath, normalizedRoot, StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -232,15 +237,11 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
 
         foreach (var subkeyName in GetSubKeyNames(accounts))
         {
-            using var account = OpenSubKey(accounts, subkeyName);
-            var rootPath = account?.GetValue("UserFolder") as string;
-            if (string.IsNullOrWhiteSpace(rootPath))
+            var candidate = ReadAccountCandidate(accounts, subkeyName);
+            if (candidate is not null)
             {
-                continue;
+                yield return candidate;
             }
-
-            var displayName = account?.GetValue("DisplayName") as string;
-            yield return new OneDriveRootCandidate(rootPath, BuildAccountLabel(subkeyName, displayName));
         }
     }
 
@@ -294,6 +295,26 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         try
         {
             return key.OpenSubKey(subkeyName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static OneDriveRootCandidate? ReadAccountCandidate(RegistryKey accounts, string subkeyName)
+    {
+        try
+        {
+            using var account = OpenSubKey(accounts, subkeyName);
+            var rootPath = account?.GetValue("UserFolder") as string;
+            if (string.IsNullOrWhiteSpace(rootPath))
+            {
+                return null;
+            }
+
+            var displayName = account?.GetValue("DisplayName") as string;
+            return new OneDriveRootCandidate(rootPath, BuildAccountLabel(subkeyName, displayName));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
