@@ -74,12 +74,28 @@ public sealed class CloudProviderDiscoveryServiceTests
         Assert.Null(sibling);
     }
 
+    [Fact]
+    public void GetTargetsReturnsEmptyWhenEnvironmentIsUnsupported()
+    {
+        var env = new FakeCloudProviderEnvironment
+        {
+            IsSupported = false
+        };
+        env.AccountCandidates.Add(new OneDriveRootCandidate(@"C:\Users\Me\OneDrive", "Personal"));
+        env.ExistingDirectories.Add(@"C:\Users\Me\OneDrive");
+        var service = new CloudProviderDiscoveryService(env);
+
+        Assert.Empty(service.GetTargets());
+        Assert.Null(service.TryMatchPath(@"C:\Users\Me\OneDrive\Pictures\photo.jpg"));
+    }
+
     private sealed class FakeCloudProviderEnvironment : ICloudProviderDiscoveryEnvironment
     {
         public List<OneDriveRootCandidate> AccountCandidates { get; } = [];
         public List<OneDriveRootCandidate> EnvironmentCandidates { get; } = [];
         public Dictionary<string, string> KnownFolders { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> ExistingDirectories { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool IsSupported { get; init; } = true;
         public string? UserProfilePath { get; init; }
 
         public IEnumerable<OneDriveRootCandidate> GetOneDriveAccountCandidates() => AccountCandidates;

@@ -24,6 +24,11 @@ internal sealed class CloudProviderDiscoveryService
 
     public IReadOnlyList<CloudProviderTarget> GetTargets()
     {
+        if (!_environment.IsSupported)
+        {
+            return [];
+        }
+
         var knownFolders = _environment.GetKnownFolderPaths();
         var targets = new Dictionary<string, CloudProviderTarget>(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in GetOneDriveCandidates())
@@ -176,6 +181,7 @@ internal sealed record OneDriveRootCandidate(string RootPath, string AccountLabe
 
 internal interface ICloudProviderDiscoveryEnvironment
 {
+    bool IsSupported { get; }
     IEnumerable<OneDriveRootCandidate> GetOneDriveAccountCandidates();
     IEnumerable<OneDriveRootCandidate> GetOneDriveEnvironmentCandidates();
     IReadOnlyDictionary<string, string> GetKnownFolderPaths();
@@ -190,6 +196,8 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
     private WindowsCloudProviderDiscoveryEnvironment()
     {
     }
+
+    public bool IsSupported => OperatingSystem.IsWindows();
 
     public IEnumerable<OneDriveRootCandidate> GetOneDriveAccountCandidates()
     {
