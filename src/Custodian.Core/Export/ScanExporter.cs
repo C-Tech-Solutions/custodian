@@ -33,10 +33,10 @@ public static class ScanExporter
                 CsvFieldFormatter.Format(entry.Extension),
                 CsvFieldFormatter.Format(entry.Attributes),
                 CsvFieldFormatter.Format(entry.LastWriteTime?.UtcDateTime.ToString("O") ?? string.Empty),
-                CsvFieldFormatter.Format(provider?.ProviderId),
-                CsvFieldFormatter.Format(provider?.ProviderName),
-                CsvFieldFormatter.Format(provider?.AccountLabel),
-                CsvFieldFormatter.Format(provider?.RootPath));
+                CsvFieldFormatter.Format(provider?.ProviderId ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.ProviderName ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.AccountLabel ?? string.Empty),
+                CsvFieldFormatter.Format(provider?.RootPath ?? string.Empty));
             await writer.WriteLineAsync(line);
         }
     }

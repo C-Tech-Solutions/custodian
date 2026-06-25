@@ -318,6 +318,7 @@ internal interface IRecursiveScanFileSystem
 
 internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
 {
+    private const uint FileReadData = 0x00000001;
     private const uint GenericFileShare = 0x00000001 | 0x00000002 | 0x00000004;
     private const uint OpenExisting = 3;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
@@ -355,7 +356,7 @@ internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
         {
             using var handle = CreateFile(
                 directory.FullName,
-                0,
+                FileReadData,
                 GenericFileShare,
                 IntPtr.Zero,
                 OpenExisting,

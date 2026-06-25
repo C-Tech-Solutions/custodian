@@ -116,6 +116,21 @@ public sealed class CloudProviderDiscoveryServiceTests
     }
 
     [Theory]
+    [InlineData(@"\\")]
+    [InlineData(@"\\server")]
+    [InlineData(@"\\server\")]
+    [InlineData("//")]
+    [InlineData("//server")]
+    [InlineData("//server/")]
+    public void TryNormalizeRootRejectsIncompleteUncPaths(string path)
+    {
+        var normalized = CloudProviderDiscoveryService.TryNormalizeRoot(path, out var root);
+
+        Assert.False(normalized);
+        Assert.Equal(string.Empty, root);
+    }
+
+    [Theory]
     [InlineData(@"C:\Users\Me\OneDrive", @"C:\Users\Me\OneDrive", true)]
     [InlineData(@"C:\Users\Me\OneDrive\Pictures", @"C:\Users\Me\OneDrive", true)]
     [InlineData(@"C:\Users\Me\OneDrive Backup", @"C:\Users\Me\OneDrive", false)]

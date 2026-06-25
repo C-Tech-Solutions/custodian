@@ -8,6 +8,7 @@ internal sealed class CloudProviderDiscoveryService
     private const string OneDriveProviderId = "onedrive";
     private const string OneDriveProviderName = "OneDrive";
     private readonly ICloudProviderDiscoveryEnvironment _environment;
+    private readonly object _lock = new();
     private IReadOnlyList<CloudProviderTarget>? _cachedTargets;
 
     public CloudProviderDiscoveryService()
@@ -30,20 +31,23 @@ internal sealed class CloudProviderDiscoveryService
             return [];
         }
 
-        if (!forceRefresh && _cachedTargets is not null)
+        lock (_lock)
         {
-            return _cachedTargets;
-        }
+            if (!forceRefresh && _cachedTargets is not null)
+            {
+                return _cachedTargets;
+            }
 
-        try
-        {
-            var targets = DiscoverTargets();
-            _cachedTargets = targets;
-            return targets;
-        }
-        catch (Exception ex) when (IsRecoverableDiscoveryException(ex))
-        {
-            return _cachedTargets ?? [];
+            try
+            {
+                var targets = DiscoverTargets();
+                _cachedTargets = targets;
+                return targets;
+            }
+            catch (Exception ex) when (IsRecoverableDiscoveryException(ex))
+            {
+                return _cachedTargets ?? [];
+            }
         }
     }
 
@@ -168,9 +172,15 @@ internal sealed class CloudProviderDiscoveryService
             return false;
         }
 
+        var trimmed = path.Trim();
+        if (IsIncompleteUncPath(trimmed))
+        {
+            return false;
+        }
+
         try
         {
-            var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
+            var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(trimmed));
             var root = Path.GetPathRoot(fullPath);
             if (string.IsNullOrWhiteSpace(root))
             {
@@ -190,6 +200,18 @@ internal sealed class CloudProviderDiscoveryService
             normalized = string.Empty;
             return false;
         }
+    }
+
+    private static bool IsIncompleteUncPath(string path)
+    {
+        if (!path.StartsWith(@"\\", StringComparison.Ordinal) &&
+            !path.StartsWith("//", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var separatorIndex = path.IndexOfAny(['\\', '/'], 2);
+        return separatorIndex < 0 || separatorIndex == path.Length - 1;
     }
 }
 

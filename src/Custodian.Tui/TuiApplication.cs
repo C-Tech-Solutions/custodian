@@ -305,7 +305,9 @@ internal static class TuiApplication
             {
                 var cloudTargets = await cloudTargetsTask;
                 targets.AddRange(cloudTargets.Select(target => new TargetLine(
-                    $"Cloud   {target.ProviderName} {target.AccountLabel} - {target.RootPath}",
+                    string.IsNullOrWhiteSpace(target.AccountLabel)
+                        ? $"Cloud   {target.ProviderName} - {target.RootPath}"
+                        : $"Cloud   {target.ProviderName} {target.AccountLabel} - {target.RootPath}",
                     target.RootPath,
                     null,
                     target)));
