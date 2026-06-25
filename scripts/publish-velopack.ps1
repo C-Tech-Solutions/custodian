@@ -124,6 +124,17 @@ dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
     -p:InformationalVersion=$Version `
     -o (Join-Path $appOut "cli")
 
+dotnet publish (Join-Path $repo "src\Custodian.Tui\Custodian.Tui.csproj") `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    -p:PublishSingleFile=false `
+    -p:Version=$Version `
+    -p:AssemblyVersion=$numericVersion `
+    -p:FileVersion=$numericVersion `
+    -p:InformationalVersion=$Version `
+    -o (Join-Path $appOut "tui")
+
 $vpkArgs = @(
     "vpk",
     "pack",

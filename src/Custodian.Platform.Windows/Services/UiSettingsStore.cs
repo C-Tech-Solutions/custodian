@@ -1,11 +1,11 @@
 using System.IO;
 using System.Text.Json;
-using Custodian.App.Logging;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
-public sealed class UiSettings
+internal sealed class UiSettings
 {
     public string Theme { get; set; } = "Dark";
     public double WindowWidth { get; set; } = 1400;
@@ -24,7 +24,7 @@ public sealed class UiSettings
     public List<string> RecentPaths { get; set; } = [];
 }
 
-public static class UiSettingsStore
+internal static class UiSettingsStore
 {
     private static readonly string AppDataDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

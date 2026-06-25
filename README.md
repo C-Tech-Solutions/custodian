@@ -6,8 +6,8 @@
 
 Custodian is a Windows disk usage analyzer for machines where you need fast,
 local inspection without depending on third-party desktop utilities. It ships as
-a self-updating desktop app, a portable desktop app, and a CLI for repeatable
-server or workstation workflows.
+a self-updating desktop app, a portable desktop app, a full-screen terminal UI,
+and a CLI for repeatable server or workstation workflows.
 
 ![Custodian disk scan overview](docs/screenshots/custodian-overview-pie.png)
 
@@ -25,8 +25,8 @@ server or workstation workflows.
   through USB File Transfer / MTP, with read-only metadata scans of each
   readable storage root plus safe copy-to-PC actions.
 - **Run in locked-down environments** with a portable build, a CLI, UNC path
-  support, safe fallbacks when raw NTFS access is unavailable, and an optional
-  always-open-as-administrator launch setting.
+  support, a full-screen TUI, safe fallbacks when raw NTFS access is
+  unavailable, and an optional always-open-as-administrator launch setting.
 - **Review before deleting** with Recycle Bin management, restore, permanent
   delete, empty-bin actions, and confirmation prompts.
 - **Keep results portable** with `.custodian-scan` SQLite save files plus CSV
@@ -80,7 +80,7 @@ https://github.com/ctech1313/custodian/releases/latest
 Release assets include:
 
 - `Custodian.DiskAnalyzer-win-Setup.exe` - installed desktop app with updates.
-- `Custodian.DiskAnalyzer-win-Portable.zip` - portable desktop app and CLI.
+- `Custodian.DiskAnalyzer-win-Portable.zip` - portable desktop app, TUI, and CLI.
 - `Custodian.DiskAnalyzer-<version>-full.nupkg`, `RELEASES`, and
   `releases.win.json` - Velopack update assets for installed clients.
 
@@ -94,8 +94,8 @@ Release assets include:
   folders or files in Explorer when Windows supports it, and copy selected files
   to the PC, but it does not delete, rename, move, or modify files on the phone.
   Allocated-size/MFT data is not available.
-- The CLI can run in more constrained server workflows, including scheduled
-  jobs, recursive scans, and export tasks.
+- The TUI and CLI can run in more constrained server workflows, including
+  terminal sessions, scheduled jobs, recursive scans, and export tasks.
 
 ## Desktop Workflow
 
@@ -129,6 +129,19 @@ custodian scan C:\Data --out data.custodian-scan
 custodian scan \\server\share --export share.csv --silent
 custodian export data.custodian-scan --format json --out data.json
 ```
+
+## TUI Examples
+
+```powershell
+.\tui\Custodian.Tui.exe
+.\tui\Custodian.Tui.exe --scan C:\Data --mode auto
+.\tui\Custodian.Tui.exe --open data.custodian-scan
+```
+
+The TUI provides keyboard/mouse terminal navigation for scans, saved scan files,
+terminal-native charts, Recycle Bin review, Android / MTP scan and copy actions,
+CSV/JSON export, update checks, and elevation settings. It shares the same local
+scan and safety behavior as the desktop app.
 
 ## Build From Source
 
@@ -239,8 +252,9 @@ the installed test build.
 ## Legacy Installer
 
 The Inno Setup script at `installer\Custodian.iss` packages the portable publish
-output and creates Start Menu shortcuts for the GUI and CLI. This path remains
-available for manual or legacy installs, but it is not the auto-update channel.
+output and creates Start Menu shortcuts for the GUI, TUI, and CLI. This path
+remains available for manual or legacy installs, but it is not the auto-update
+channel.
 After compiling the Inno installer, sign it with:
 
 ```powershell

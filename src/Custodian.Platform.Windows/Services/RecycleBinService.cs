@@ -4,11 +4,11 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
-using Custodian.App.Logging;
 using Custodian.Core.Model;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
 internal enum RecycleBinMoveResult
 {

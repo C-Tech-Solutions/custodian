@@ -2,14 +2,14 @@ using System.IO;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Custodian.App.Logging;
+namespace Custodian.Platform.Windows.Logging;
 
 /// <summary>
 /// Application-wide logging composition root. Initialized once in <c>Program.Main</c>.
 /// Until DI is introduced (later phase), this is the single ambient factory the App
 /// layer pulls loggers from. Safe to call before initialization — returns a no-op logger.
 /// </summary>
-public static class AppLogging
+internal static class AppLogging
 {
     private static ILoggerFactory? _factory;
 

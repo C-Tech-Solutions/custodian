@@ -190,15 +190,6 @@
           "Microsoft.Data.Sqlite": "[10.0.0, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.3, )"
         }
-      },
-      "custodian.platform.windows": {
-        "type": "Project",
-        "dependencies": {
-          "Custodian.Core": "[1.0.0, )",
-          "Microsoft.Extensions.Logging": "[10.0.0, )",
-          "Vanara.PInvoke.PortableDeviceApi": "[5.0.5, )",
-          "Velopack": "[0.0.626, )"
-        }
       }
     }
   }

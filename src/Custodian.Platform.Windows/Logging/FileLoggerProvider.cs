@@ -3,14 +3,14 @@ using System.IO;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
-namespace Custodian.App.Logging;
+namespace Custodian.Platform.Windows.Logging;
 
 /// <summary>
 /// Minimal rolling file logger. Writes one line per entry to a daily file under the
 /// configured directory. Designed to be dependency-free (no third-party sink) so it
 /// cannot conflict with the pinned Velopack / .NET runtime versions.
 /// </summary>
-public sealed class FileLoggerProvider : ILoggerProvider
+internal sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _directory;
     private readonly LogLevel _minLevel;

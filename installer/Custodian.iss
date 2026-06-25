@@ -26,6 +26,7 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 [Icons]
 Name: "{group}\Custodian Disk Analyzer"; Filename: "{app}\Custodian.App.exe"
 Name: "{group}\Custodian CLI"; Filename: "{app}\cli\Custodian.Cli.exe"
+Name: "{group}\Custodian TUI"; Filename: "{app}\tui\Custodian.Tui.exe"
 Name: "{autodesktop}\Custodian Disk Analyzer"; Filename: "{app}\Custodian.App.exe"; Tasks: desktopicon
 
 [Tasks]

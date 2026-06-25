@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Custodian.Core\Custodian.Core.csproj" />
+    <ProjectReference Include="..\Custodian.Platform.Windows\Custodian.Platform.Windows.csproj" />
   </ItemGroup>
 
   <ItemGroup>

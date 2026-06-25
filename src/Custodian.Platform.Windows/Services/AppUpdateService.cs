@@ -1,12 +1,12 @@
 using System.Reflection;
-using Custodian.App.Logging;
 using Custodian.Core.Updates;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 using Velopack;
 using Velopack.Locators;
 using Velopack.Sources;
 
-namespace Custodian.App;
+namespace Custodian.Platform.Windows.Services;
 
 internal sealed class AppUpdateService
 {
@@ -71,6 +71,12 @@ internal sealed class AppUpdateService
     }
 
     public void ApplyUpdatesAndRestart(AppUpdateCheckResult update)
+        => ApplyUpdates(update, restart: true);
+
+    public void ApplyUpdatesWithoutRestart(AppUpdateCheckResult update)
+        => ApplyUpdates(update, restart: false);
+
+    private void ApplyUpdates(AppUpdateCheckResult update, bool restart)
     {
         var asset = update.PendingRestartAsset ?? update.UpdateInfo?.TargetFullRelease;
         if (asset is null)
@@ -81,7 +87,7 @@ internal sealed class AppUpdateService
         _manager.WaitExitThenApplyUpdates(
             asset,
             silent: true,
-            restart: true,
+            restart: restart,
             Environment.GetCommandLineArgs().Skip(1).ToArray());
     }
 

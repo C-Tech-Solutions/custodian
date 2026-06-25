@@ -37,6 +37,13 @@ dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
     -p:PublishSingleFile=false `
     -o (Join-Path $appOut "cli")
 
+dotnet publish (Join-Path $repo "src\Custodian.Tui\Custodian.Tui.csproj") `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    -p:PublishSingleFile=false `
+    -o (Join-Path $appOut "tui")
+
 if ($Sign) {
     $signArgs = @{}
     if (![string]::IsNullOrWhiteSpace($AzureSigningMetadataPath)) { $signArgs.MetadataPath = $AzureSigningMetadataPath }

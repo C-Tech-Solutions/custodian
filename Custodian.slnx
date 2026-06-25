@@ -3,6 +3,8 @@
     <Project Path="src/Custodian.App/Custodian.App.csproj" />
     <Project Path="src/Custodian.Cli/Custodian.Cli.csproj" />
     <Project Path="src/Custodian.Core/Custodian.Core.csproj" />
+    <Project Path="src/Custodian.Platform.Windows/Custodian.Platform.Windows.csproj" />
+    <Project Path="src/Custodian.Tui/Custodian.Tui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Custodian.Tests/Custodian.Tests.csproj" />

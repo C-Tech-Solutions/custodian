@@ -5,7 +5,7 @@ using Custodian.Core.Model;
 using Custodian.Core.Portable;
 using Microsoft.CSharp.RuntimeBinder;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
 internal static class PortableDeviceExplorerService
 {

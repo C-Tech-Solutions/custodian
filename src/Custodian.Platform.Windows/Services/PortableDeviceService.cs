@@ -5,17 +5,17 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
-using Custodian.App.Logging;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
 using Custodian.Core.Portable;
 using Custodian.Core.Scanning;
+using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 using Vanara.PInvoke;
 using PROPERTYKEY = Vanara.PInvoke.Ole32.PROPERTYKEY;
 using PROPVARIANT = Vanara.PInvoke.Ole32.PROPVARIANT;
 
-namespace Custodian.App.Services;
+namespace Custodian.Platform.Windows.Services;
 
 internal sealed class PortableDeviceService
 {

@@ -17,8 +17,9 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Windows.Interop;
 using Custodian.App.Controls;
-using Custodian.App.Logging;
 using Custodian.App.Services;
+using Custodian.Platform.Windows.Logging;
+using Custodian.Platform.Windows.Services;
 using Microsoft.Extensions.Logging;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
@@ -2764,7 +2765,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                             scanCached: IsScanCached(drive.RootPath),
                             scanActive: IsScanActive(drive.RootPath))
                         : target;
-                if (!EqualityComparer<TargetRow>.Default.Equals(target, replacement))
+                if (!TargetRowsEquivalent(target, replacement))
                 {
                     TargetRows[i] = replacement;
 
@@ -2788,6 +2789,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _suppressTargetSelection = false;
         }
     }
+
+    private static bool TargetRowsEquivalent(TargetRow left, TargetRow right)
+        => EqualityComparer<TargetRow>.Default.Equals(left, right) &&
+            EqualityComparer<PortableDeviceTarget?>.Default.Equals(left.PortableTarget, right.PortableTarget);
 
     private void SetViewMode(DetailViewMode mode)
     {
@@ -4229,7 +4234,6 @@ public sealed record TargetRow(
     string Label,
     string RootPath,
     string DisplayPath,
-    PortableDeviceTarget? PortableTarget,
     bool IsAvailable,
     string UsedText,
     string DetailText,
@@ -4245,13 +4249,14 @@ public sealed record TargetRow(
 {
     private const string TransparentBrush = "#00000000";
 
+    internal PortableDeviceTarget? PortableTarget { get; init; }
+
     public static TargetRow RecycleBin()
         => new(
             TargetKind.RecycleBin,
             "Recycle Bin",
             string.Empty,
             string.Empty,
-            null,
             true,
             string.Empty,
             "Calculating usage...",
@@ -4271,7 +4276,6 @@ public sealed record TargetRow(
             "Recycle Bin",
             string.Empty,
             string.Empty,
-            null,
             true,
             SizeFormatter.Format(sizeBytes),
             itemCount == 0 ? "Windows Recycle Bin - empty" : $"Windows Recycle Bin - {ItemCountText(itemCount)}",
@@ -4291,7 +4295,6 @@ public sealed record TargetRow(
             "Recycle Bin",
             string.Empty,
             string.Empty,
-            null,
             true,
             "Unavailable",
             "Windows Recycle Bin",
@@ -4311,7 +4314,6 @@ public sealed record TargetRow(
             row.Label,
             row.RootPath,
             row.RootPath,
-            null,
             true,
             row.UsedText,
             row.FreeText,
@@ -4325,7 +4327,7 @@ public sealed record TargetRow(
             scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
             scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed);
 
-    public static TargetRow FromPortable(PortableDeviceTarget target, bool scanCached = false, bool scanActive = false)
+    internal static TargetRow FromPortable(PortableDeviceTarget target, bool scanCached = false, bool scanActive = false)
     {
         var hasCapacity = target.CapacityBytes is > 0;
         var free = Math.Max(0, target.FreeBytes ?? 0);
@@ -4347,7 +4349,6 @@ public sealed record TargetRow(
             label,
             target.TargetId,
             target.DisplayPath,
-            target,
             target.IsAvailable,
             usedText,
             detailText,
@@ -4359,7 +4360,10 @@ public sealed record TargetRow(
             scanActive ? "\uE895" : scanCached ? "\uE930" : string.Empty,
             scanActive ? "Scanning" : scanCached ? "Scanned" : string.Empty,
             scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
-            scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed);
+            scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed)
+        {
+            PortableTarget = target
+        };
     }
 
     private static string ItemCountText(long count)
