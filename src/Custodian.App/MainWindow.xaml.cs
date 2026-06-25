@@ -490,7 +490,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             SetPortableScanControls(
                 isPortableTarget: false,
-                isCloudProviderTarget: filesystemTarget.Kind == TargetKind.CloudProvider || TextMatchesCloudProviderPath(text));
+                isCloudProviderTarget: filesystemTarget.CloudProvider is not null || TextMatchesCloudProviderPath(text));
             return;
         }
 
@@ -901,7 +901,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 filesystemTarget.DisplayPath,
                 filesystemTarget.RootPath,
                 null,
-                filesystemTarget.CloudProviderTarget?.ToMetadata());
+                filesystemTarget.CloudProvider ?? TryMatchCloudProviderPath(text));
         }
 
         if (DriveList.SelectedItem is TargetRow { Kind: TargetKind.PortableDevice, PortableTarget: { } portableTarget } row &&
@@ -932,7 +932,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var scanKey = TryGetScanCacheKey(text, out var normalizedKey)
             ? normalizedKey
             : text;
-        return new PendingScan(scanKey, text, text, null, _cloudProviders.TryMatchPath(text));
+        return new PendingScan(scanKey, text, text, null, TryMatchCloudProviderPath(text));
     }
 
     private PendingScan? CreatePendingScanFromCurrentPortableScan(string text)
@@ -1179,7 +1179,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             PathBox.Text = row.RootPath;
-            SetPortableScanControls(isPortableTarget: false, isCloudProviderTarget: row.Kind == TargetKind.CloudProvider);
+            SetPortableScanControls(isPortableTarget: false, isCloudProviderTarget: row.CloudProvider is not null);
             AddRecentPath(row.RootPath);
 
             if (_activeScan is { } activeScan && IsScanActive(row.RootPath))
@@ -1208,7 +1208,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SelectTargetWithoutNavigation(target);
         PathBox.Text = target.Kind == TargetKind.PortableDevice ? target.DisplayPath : target.RootPath;
-        SetPortableScanControls(target.Kind == TargetKind.PortableDevice, target.Kind == TargetKind.CloudProvider);
+        SetPortableScanControls(target.Kind == TargetKind.PortableDevice, target.CloudProvider is not null);
         await StartScanAsync();
     }
 
@@ -2822,6 +2822,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         => EqualityComparer<TargetRow>.Default.Equals(left, right) &&
             EqualityComparer<PortableDeviceTarget?>.Default.Equals(left.PortableTarget, right.PortableTarget) &&
             EqualityComparer<CloudProviderTarget?>.Default.Equals(left.CloudProviderTarget, right.CloudProviderTarget) &&
+            EqualityComparer<CloudProviderMetadata?>.Default.Equals(left.CloudProvider, right.CloudProvider) &&
             left.IsCloudDrive == right.IsCloudDrive;
 
     private void SetViewMode(DetailViewMode mode)
@@ -3901,16 +3902,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ProgressBar.IsIndeterminate = scanning;
     }
 
-    private bool TextMatchesCloudProviderPath(string text)
+    private CloudProviderMetadata? TryMatchCloudProviderPath(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            return false;
+            return null;
         }
 
-        return _cloudTargets.Any(target => CloudProviderDiscoveryService.IsPathWithinRoot(text, target.RootPath)) ||
-            _cloudProviders.TryMatchPath(text) is not null;
+        var cloudDrive = DriveRows
+            .Where(row => row.IsCloudDrive && CloudProviderDiscoveryService.IsPathWithinRoot(text, row.RootPath))
+            .OrderByDescending(row => row.RootPath.Length)
+            .FirstOrDefault();
+        if (cloudDrive is not null)
+        {
+            return CloudTargetRowService.CloudProviderMetadataForDrive(cloudDrive);
+        }
+
+        var cloudTarget = _cloudTargets
+            .Where(target => CloudProviderDiscoveryService.IsPathWithinRoot(text, target.RootPath))
+            .OrderByDescending(target => target.RootPath.Length)
+            .FirstOrDefault();
+        if (cloudTarget is not null)
+        {
+            return cloudTarget.ToMetadata();
+        }
+
+        return _cloudProviders.TryMatchPath(text);
     }
+
+    private bool TextMatchesCloudProviderPath(string text)
+        => TryMatchCloudProviderPath(text) is not null;
 
     private void SetPortableScanControls(bool isPortableTarget, bool isCloudProviderTarget = false)
     {
@@ -4344,7 +4365,8 @@ public sealed record DriveRow(
     string UsedText,
     string FreeText,
     double UsedPercent,
-    bool IsCloudDrive = false);
+    bool IsCloudDrive = false,
+    CloudProviderMetadata? CloudProvider = null);
 
 public sealed record TargetRow(
     TargetKind Kind,
@@ -4368,6 +4390,7 @@ public sealed record TargetRow(
 
     internal PortableDeviceTarget? PortableTarget { get; init; }
     internal CloudProviderTarget? CloudProviderTarget { get; init; }
+    internal CloudProviderMetadata? CloudProvider { get; init; }
     internal bool IsCloudDrive { get; init; }
 
     public static TargetRow RecycleBin()
@@ -4446,7 +4469,8 @@ public sealed record TargetRow(
             scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
             scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed)
         {
-            IsCloudDrive = row.IsCloudDrive
+            IsCloudDrive = row.IsCloudDrive,
+            CloudProvider = CloudTargetRowService.CloudProviderMetadataForDrive(row)
         };
 
     internal static TargetRow FromCloudProvider(CloudProviderTarget target, bool scanCached = false, bool scanActive = false)
@@ -4470,7 +4494,8 @@ public sealed record TargetRow(
             scanActive ? "#3B82F6" : scanCached ? "#10B981" : TransparentBrush,
             scanActive || scanCached ? Visibility.Visible : Visibility.Collapsed)
         {
-            CloudProviderTarget = target
+            CloudProviderTarget = target,
+            CloudProvider = target.ToMetadata()
         };
 
     internal static TargetRow FromPortable(PortableDeviceTarget target, bool scanCached = false, bool scanActive = false)

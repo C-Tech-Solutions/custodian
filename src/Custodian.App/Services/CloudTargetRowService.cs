@@ -1,3 +1,4 @@
+using Custodian.Core.Model;
 using Custodian.Platform.Windows.Services;
 
 namespace Custodian.App.Services;
@@ -82,4 +83,18 @@ internal static class CloudTargetRowService
 
     internal static bool IsCloudDriveVolumeLabel(string? volumeLabel)
         => string.Equals(volumeLabel?.Trim(), "Google Drive", StringComparison.OrdinalIgnoreCase);
+
+    internal static CloudProviderMetadata? CloudProviderMetadataForDrive(DriveRow row)
+    {
+        if (!row.IsCloudDrive)
+        {
+            return null;
+        }
+
+        return row.CloudProvider ?? new CloudProviderMetadata(
+            "google-drive",
+            "Google Drive",
+            string.Empty,
+            row.RootPath);
+    }
 }

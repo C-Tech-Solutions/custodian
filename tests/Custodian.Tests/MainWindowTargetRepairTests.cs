@@ -124,6 +124,43 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void GoogleDriveTargetRowsCarryCloudMetadata()
+    {
+        var row = TargetRow.FromDrive(new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true));
+
+        Assert.NotNull(row.CloudProvider);
+        Assert.Equal("google-drive", row.CloudProvider.ProviderId);
+        Assert.Equal("Google Drive", row.CloudProvider.ProviderName);
+        Assert.Equal(@"G:\", row.CloudProvider.RootPath);
+    }
+
+    [Fact]
+    public void FindFilesystemTargetForScanTextPreservesGoogleDriveMetadata()
+    {
+        var drive = new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true);
+        var row = TargetRow.FromDrive(drive);
+
+        var match = MainWindow.FindFilesystemTargetForScanText([row], [drive], @"G:\ Google Drive");
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.Drive, match.Kind);
+        Assert.NotNull(match.CloudProvider);
+        Assert.Equal("google-drive", match.CloudProvider.ProviderId);
+    }
+
+    [Fact]
     public void CloudTargetRowServiceAddsAndRemovesVisibleCloudRows()
     {
         var localDrive = new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50);
