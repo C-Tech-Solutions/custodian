@@ -63,6 +63,66 @@ public sealed class MainWindowTargetRepairTests
         Assert.Equal(@"D:\", match.RootPath);
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\Me\OneDrive")]
+    [InlineData("OneDrive - Personal")]
+    public void FindFilesystemTargetForScanTextResolvesCloudProviderTarget(string text)
+    {
+        var cloudTarget = new CloudProviderTarget(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive",
+            @"Personal - C:\Users\Me\OneDrive",
+            []);
+        var row = TargetRow.FromCloudProvider(cloudTarget);
+
+        var match = MainWindow.FindFilesystemTargetForScanText([row], [], text);
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.CloudProvider, match.Kind);
+        Assert.Same(cloudTarget, match.CloudProviderTarget);
+    }
+
+    [Fact]
+    public void CloudTargetInsertIndexPlacesCloudRowsAfterLocalDrives()
+    {
+        var recycleBin = TargetRow.RecycleBin();
+        var drive = TargetRow.FromDrive(new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50));
+        var portable = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "wpd:phone",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+
+        var index = MainWindow.CloudTargetInsertIndex([recycleBin, drive, portable]);
+
+        Assert.Equal(2, index);
+    }
+
+    [Theory]
+    [InlineData("Google Drive", true)]
+    [InlineData(" google drive ", true)]
+    [InlineData("Library", false)]
+    [InlineData("", false)]
+    public void IsCloudDriveVolumeLabelRecognizesGoogleDrive(string volumeLabel, bool expected)
+    {
+        Assert.Equal(expected, MainWindow.IsCloudDriveVolumeLabel(volumeLabel));
+    }
+
+    [Fact]
+    public void IsCloudFilteredTargetIncludesGoogleDriveRows()
+    {
+        var row = TargetRow.FromDrive(new DriveRow(
+            @"G:\ Google Drive",
+            @"G:\",
+            "1 GB used",
+            "2 GB free",
+            50,
+            IsCloudDrive: true));
+
+        Assert.True(MainWindow.IsCloudFilteredTarget(row));
+    }
+
     [Fact]
     public void PortableTargetMatchesScanUsesStableTargetIdWhenStorageObjectIdChanges()
     {

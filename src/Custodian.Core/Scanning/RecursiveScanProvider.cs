@@ -69,6 +69,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             SourceKind = ScanSourceKind.FileSystem,
             SourceId = root.FullPath,
             DisplayRootPath = root.FullPath,
+            CloudProvider = options.CloudProvider,
             Engine = Name,
             StartedAt = started,
             CompletedAt = DateTimeOffset.UtcNow,

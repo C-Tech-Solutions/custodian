@@ -12,6 +12,7 @@ public sealed class ScanResult
     public string PortableStorageObjectId { get; set; } = string.Empty;
     public string PortableDeviceName { get; set; } = string.Empty;
     public string PortableStorageName { get; set; } = string.Empty;
+    public CloudProviderMetadata? CloudProvider { get; set; }
     public string Engine { get; set; } = string.Empty;
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset CompletedAt { get; set; }

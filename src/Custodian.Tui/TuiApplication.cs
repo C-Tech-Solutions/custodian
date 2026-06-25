@@ -36,6 +36,7 @@ internal static class TuiApplication
         private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainView).FullName!);
         private readonly DiskScanner _scanner = new();
         private readonly PortableDeviceService _portableDevices = new();
+        private readonly CloudProviderDiscoveryService _cloudProviders = new();
         private readonly ScanStore _store = new();
         private readonly AppUpdateService _updates = new();
         private readonly IApplication _app;
@@ -287,6 +288,7 @@ internal static class TuiApplication
             SetStatus("Loading targets...");
             var targets = new List<TargetLine>();
             var driveTargetsTask = Task.Run(CreateDriveTargetLines);
+            var cloudTargetsTask = _cloudProviders.GetTargetsAsync();
             var phoneTargetsTask = _portableDevices.GetTargetsAsync();
 
             try
@@ -297,6 +299,21 @@ internal static class TuiApplication
             {
                 Logger.LogWarning(ex, "Unable to enumerate local drives.");
                 SetStatus("Local drives unavailable: " + ex.Message);
+            }
+
+            try
+            {
+                var cloudTargets = await cloudTargetsTask;
+                targets.AddRange(cloudTargets.Select(target => new TargetLine(
+                    $"Cloud   {target.ProviderName} {target.AccountLabel} - {target.RootPath}",
+                    target.RootPath,
+                    null,
+                    target)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Logger.LogWarning(ex, "Unable to enumerate cloud-provider targets.");
+                SetStatus("Cloud targets unavailable: " + ex.Message);
             }
 
             try
@@ -383,6 +400,9 @@ internal static class TuiApplication
                 return;
             }
 
+            var cloudProvider = shouldUseSelectedTarget && selectedTarget?.CloudProviderTarget is { } cloudTarget
+                ? cloudTarget.ToMetadata()
+                : _cloudProviders.TryMatchPath(path);
             var mode = ParseMode(_scanMode);
             var cts = await StartOperationAsync();
             await InvokeUiAsync(ShowDetailView);
@@ -391,7 +411,7 @@ internal static class TuiApplication
             {
                 var progress = new Progress<ScanProgress>(ReportProgress);
                 var result = await _scanner.ScanAsync(
-                    new ScanOptions(path, mode, CollectAllocatedSize: _collectAllocatedSize),
+                    new ScanOptions(path, mode, CollectAllocatedSize: _collectAllocatedSize, CloudProvider: cloudProvider),
                     progress,
                     cts.Token);
                 if (!await IsCurrentOperationAsync(cts))

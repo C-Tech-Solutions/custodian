@@ -270,11 +270,19 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Style="{StaticResource SectionHeader}" Text="TARGETS" Margin="0,2,0,0"/>
-                        <Button Grid.Column="1"
-                                Style="{StaticResource ExplorerNavButton}"
-                                Content="Refresh"
-                                Click="RefreshTargets_Click"
-                                ToolTip="Refresh drives and connected phones"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <CheckBox x:Name="ShowCloudTargetsBox"
+                                      Content="Cloud"
+                                      IsChecked="True"
+                                      Margin="0,0,10,0"
+                                      Checked="ShowCloudTargets_Changed"
+                                      Unchecked="ShowCloudTargets_Changed"
+                                      ToolTip="Show cloud provider targets"/>
+                            <Button Style="{StaticResource ExplorerNavButton}"
+                                    Content="Refresh"
+                                    Click="RefreshTargets_Click"
+                                    ToolTip="Refresh drives, cloud providers, and connected phones"/>
+                        </StackPanel>
                     </Grid>
                     <ListBox x:Name="DriveList" Grid.Row="1"
                              ItemsSource="{Binding TargetRows}"

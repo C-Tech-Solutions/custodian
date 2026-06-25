@@ -5,4 +5,5 @@ public sealed record ScanOptions(
     ScanMode Mode = ScanMode.Auto,
     bool FollowReparsePoints = false,
     bool IncludeHiddenAndSystem = true,
-    bool CollectAllocatedSize = false);
+    bool CollectAllocatedSize = false,
+    CloudProviderMetadata? CloudProvider = null);

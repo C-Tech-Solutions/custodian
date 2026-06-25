@@ -109,6 +109,47 @@ public sealed class RecursiveScannerTests : IDisposable
         Assert.Empty(result.SkippedEntries);
     }
 
+    [Theory]
+    [InlineData((int)FileAttributes.Offline)]
+    [InlineData(0x00040000)]
+    [InlineData(0x00400000)]
+    public async Task ScannerAvoidsAllocatedSizeProbeForHydrationProneAttributes(int attributeValue)
+    {
+        var cloudFile = Path.Combine(_root, $"cloud-{attributeValue:x}.bin");
+        await File.WriteAllBytesAsync(cloudFile, new byte[42]);
+        var fileSystem = new TestRecursiveScanFileSystem
+        {
+            ThrowOnAllocatedSize = true
+        };
+        fileSystem.AttributeOverrides[cloudFile] = FileAttributes.Archive | (FileAttributes)attributeValue;
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CollectAllocatedSize: true),
+            null,
+            CancellationToken.None);
+
+        var entry = Assert.Single(result.Root.Children);
+        Assert.Equal(cloudFile, entry.FullPath);
+        Assert.Equal(42, entry.AllocatedSizeBytes);
+        Assert.Equal(0, fileSystem.AllocatedSizeCalls);
+    }
+
+    [Fact]
+    public async Task CloudProviderScanStampsMetadataAndForcesRecursiveMode()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(_root, "onedrive-file.bin"), new byte[10]);
+        var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
+
+        var result = await new DiskScanner().ScanAsync(
+            new ScanOptions(_root, ScanMode.Mft, CollectAllocatedSize: true, CloudProvider: metadata));
+
+        Assert.Equal("Recursive", result.Engine);
+        Assert.Equal(ScanSourceKind.FileSystem, result.SourceKind);
+        Assert.Equal(metadata, result.CloudProvider);
+        Assert.Equal(10, result.Root.LogicalSizeBytes);
+    }
+
     [Fact]
     public async Task ScannerUsesAllocatedSizeProbeForUnpinnedLocalFiles()
     {

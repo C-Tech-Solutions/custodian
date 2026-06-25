@@ -123,6 +123,28 @@ public sealed class ScanStoreTests
     }
 
     [Fact]
+    public async Task SaveThenLoadPreservesCloudProviderMetadata()
+    {
+        var result = SampleResult();
+        result.CloudProvider = new CloudProviderMetadata(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive");
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+
+        await store.SaveAsync(result, temp.Path);
+        var loaded = await store.LoadAsync(temp.Path);
+
+        Assert.NotNull(loaded.CloudProvider);
+        Assert.Equal("onedrive", loaded.CloudProvider.ProviderId);
+        Assert.Equal("OneDrive", loaded.CloudProvider.ProviderName);
+        Assert.Equal("Personal", loaded.CloudProvider.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\OneDrive", loaded.CloudProvider.RootPath);
+    }
+
+    [Fact]
     public async Task LoadDefaultsSourceMetadataForLegacyScanFiles()
     {
         var result = SampleResult();
@@ -162,6 +184,41 @@ public sealed class ScanStoreTests
         Assert.Equal(string.Empty, loaded.PortableStorageName);
         Assert.Equal(string.Empty, loaded.Root.PortableObjectId);
         Assert.Equal(string.Empty, loaded.Root.Children[0].PortableObjectId);
+        Assert.Null(loaded.CloudProvider);
+    }
+
+    [Fact]
+    public async Task LoadDefaultsCloudProviderMetadataForLegacyScanFiles()
+    {
+        var result = SampleResult();
+        result.CloudProvider = new CloudProviderMetadata(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive");
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+
+        await store.SaveAsync(result, temp.Path);
+        await using (var connection = new SqliteConnection($"Data Source={temp.Path};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM metadata
+                WHERE key IN (
+                    'cloud_provider_id',
+                    'cloud_provider_name',
+                    'cloud_provider_account_label',
+                    'cloud_provider_root_path'
+                );
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var loaded = await store.LoadAsync(temp.Path);
+
+        Assert.Null(loaded.CloudProvider);
     }
 
     [Fact]
