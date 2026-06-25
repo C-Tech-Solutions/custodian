@@ -75,6 +75,38 @@ public sealed class CloudProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void TryMatchPathUsesCachedTargetsWithoutRediscovering()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.AccountCandidates.Add(new OneDriveRootCandidate(@"C:\Users\Me\OneDrive", "Personal"));
+        env.ExistingDirectories.Add(@"C:\Users\Me\OneDrive");
+        var service = new CloudProviderDiscoveryService(env);
+
+        Assert.Single(service.GetTargets());
+        env.KnownFolderFailure = new UnauthorizedAccessException("known folders blocked");
+
+        var metadata = service.TryMatchPath(@"C:\Users\Me\OneDrive\Pictures\photo.jpg");
+
+        Assert.NotNull(metadata);
+        Assert.Equal(@"C:\Users\Me\OneDrive", metadata.RootPath);
+    }
+
+    [Fact]
+    public void GetTargetsForceRefreshUpdatesCachedTargets()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.AccountCandidates.Add(new OneDriveRootCandidate(@"C:\Users\Me\OneDrive", "Personal"));
+        env.ExistingDirectories.Add(@"C:\Users\Me\OneDrive");
+        var service = new CloudProviderDiscoveryService(env);
+
+        Assert.Single(service.GetTargets());
+        env.AccountCandidates.Clear();
+        env.ExistingDirectories.Clear();
+
+        Assert.Empty(service.GetTargets(forceRefresh: true));
+    }
+
+    [Fact]
     public void TryNormalizeRootPreservesDriveRootSeparator()
     {
         var normalized = CloudProviderDiscoveryService.TryNormalizeRoot(@"C:\", out var root);
@@ -120,7 +152,7 @@ public sealed class CloudProviderDiscoveryServiceTests
         public Dictionary<string, string> KnownFolders { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> ExistingDirectories { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool IsSupported { get; init; } = true;
-        public Exception? KnownFolderFailure { get; init; }
+        public Exception? KnownFolderFailure { get; set; }
         public string? UserProfilePath { get; init; }
 
         public IEnumerable<OneDriveRootCandidate> GetOneDriveAccountCandidates() => AccountCandidates;

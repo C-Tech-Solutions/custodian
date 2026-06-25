@@ -8,6 +8,7 @@ internal sealed class CloudProviderDiscoveryService
     private const string OneDriveProviderId = "onedrive";
     private const string OneDriveProviderName = "OneDrive";
     private readonly ICloudProviderDiscoveryEnvironment _environment;
+    private IReadOnlyList<CloudProviderTarget>? _cachedTargets;
 
     public CloudProviderDiscoveryService()
         : this(WindowsCloudProviderDiscoveryEnvironment.Instance)
@@ -20,22 +21,29 @@ internal sealed class CloudProviderDiscoveryService
     }
 
     public Task<IReadOnlyList<CloudProviderTarget>> GetTargetsAsync(CancellationToken cancellationToken = default)
-        => Task.Run(GetTargets, cancellationToken);
+        => Task.Run(() => GetTargets(forceRefresh: true), cancellationToken);
 
-    public IReadOnlyList<CloudProviderTarget> GetTargets()
+    public IReadOnlyList<CloudProviderTarget> GetTargets(bool forceRefresh = false)
     {
         if (!_environment.IsSupported)
         {
             return [];
         }
 
+        if (!forceRefresh && _cachedTargets is not null)
+        {
+            return _cachedTargets;
+        }
+
         try
         {
-            return DiscoverTargets();
+            var targets = DiscoverTargets();
+            _cachedTargets = targets;
+            return targets;
         }
         catch (Exception ex) when (IsRecoverableDiscoveryException(ex))
         {
-            return [];
+            return _cachedTargets ?? [];
         }
     }
 
