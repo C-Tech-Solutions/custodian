@@ -393,8 +393,17 @@ internal static class TuiApplication
                     new ScanOptions(path, mode, CollectAllocatedSize: _collectAllocatedSize),
                     progress,
                     cts.Token);
-                ApplyScan(result, result.Root);
+                if (!await IsCurrentOperationAsync(cts))
+                {
+                    return;
+                }
+
                 RememberScan(result, result.Root, _detailMode, _chartScope);
+                if (!await QueryUiAsync(() => _recycleView))
+                {
+                    ApplyScan(result, result.Root);
+                }
+
                 SetStatus($"Scan complete: {SizeFormatter.Format(result.Root.LogicalSizeBytes)}, {result.Root.FileCount:n0} files.");
             }
             catch (OperationCanceledException)
@@ -428,8 +437,17 @@ internal static class TuiApplication
             {
                 var progress = new Progress<ScanProgress>(ReportProgress);
                 var result = await _portableDevices.ScanAsync(target, progress, cts.Token);
-                ApplyScan(result, result.Root);
+                if (!await IsCurrentOperationAsync(cts))
+                {
+                    return;
+                }
+
                 RememberScan(result, result.Root, _detailMode, _chartScope);
+                if (!await QueryUiAsync(() => _recycleView))
+                {
+                    ApplyScan(result, result.Root);
+                }
+
                 SetStatus($"Phone scan complete: {SizeFormatter.Format(result.Root.LogicalSizeBytes)}, {result.Root.FileCount:n0} files.");
             }
             catch (OperationCanceledException)
@@ -461,6 +479,11 @@ internal static class TuiApplication
             {
                 SetStatus($"Opening {path}...");
                 var result = await _store.LoadAsync(path, cts.Token);
+                if (!await IsCurrentOperationAsync(cts))
+                {
+                    return;
+                }
+
                 ApplyScan(result, result.Root);
                 RememberScan(result, result.Root, _detailMode, _chartScope);
                 UpdateUi(() => _pathField.Text = result.DisplayRootPathOrRoot());
@@ -799,15 +822,13 @@ internal static class TuiApplication
                 return;
             }
 
-            var refreshPath = _currentScan?.RootPath;
             try
             {
                 var result = RecycleBinService.MoveToRecycleBin(line.Row.FullPath, GetConsoleOwnerHandle());
                 SetStatus(result == RecycleBinMoveResult.Completed ? "Moved to Recycle Bin." : "Recycle operation cancelled.");
-                if (result == RecycleBinMoveResult.Completed && !string.IsNullOrWhiteSpace(refreshPath))
+                if (result == RecycleBinMoveResult.Completed)
                 {
-                    await InvokeUiAsync(() => _pathField.Text = refreshPath);
-                    await StartScanFromPathAsync(useSelectedTarget: false);
+                    await InvokeUiAsync(() => RemoveEntryFromCurrentScan(line.Row.Entry));
                 }
             }
             catch (Exception ex)
@@ -1262,6 +1283,9 @@ internal static class TuiApplication
             UpdateUi(() => _activeOperation?.Cancel());
         }
 
+        private Task<bool> IsCurrentOperationAsync(CancellationTokenSource cts)
+            => QueryUiAsync(() => ReferenceEquals(_activeOperation, cts));
+
         private void CancelRecycleLoad()
         {
             _recycleLoadCts?.Cancel();
@@ -1368,6 +1392,33 @@ internal static class TuiApplication
                     _sessionScanCacheOrder.RemoveLast();
                 }
             });
+        }
+
+        private void RemoveEntryFromCurrentScan(FileSystemEntry entry)
+        {
+            if (_currentScan is null)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(_currentScan.Root, entry))
+            {
+                _currentScan = null;
+                _selectedEntry = null;
+                RefreshAll();
+                return;
+            }
+
+            if (ScanViewProjector.TryFindParent(_currentScan.Root, entry, out var parent))
+            {
+                parent.Children.Remove(entry);
+                if (ReferenceEquals(_selectedEntry, entry))
+                {
+                    _selectedEntry = parent;
+                }
+
+                RefreshAll();
+            }
         }
 
         private static string ScanCacheKey(ScanResult result)
