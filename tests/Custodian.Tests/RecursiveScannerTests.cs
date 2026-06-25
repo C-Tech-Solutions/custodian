@@ -162,6 +162,7 @@ public sealed class RecursiveScannerTests : IDisposable
             FileAttributes.ReparsePoint |
             FileAttributes.Offline |
             (FileAttributes)0x00400000;
+        fileSystem.CloudFilesReparsePoints.Add(cloudDirectory);
         var provider = new RecursiveScanProvider(fileSystem);
         var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
 
@@ -184,7 +185,9 @@ public sealed class RecursiveScannerTests : IDisposable
         var fileSystem = new TestRecursiveScanFileSystem();
         fileSystem.AttributeOverrides[junctionLikeDirectory] =
             FileAttributes.Directory |
-            FileAttributes.ReparsePoint;
+            FileAttributes.ReparsePoint |
+            FileAttributes.Offline |
+            (FileAttributes)0x00400000;
         var provider = new RecursiveScanProvider(fileSystem);
         var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
 
@@ -377,6 +380,8 @@ public sealed class RecursiveScannerTests : IDisposable
 
         public Dictionary<string, long> AllocatedSizeOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public HashSet<string> CloudFilesReparsePoints { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public TimeSpan DirectoryEnumerationDelay { get; set; }
 
         public bool ThrowOnAllocatedSize { get; set; }
@@ -405,7 +410,7 @@ public sealed class RecursiveScannerTests : IDisposable
                 : info.Attributes;
 
         public bool IsCloudFilesReparsePoint(DirectoryInfo directory)
-            => false;
+            => CloudFilesReparsePoints.Contains(directory.FullName);
 
         public DateTimeOffset GetLastWriteTimeUtc(FileSystemInfo info)
             => info.LastWriteTimeUtc;

@@ -29,6 +29,18 @@ internal sealed class CloudProviderDiscoveryService
             return [];
         }
 
+        try
+        {
+            return DiscoverTargets();
+        }
+        catch (Exception ex) when (IsRecoverableDiscoveryException(ex))
+        {
+            return [];
+        }
+    }
+
+    private IReadOnlyList<CloudProviderTarget> DiscoverTargets()
+    {
         var knownFolders = _environment.GetKnownFolderPaths();
         var targets = new Dictionary<string, CloudProviderTarget>(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in GetOneDriveCandidates())
@@ -67,6 +79,9 @@ internal sealed class CloudProviderDiscoveryService
             .ThenBy(target => target.RootPath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static bool IsRecoverableDiscoveryException(Exception ex)
+        => ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException or System.Security.SecurityException;
 
     public CloudProviderMetadata? TryMatchPath(string path)
     {

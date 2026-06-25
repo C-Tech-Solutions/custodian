@@ -255,12 +255,8 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             return false;
         }
 
-        return options.CloudProvider is null || !IsCloudFilesReparseDirectory(directory, attributes);
+        return options.CloudProvider is null || !_fileSystem.IsCloudFilesReparsePoint(directory);
     }
-
-    private bool IsCloudFilesReparseDirectory(DirectoryInfo directory, FileAttributes attributes)
-        => HasHydrationProneAttributes(attributes) ||
-            _fileSystem.IsCloudFilesReparsePoint(directory);
 
     private static bool ShouldAvoidAllocatedSizeProbe(FileAttributes attributes)
         => HasHydrationProneAttributes(attributes);
@@ -356,8 +352,9 @@ internal sealed class RecursiveScanFileSystem : IRecursiveScanFileSystem
                 0,
                 buffer,
                 buffer.Length,
-                out _,
+                out var bytesReturned,
                 IntPtr.Zero) &&
+            bytesReturned >= sizeof(uint) &&
             IsCloudFilesReparseTag(BitConverter.ToUInt32(buffer, 0));
     }
 

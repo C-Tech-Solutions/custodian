@@ -89,6 +89,21 @@ public sealed class CloudProviderDiscoveryServiceTests
         Assert.Null(service.TryMatchPath(@"C:\Users\Me\OneDrive\Pictures\photo.jpg"));
     }
 
+    [Fact]
+    public void GetTargetsReturnsEmptyWhenDiscoveryMetadataThrows()
+    {
+        var env = new FakeCloudProviderEnvironment
+        {
+            KnownFolderFailure = new UnauthorizedAccessException("known folders blocked")
+        };
+        env.AccountCandidates.Add(new OneDriveRootCandidate(@"C:\Users\Me\OneDrive", "Personal"));
+        env.ExistingDirectories.Add(@"C:\Users\Me\OneDrive");
+        var service = new CloudProviderDiscoveryService(env);
+
+        Assert.Empty(service.GetTargets());
+        Assert.Null(service.TryMatchPath(@"C:\Users\Me\OneDrive\Pictures\photo.jpg"));
+    }
+
     private sealed class FakeCloudProviderEnvironment : ICloudProviderDiscoveryEnvironment
     {
         public List<OneDriveRootCandidate> AccountCandidates { get; } = [];
@@ -96,11 +111,21 @@ public sealed class CloudProviderDiscoveryServiceTests
         public Dictionary<string, string> KnownFolders { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> ExistingDirectories { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool IsSupported { get; init; } = true;
+        public Exception? KnownFolderFailure { get; init; }
         public string? UserProfilePath { get; init; }
 
         public IEnumerable<OneDriveRootCandidate> GetOneDriveAccountCandidates() => AccountCandidates;
         public IEnumerable<OneDriveRootCandidate> GetOneDriveEnvironmentCandidates() => EnvironmentCandidates;
-        public IReadOnlyDictionary<string, string> GetKnownFolderPaths() => KnownFolders;
+        public IReadOnlyDictionary<string, string> GetKnownFolderPaths()
+        {
+            if (KnownFolderFailure is not null)
+            {
+                throw KnownFolderFailure;
+            }
+
+            return KnownFolders;
+        }
+
         public string? GetUserProfilePath() => UserProfilePath;
 
         public bool DirectoryExists(string path)
