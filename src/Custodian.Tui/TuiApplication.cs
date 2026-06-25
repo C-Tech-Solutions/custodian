@@ -64,6 +64,7 @@ internal static class TuiApplication
         private readonly Label _statusLabel;
         private readonly Label _progressLabel;
         private CancellationTokenSource? _activeOperation;
+        private CancellationTokenSource? _recycleLoadCts;
         private ScanResult? _currentScan;
         private FileSystemEntry? _selectedEntry;
         private DetailMode _detailMode = DetailMode.Contents;
@@ -259,17 +260,25 @@ internal static class TuiApplication
 
         private async Task LoadInitialAsync()
         {
-            await LoadTargetsAsync();
-
-            if (!string.IsNullOrWhiteSpace(_options.ScanFilePath))
+            try
             {
-                await OpenScanAsync(_options.ScanFilePath);
-                return;
+                await LoadTargetsAsync();
+
+                if (!string.IsNullOrWhiteSpace(_options.ScanFilePath))
+                {
+                    await OpenScanAsync(_options.ScanFilePath);
+                    return;
+                }
+
+                if (_options.AutoScan && !string.IsNullOrWhiteSpace(_options.TargetPath))
+                {
+                    await StartScanFromPathAsync(useSelectedTarget: false);
+                }
             }
-
-            if (_options.AutoScan && !string.IsNullOrWhiteSpace(_options.TargetPath))
+            catch (Exception ex)
             {
-                await StartScanFromPathAsync(useSelectedTarget: false);
+                Logger.LogError(ex, "TUI startup initialization failed.");
+                SetStatus("Startup failed: " + ex.Message);
             }
         }
 
@@ -524,6 +533,7 @@ internal static class TuiApplication
         {
             UpdateUi(() =>
             {
+                CancelRecycleLoad();
                 _recycleView = false;
                 _recycleList.Visible = false;
                 _detailList.Visible = true;
@@ -661,7 +671,7 @@ internal static class TuiApplication
                 return;
             }
 
-            if (_currentScan?.SourceKind != ScanSourceKind.PortableDevice && !CanUseLocalFileSystemPath(line.Row))
+            if (_currentScan?.SourceKind != ScanSourceKind.PortableDevice && !CanUseLocalFileSystemPath(line.Row, allowRemote: true))
             {
                 SetStatus("Open is only available for existing file rows.");
                 return;
@@ -804,7 +814,7 @@ internal static class TuiApplication
             }
         }
 
-        private static bool CanUseLocalFileSystemPath(DetailRow row)
+        private static bool CanUseLocalFileSystemPath(DetailRow row, bool allowRemote = false)
         {
             if (string.Equals(row.Kind, "Extension", StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(row.FullPath))
@@ -814,10 +824,19 @@ internal static class TuiApplication
 
             try
             {
-                return Path.IsPathFullyQualified(row.FullPath) &&
-                    (File.Exists(row.FullPath) || Directory.Exists(row.FullPath));
+                if (!Path.IsPathFullyQualified(row.FullPath))
+                {
+                    return false;
+                }
+
+                if (IsRemotePath(row.FullPath))
+                {
+                    return allowRemote;
+                }
+
+                return File.Exists(row.FullPath) || Directory.Exists(row.FullPath);
             }
-            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {
                 Logger.LogWarning(ex, "Unable to validate detail row path {Path}.", row.FullPath);
                 return false;
@@ -872,8 +891,11 @@ internal static class TuiApplication
 
         private async Task ShowRecycleBinAsync()
         {
+            var loadCts = new CancellationTokenSource();
             await InvokeUiAsync(() =>
             {
+                CancelRecycleLoad();
+                _recycleLoadCts = loadCts;
                 _recycleView = true;
                 _detailList.Visible = false;
                 _recycleList.Visible = true;
@@ -882,9 +904,9 @@ internal static class TuiApplication
 
             try
             {
-                var entries = await RecycleBinService.GetItemsAsync();
-                var usage = await RecycleBinService.GetUsageAsync();
-                if (!await QueryUiAsync(() => _recycleView))
+                var entries = await RecycleBinService.GetItemsAsync(loadCts.Token);
+                var usage = await RecycleBinService.GetUsageAsync(loadCts.Token);
+                if (!await QueryUiAsync(() => _recycleView && ReferenceEquals(_recycleLoadCts, loadCts)))
                 {
                     return;
                 }
@@ -910,10 +932,26 @@ internal static class TuiApplication
                     _statusLabel.Text = Truncate($"Recycle Bin loaded: {_recycleRows.Count:n0} item(s).", 120);
                 });
             }
+            catch (OperationCanceledException)
+            {
+                SetStatus("Recycle Bin load cancelled.");
+            }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Recycle Bin load failed.");
                 SetStatus("Recycle Bin load failed: " + ex.Message);
+            }
+            finally
+            {
+                await InvokeUiAsync(() =>
+                {
+                    if (ReferenceEquals(_recycleLoadCts, loadCts))
+                    {
+                        _recycleLoadCts = null;
+                    }
+
+                    loadCts.Dispose();
+                });
             }
         }
 
@@ -965,14 +1003,15 @@ internal static class TuiApplication
                 }
 
                 if (result.Status.Kind == AppUpdateStatusKind.Available &&
+                    await QueryUiAsync(() => _activeOperation is not null))
+                {
+                    SetStatus("Finish or stop the active operation before downloading updates.");
+                    return;
+                }
+
+                if (result.Status.Kind == AppUpdateStatusKind.Available &&
                     await ShowQueryAsync("Update", result.Status.Message + Environment.NewLine + "Download now?", "Download", "Cancel") == 0)
                 {
-                    if (await QueryUiAsync(() => _activeOperation is not null))
-                    {
-                        SetStatus("Finish or stop the active operation before downloading updates.");
-                        return;
-                    }
-
                     var cts = await StartOperationAsync(cancelExisting: false);
                     try
                     {
@@ -1042,6 +1081,7 @@ internal static class TuiApplication
             var cacheKey = target.PortableTarget?.TargetId ?? NormalizeCacheKey(target.Path);
             if (_sessionScanCache.TryGetValue(cacheKey, out var cached))
             {
+                CancelRecycleLoad();
                 _recycleView = false;
                 _recycleList.Visible = false;
                 _detailList.Visible = true;
@@ -1214,6 +1254,13 @@ internal static class TuiApplication
         private void StopActiveOperation()
         {
             UpdateUi(() => _activeOperation?.Cancel());
+        }
+
+        private void CancelRecycleLoad()
+        {
+            _recycleLoadCts?.Cancel();
+            _recycleLoadCts?.Dispose();
+            _recycleLoadCts = null;
         }
 
         private Task EndOperationAsync(CancellationTokenSource cts)
@@ -1417,7 +1464,7 @@ internal static class TuiApplication
                     return process.MainWindowHandle;
                 }
             }
-            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or UnauthorizedAccessException or System.Security.SecurityException)
             {
                 Logger.LogWarning(ex, "Unable to get current process main window handle for Recycle Bin ownership.");
             }
