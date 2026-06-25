@@ -1409,14 +1409,11 @@ internal static class TuiApplication
                 return;
             }
 
-            if (ScanViewProjector.TryFindParent(_currentScan.Root, entry, out var parent))
+            if (TuiScanTreeUpdater.RemoveEntry(_currentScan, entry, ref _selectedEntry))
             {
-                parent.Children.Remove(entry);
-                if (ReferenceEquals(_selectedEntry, entry))
-                {
-                    _selectedEntry = parent;
-                }
-
+                _backStack.Clear();
+                _forwardStack.Clear();
+                RememberCurrentState();
                 RefreshAll();
             }
         }
