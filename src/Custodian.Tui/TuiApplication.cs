@@ -286,9 +286,12 @@ internal static class TuiApplication
         {
             SetStatus("Loading targets...");
             var targets = new List<TargetLine>();
+            var driveTargetsTask = Task.Run(CreateDriveTargetLines);
+            var phoneTargetsTask = _portableDevices.GetTargetsAsync();
+
             try
             {
-                targets.AddRange(await Task.Run(CreateDriveTargetLines));
+                targets.AddRange(await driveTargetsTask);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {
@@ -298,7 +301,7 @@ internal static class TuiApplication
 
             try
             {
-                var phoneTargets = await _portableDevices.GetTargetsAsync();
+                var phoneTargets = await phoneTargetsTask;
                 targets.AddRange(phoneTargets.Select(target => new TargetLine(
                     $"Phone   {target.DisplayPath} - {target.DetailText}",
                     target.DisplayPath,
@@ -858,10 +861,10 @@ internal static class TuiApplication
                 return;
             }
 
-            var destination = OutputText();
+            var destination = ResolvePortableCopyDestination(OutputText());
             if (string.IsNullOrWhiteSpace(destination))
             {
-                SetStatus("Enter a PC destination in Output.");
+                SetStatus("Enter a PC destination folder in Output.");
                 return;
             }
 
@@ -904,8 +907,11 @@ internal static class TuiApplication
 
             try
             {
-                var entries = await RecycleBinService.GetItemsAsync(loadCts.Token);
-                var usage = await RecycleBinService.GetUsageAsync(loadCts.Token);
+                var entriesTask = RecycleBinService.GetItemsAsync(loadCts.Token);
+                var usageTask = RecycleBinService.GetUsageAsync(loadCts.Token);
+                await Task.WhenAll(entriesTask, usageTask);
+                var entries = await entriesTask;
+                var usage = await usageTask;
                 if (!await QueryUiAsync(() => _recycleView && ReferenceEquals(_recycleLoadCts, loadCts)))
                 {
                     return;
@@ -1259,7 +1265,6 @@ internal static class TuiApplication
         private void CancelRecycleLoad()
         {
             _recycleLoadCts?.Cancel();
-            _recycleLoadCts?.Dispose();
             _recycleLoadCts = null;
         }
 
@@ -1386,6 +1391,34 @@ internal static class TuiApplication
         private string PathText() => _pathField.Text?.ToString() ?? string.Empty;
         private string OutputText() => _outputField.Text?.ToString() ?? string.Empty;
         private string FilterText() => _filterField.Text?.ToString() ?? string.Empty;
+
+        private static string ResolvePortableCopyDestination(string output)
+        {
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                if (Directory.Exists(output))
+                {
+                    return output;
+                }
+
+                if (File.Exists(output) || !string.IsNullOrWhiteSpace(Path.GetExtension(output)))
+                {
+                    return Path.GetDirectoryName(output) ?? string.Empty;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Logger.LogWarning(ex, "Unable to classify portable-copy output path {Path}.", output);
+                return string.Empty;
+            }
+
+            return output;
+        }
 
         private string OutputPath(string extension)
         {
