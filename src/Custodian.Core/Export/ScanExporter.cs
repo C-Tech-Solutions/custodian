@@ -17,10 +17,10 @@ public static class ScanExporter
         await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         await writer.WriteLineAsync("Path,Name,Type,LogicalSizeBytes,AllocatedSizeBytes,FileCount,DirectoryCount,Extension,Attributes,LastWriteUtc,CloudProviderId,CloudProviderName,CloudProviderAccountLabel,CloudProviderRootPath");
 
+        var provider = result.CloudProvider;
         foreach (var entry in result.Root.Flatten())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var provider = result.CloudProvider;
             var line = string.Join(
                 ',',
                 CsvFieldFormatter.Format(entry.FullPath),

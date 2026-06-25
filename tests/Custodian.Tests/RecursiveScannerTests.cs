@@ -151,6 +151,55 @@ public sealed class RecursiveScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task CloudProviderScanTraversesCloudPlaceholderReparseDirectories()
+    {
+        var cloudDirectory = Path.Combine(_root, "cloud-folder");
+        Directory.CreateDirectory(cloudDirectory);
+        await File.WriteAllBytesAsync(Path.Combine(cloudDirectory, "placeholder-child.bin"), new byte[10]);
+        var fileSystem = new TestRecursiveScanFileSystem();
+        fileSystem.AttributeOverrides[cloudDirectory] =
+            FileAttributes.Directory |
+            FileAttributes.ReparsePoint |
+            FileAttributes.Offline |
+            (FileAttributes)0x00400000;
+        var provider = new RecursiveScanProvider(fileSystem);
+        var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CloudProvider: metadata),
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(10, result.Root.LogicalSizeBytes);
+        Assert.Contains(result.Root.Children, entry => entry.FullPath == cloudDirectory);
+        Assert.DoesNotContain(result.SkippedEntries, entry => entry.Path == cloudDirectory);
+    }
+
+    [Fact]
+    public async Task CloudProviderScanStillSkipsNonCloudReparseDirectories()
+    {
+        var junctionLikeDirectory = Path.Combine(_root, "junction-like");
+        Directory.CreateDirectory(junctionLikeDirectory);
+        await File.WriteAllBytesAsync(Path.Combine(junctionLikeDirectory, "loop-risk.bin"), new byte[10]);
+        var fileSystem = new TestRecursiveScanFileSystem();
+        fileSystem.AttributeOverrides[junctionLikeDirectory] =
+            FileAttributes.Directory |
+            FileAttributes.ReparsePoint;
+        var provider = new RecursiveScanProvider(fileSystem);
+        var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
+
+        var result = await provider.ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, CloudProvider: metadata),
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(0, result.Root.LogicalSizeBytes);
+        Assert.Contains(result.SkippedEntries, entry =>
+            entry.Path == junctionLikeDirectory &&
+            entry.Reason.Contains("reparse", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ScannerUsesAllocatedSizeProbeForUnpinnedLocalFiles()
     {
         var unpinnedFile = Path.Combine(_root, "unpinned-local.bin");
@@ -354,6 +403,9 @@ public sealed class RecursiveScannerTests : IDisposable
             => AttributeOverrides.TryGetValue(info.FullName, out var attributes)
                 ? attributes
                 : info.Attributes;
+
+        public bool IsCloudFilesReparsePoint(DirectoryInfo directory)
+            => false;
 
         public DateTimeOffset GetLastWriteTimeUtc(FileSystemInfo info)
             => info.LastWriteTimeUtc;
