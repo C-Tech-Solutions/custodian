@@ -68,6 +68,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _activePortableCopy;
     private Task? _activePortableCopyTask;
+    private bool _activeFileOperation;
     private CancellationTokenSource? _updateCts;
     private CancellationTokenSource? _recycleBinCts;
     private bool _recycleBinCtsIsRefresh;
@@ -190,6 +191,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ApplyRecycleBinSort();
         UpdateRecycleBinFilterUiState();
         UpdateRecycleBinActionState();
+        UpdateDetailSelectionActionState();
         RefreshElevationWarning();
 
         SizeChanged += (_, _) => ScheduleSettingsSave();
@@ -758,6 +760,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task StartScanAsync()
     {
         if (_activeScan is not null || _activePortableCopy is not null) return;
+        if (_activeFileOperation)
+        {
+            ShowToast("Wait for the current file operation to finish first.");
+            return;
+        }
 
         var request = CreatePendingScan();
         if (request is null)
@@ -1428,6 +1435,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         row.Focus();
     }
+
+    private void DetailsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => UpdateDetailSelectionActionState();
 
     private void DetailsGrid_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
@@ -2205,13 +2215,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ============================================================
     private void DetailsContextMenu_Opened(object sender, RoutedEventArgs e)
     {
-        var visible = CurrentScanIsPortable() ? Visibility.Visible : Visibility.Collapsed;
-        CopyPortableToPcMenuItem.Visibility = visible;
-        CopyPortableToPcSeparator.Visibility = visible;
+        UpdateDetailSelectionActionState();
+        var portableVisible = CurrentScanIsPortable() ? Visibility.Visible : Visibility.Collapsed;
+        var localVisible = CurrentScanIsPortable() ? Visibility.Collapsed : Visibility.Visible;
+        CopyPortableToPcMenuItem.Visibility = portableVisible;
+        CopyPortableToPcSeparator.Visibility = portableVisible;
+        CopyToFolderMenuItem.Visibility = localVisible;
+        MoveToFolderMenuItem.Visibility = localVisible;
     }
 
     private void OpenSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (SelectedDetailRows().Take(2).Count() > 1)
+        {
+            ShowToast("Select one item to open.");
+            return;
+        }
+
         if (CurrentScanIsPortable())
         {
             OpenPortableSelectionInExplorer(PortableExplorerOpenMode.Open);
@@ -2259,6 +2279,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RevealSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (SelectedDetailRows().Take(2).Count() > 1)
+        {
+            ShowToast("Select one item to reveal.");
+            return;
+        }
+
         if (CurrentScanIsPortable())
         {
             OpenPortableSelectionInExplorer(PortableExplorerOpenMode.Reveal);
@@ -2268,6 +2294,65 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var path = SelectedPath();
         if (path is null) return;
         if (IsExistingFileSystemPath(path)) RevealPath(path);
+    }
+
+    private async void CopySelection_Click(object sender, RoutedEventArgs e)
+    {
+        if (CurrentScanIsPortable())
+        {
+            CopyPortableToPc_Click(sender, e);
+            return;
+        }
+
+        await CopyOrMoveSelectedFileSystemItemsAsync(FileSystemOperationKind.Copy);
+    }
+
+    private async void MoveSelection_Click(object sender, RoutedEventArgs e)
+        => await CopyOrMoveSelectedFileSystemItemsAsync(FileSystemOperationKind.Move);
+
+    private async Task CopyOrMoveSelectedFileSystemItemsAsync(FileSystemOperationKind operationKind)
+    {
+        if (_activeScan is not null || _activePortableCopy is not null || _activeFileOperation)
+        {
+            ShowToast("Wait for the current operation to finish first.");
+            return;
+        }
+
+        var selectedRows = SelectedDetailRows().ToList();
+        var paths = SelectedExistingFileSystemPaths();
+        if (selectedRows.Count == 0 || paths.Count == 0)
+        {
+            ShowToast("Select one or more existing file or folder rows first.");
+            return;
+        }
+
+        if (paths.Count != selectedRows.Count)
+        {
+            ShowToast("Copy and move require real file or folder rows.");
+            return;
+        }
+
+        using var dialog = new WinForms.FolderBrowserDialog
+        {
+            Description = operationKind == FileSystemOperationKind.Copy
+                ? "Choose where to copy the selected files and folders"
+                : "Choose where to move the selected files and folders",
+            UseDescriptionForTitle = true,
+            SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+
+        if (dialog.ShowDialog() != WinForms.DialogResult.OK)
+        {
+            return;
+        }
+
+        if (operationKind == FileSystemOperationKind.Move &&
+            !ConfirmMoveSelection(paths.Count, dialog.SelectedPath))
+        {
+            return;
+        }
+
+        await RunFileSystemOperationAsync(operationKind, paths, dialog.SelectedPath);
     }
 
     private void CopyPath_Click(object sender, RoutedEventArgs e)
@@ -2415,7 +2500,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void DeleteSelected_Click(object sender, RoutedEventArgs e)
+    private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
     {
         if (CurrentScanIsPortable())
         {
@@ -2423,40 +2508,130 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var path = SelectedPath();
-        if (path is null || (!File.Exists(path) && !Directory.Exists(path)))
+        var selectedRows = SelectedDetailRows().ToList();
+        var paths = SelectedExistingFileSystemPaths();
+        if (selectedRows.Count == 0 || paths.Count == 0)
         {
-            ShowToast("Select an existing file or folder.");
+            ShowToast("Select one or more existing file or folder rows.");
             return;
         }
 
-        var targetEntry = SelectedEntry();
-        var sizeLine = targetEntry is not null && targetEntry.LogicalSizeBytes > 0
-            ? $"{Environment.NewLine}{Environment.NewLine}Size: {SizeFormatter.Format(targetEntry.LogicalSizeBytes)}"
-            : string.Empty;
+        if (paths.Count != selectedRows.Count)
+        {
+            ShowToast("Delete requires real file or folder rows.");
+            return;
+        }
 
         var answer = WpfMessageBox.Show(
             this,
-            $"Move to Recycle Bin?\n\n{path}{sizeLine}\n\nCustodian will ask Windows to recycle this item, not permanently delete it. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
+            $"Move {paths.Count:n0} selected item(s) to the Recycle Bin?\n\n{SelectionPreview(paths)}\n\nCustodian will ask Windows to recycle these items, not permanently delete them. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
             "Confirm Recycle Bin move",
             MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
+
+        await RunFileSystemOperationAsync(FileSystemOperationKind.Recycle, paths, destinationFolder: null);
+    }
+
+    private bool ConfirmMoveSelection(int count, string destinationFolder)
+    {
+        var answer = WpfMessageBox.Show(
+            this,
+            $"Move {count:n0} selected item(s) to:\n\n{destinationFolder}\n\nWindows may prompt if names collide or access is denied.",
+            "Confirm Move",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return answer == MessageBoxResult.Yes;
+    }
+
+    private async Task RunFileSystemOperationAsync(
+        FileSystemOperationKind operationKind,
+        IReadOnlyCollection<string> paths,
+        string? destinationFolder)
+    {
+        _activeFileOperation = true;
+        UpdateDetailSelectionActionState();
+        var operationText = operationKind switch
+        {
+            FileSystemOperationKind.Copy => "Copying selected items",
+            FileSystemOperationKind.Move => "Moving selected items",
+            _ => "Moving selected items to Recycle Bin"
+        };
+        UpdateFooterStatus(operationText, destinationFolder ?? $"{paths.Count:n0} selected item(s)");
+
         try
         {
-            var result = RecycleBinService.MoveToRecycleBin(path, new WindowInteropHelper(this).Handle);
-            if (result == RecycleBinMoveResult.Cancelled)
+            var ownerHandle = new WindowInteropHelper(this).Handle;
+            var result = operationKind switch
             {
-                ShowToast("Recycle Bin move cancelled.");
-                return;
-            }
+                FileSystemOperationKind.Copy => await FileSystemOperationService.CopyToFolderAsync(paths, destinationFolder!, ownerHandle),
+                FileSystemOperationKind.Move => await FileSystemOperationService.MoveToFolderAsync(paths, destinationFolder!, ownerHandle),
+                _ => await FileSystemOperationService.MoveToRecycleBinAsync(paths, ownerHandle)
+            };
 
-            ShowToast($"Moved to Recycle Bin: {Path.GetFileName(path)}");
+            ShowFileSystemOperationResult(operationKind, result, destinationFolder);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Recycle Bin move failed for {Path}.", path);
-            WpfMessageBox.Show(this, ex.Message, "Recycle Bin move failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            Logger.LogError(ex, "{OperationKind} operation failed.", operationKind);
+            ShowOperationError(FileSystemOperationTitle(operationKind) + " failed", ex);
         }
+        finally
+        {
+            _activeFileOperation = false;
+            UpdateDetailSelectionActionState();
+            if (_currentScan is not null && !_isRecycleBinViewActive)
+            {
+                UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+            }
+        }
+    }
+
+    private void ShowFileSystemOperationResult(
+        FileSystemOperationKind operationKind,
+        FileSystemOperationBatchResult result,
+        string? destinationFolder)
+    {
+        var title = FileSystemOperationTitle(operationKind);
+        var destinationText = string.IsNullOrWhiteSpace(destinationFolder) ? string.Empty : $" to {destinationFolder}";
+        if (!result.HasIssues)
+        {
+            ShowToast($"{title} complete: {result.CompletedCount:n0} item(s){destinationText}.");
+            return;
+        }
+
+        var preview = string.Join(
+            Environment.NewLine,
+            result.Failures.Take(8).Select(failure => $"{failure.Path}: {failure.Reason}"));
+        var more = result.Failures.Count > 8
+            ? $"{Environment.NewLine}...and {result.Failures.Count - 8:n0} more failure(s)."
+            : string.Empty;
+        var cancelled = result.CancelledCount > 0
+            ? $"{Environment.NewLine}{result.CancelledCount:n0} item(s) were cancelled or skipped by Windows."
+            : string.Empty;
+        var message = $"{title} completed with issues.{Environment.NewLine}{Environment.NewLine}" +
+            $"{result.CompletedCount:n0} of {result.RequestedCount:n0} item(s) completed.{cancelled}";
+        if (!string.IsNullOrWhiteSpace(preview))
+        {
+            message += $"{Environment.NewLine}{Environment.NewLine}{preview}{more}";
+        }
+
+        WpfMessageBox.Show(this, message, title + " completed with issues", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private static string FileSystemOperationTitle(FileSystemOperationKind operationKind)
+        => operationKind switch
+        {
+            FileSystemOperationKind.Copy => "Copy",
+            FileSystemOperationKind.Move => "Move",
+            _ => "Recycle Bin move"
+        };
+
+    private static string SelectionPreview(IReadOnlyList<string> paths)
+    {
+        var preview = string.Join(Environment.NewLine, paths.Take(6));
+        return paths.Count > 6
+            ? preview + $"{Environment.NewLine}...and {paths.Count - 6:n0} more."
+            : preview;
     }
 
     private FileSystemEntry? SelectedEntry()
@@ -3997,6 +4172,52 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private IEnumerable<DetailRow> SelectedDetailRows() => DetailsGrid.SelectedItems.OfType<DetailRow>();
 
+    private void UpdateDetailSelectionActionState()
+    {
+        if (!IsInitialized || DetailsGrid is null)
+        {
+            return;
+        }
+
+        var rows = SelectedDetailRows().ToList();
+        var allRowsUseFileSystemPaths = rows.Count > 0 && rows.All(row => IsExistingFileSystemPath(row.FullPath));
+        var state = DetailSelectionActionService.Build(
+            rows,
+            CurrentScanIsPortable(),
+            allRowsUseFileSystemPaths,
+            _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
+
+        SelectionStatusText.Text = state.SelectionText;
+        OpenSelectionButton.IsEnabled = state.CanOpen;
+        RevealSelectionButton.IsEnabled = state.CanReveal;
+        CopyPathSelectionButton.IsEnabled = state.CanCopyPath;
+        CopySelectionButton.IsEnabled = state.CanCopy;
+        CopySelectionButton.Content = state.CopyText;
+        CopySelectionButton.ToolTip = state.CopyToolTip;
+        MoveSelectionButton.IsEnabled = state.CanMove;
+        MoveSelectionButton.ToolTip = state.MoveToolTip;
+        ExportSelectionButton.IsEnabled = state.CanExport;
+        DeleteSelectionButton.IsEnabled = state.CanDelete;
+        DeleteSelectionButton.ToolTip = state.DeleteToolTip;
+
+        OpenSelectedMenuItem.IsEnabled = state.CanOpen;
+        RevealSelectedMenuItem.IsEnabled = state.CanReveal;
+        CopyToFolderMenuItem.IsEnabled = state.CanCopy && !CurrentScanIsPortable();
+        MoveToFolderMenuItem.IsEnabled = state.CanMove;
+        CopyPortableToPcMenuItem.IsEnabled = state.CanCopy && CurrentScanIsPortable();
+        CopyPathMenuItem.IsEnabled = state.CanCopyPath;
+        CopyRowsMenuItem.IsEnabled = state.CanCopyRows;
+        ExportSelectionMenuItem.IsEnabled = state.CanExport;
+        DeleteSelectedMenuItem.IsEnabled = state.CanDelete;
+    }
+
+    private IReadOnlyList<string> SelectedExistingFileSystemPaths()
+        => SelectedDetailRows()
+            .Select(row => row.FullPath)
+            .Where(IsExistingFileSystemPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
     private string? SelectedPath()
     {
         if (DetailsGrid.SelectedItem is DetailRow row) return row.FullPath;
@@ -4010,6 +4231,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StopButton.IsEnabled = scanning;
         RefreshButton.IsEnabled = !scanning && _currentScan is not null;
         ProgressBar.IsIndeterminate = scanning;
+        UpdateDetailSelectionActionState();
     }
 
     private CloudProviderMetadata? TryMatchCloudProviderPath(string text)

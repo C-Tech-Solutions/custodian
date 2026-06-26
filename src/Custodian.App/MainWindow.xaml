@@ -556,6 +556,59 @@
                             </Grid>
                         </Border>
 
+                        <!-- Selection actions -->
+                        <Border DockPanel.Dock="Top"
+                                Background="{DynamicResource SurfaceSubtle}"
+                                BorderBrush="{DynamicResource Border}"
+                                BorderThickness="0,0,0,1"
+                                Padding="14,7">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SelectionStatusText"
+                                           Text="No selection"
+                                           Foreground="{DynamicResource MutedStrong}"
+                                           FontSize="11.5"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,14,0"/>
+                                <WrapPanel Grid.Column="1"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center">
+                                    <Button x:Name="OpenSelectionButton"
+                                            Content="Open"
+                                            Click="OpenSelected_Click"
+                                            ToolTip="Open the selected item"/>
+                                    <Button x:Name="RevealSelectionButton"
+                                            Content="Reveal"
+                                            Click="RevealSelected_Click"
+                                            ToolTip="Reveal the selected item in Explorer"/>
+                                    <Button x:Name="CopyPathSelectionButton"
+                                            Content="Copy Path"
+                                            Click="CopyPath_Click"
+                                            ToolTip="Copy selected paths"/>
+                                    <Button x:Name="CopySelectionButton"
+                                            Content="Copy"
+                                            Click="CopySelection_Click"
+                                            ToolTip="Copy selected files or folders"/>
+                                    <Button x:Name="MoveSelectionButton"
+                                            Content="Move"
+                                            Click="MoveSelection_Click"
+                                            ToolTip="Move selected files or folders"/>
+                                    <Button x:Name="ExportSelectionButton"
+                                            Content="Export CSV"
+                                            Click="ExportSelectionCsv_Click"
+                                            ToolTip="Export selected rows to CSV"/>
+                                    <Button x:Name="DeleteSelectionButton"
+                                            Content="Delete"
+                                            Click="DeleteSelected_Click"
+                                            ToolTip="Move selected files or folders to the Recycle Bin"/>
+                                </WrapPanel>
+                            </Grid>
+                        </Border>
+
                         <!-- Results list. A plain ListView with a flat
                              ItemTemplate and a static header row above it,
                              rather than a DataGrid. The per-view-switch stutter
@@ -602,21 +655,24 @@
                                       VirtualizingPanel.VirtualizationMode="Recycling"
                                       ScrollViewer.CanContentScroll="True"
                                       ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      SelectionChanged="DetailsGrid_SelectionChanged"
                                       MouseDoubleClick="DetailsGrid_MouseDoubleClick"
                                       PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown"
                                       PreviewKeyDown="DetailsGrid_PreviewKeyDown">
                                 <ListView.ContextMenu>
                                     <ContextMenu Opened="DetailsContextMenu_Opened">
-                                        <MenuItem Header="Open" Click="OpenSelected_Click"/>
-                                        <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                        <MenuItem x:Name="OpenSelectedMenuItem" Header="Open" Click="OpenSelected_Click"/>
+                                        <MenuItem x:Name="RevealSelectedMenuItem" Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                        <MenuItem x:Name="CopyToFolderMenuItem" Header="Copy to Folder..." Click="CopySelection_Click"/>
+                                        <MenuItem x:Name="MoveToFolderMenuItem" Header="Move to Folder..." Click="MoveSelection_Click"/>
                                         <MenuItem x:Name="CopyPortableToPcMenuItem" Header="Copy selected files to PC..." Click="CopyPortableToPc_Click"/>
                                         <Separator x:Name="CopyPortableToPcSeparator"/>
                                         <Separator/>
-                                        <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
-                                        <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
-                                        <MenuItem Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
+                                        <MenuItem x:Name="CopyPathMenuItem" Header="Copy Path" Click="CopyPath_Click"/>
+                                        <MenuItem x:Name="CopyRowsMenuItem" Header="Copy Rows" Click="CopyRows_Click"/>
+                                        <MenuItem x:Name="ExportSelectionMenuItem" Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
                                         <Separator/>
-                                        <MenuItem Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
+                                        <MenuItem x:Name="DeleteSelectedMenuItem" Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
                                     </ContextMenu>
                                 </ListView.ContextMenu>
                                 <ListView.ItemTemplate>
