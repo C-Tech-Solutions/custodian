@@ -68,7 +68,10 @@ public sealed class DetailSelectionActionServiceTests
     public void PortableSelectionAllowsCopyToPcButBlocksMutation()
     {
         var state = DetailSelectionActionService.Build(
-            [Row("Pixel/Internal shared storage/DCIM/photo.jpg"), Row("Pixel/Internal shared storage/Download/file.pdf")],
+            [
+                Row("Pixel/Internal shared storage/DCIM/photo.jpg", portableObjectId: "photo-id"),
+                Row("Pixel/Internal shared storage/Download/file.pdf", portableObjectId: "file-id")
+            ],
             isPortableScan: true,
             allSelectedRowsUseFileSystemPaths: false,
             isBusy: false);
@@ -80,6 +83,26 @@ public sealed class DetailSelectionActionServiceTests
         Assert.Equal("Copy to PC", state.CopyText);
         Assert.Contains("phone", state.MoveToolTip, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("phone", state.DeleteToolTip, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PortableSyntheticSelectionBlocksFileActions()
+    {
+        var state = DetailSelectionActionService.Build(
+            [Row(".jpg")],
+            isPortableScan: true,
+            allSelectedRowsUseFileSystemPaths: false,
+            isBusy: false);
+
+        Assert.Equal("1 item selected", state.SelectionText);
+        Assert.False(state.CanOpen);
+        Assert.False(state.CanReveal);
+        Assert.False(state.CanCopy);
+        Assert.False(state.CanMove);
+        Assert.False(state.CanDelete);
+        Assert.True(state.CanCopyPath);
+        Assert.True(state.CanCopyRows);
+        Assert.True(state.CanExport);
     }
 
     [Fact]
@@ -139,14 +162,19 @@ public sealed class DetailSelectionActionServiceTests
         Assert.True(state.CanExport);
     }
 
-    private static DetailRow Row(string path)
+    private static DetailRow Row(
+        string path,
+        string portableObjectId = "",
+        string portablePersistentId = "")
     {
         var entry = new FileSystemEntry
         {
             Name = Path.GetFileName(path),
             FullPath = path,
             LogicalSizeBytes = 10,
-            AllocatedSizeBytes = 10
+            AllocatedSizeBytes = 10,
+            PortableObjectId = portableObjectId,
+            PortablePersistentId = portablePersistentId
         };
 
         return DetailRow.From(entry, parentBytes: 100);

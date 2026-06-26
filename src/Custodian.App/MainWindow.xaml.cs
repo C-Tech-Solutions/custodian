@@ -56,6 +56,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static readonly TimeSpan StartupUpdateCheckTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan TargetRefreshDebounceInterval = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan FileOperationCloseTimeout = TimeSpan.FromSeconds(2);
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
     private readonly DiskScanner _scanner = new();
     private readonly PortableDeviceService _portableDevices = new();
@@ -291,10 +292,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
-            await fileOperationTask;
+            await fileOperationTask.WaitAsync(FileOperationCloseTimeout);
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (TimeoutException)
+        {
+            Logger.LogWarning(
+                "File operation did not respond to cancellation within {Timeout} during close.",
+                FileOperationCloseTimeout);
         }
         catch (Exception ex)
         {
@@ -354,9 +361,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _isClosing = true;
             _settingsSaveTimer.Stop();
             _activeScan?.Cancellation.Cancel();
+            _activeFileOperationCts?.Cancel();
             _updateCts?.Cancel();
             _recycleBinCts?.Cancel();
             await CancelActivePortableCopyAsync();
+            await CancelActiveFileOperationAsync();
             await PersistSettingsAsync();
 
             ElevationService.RelaunchAsAdministrator(
@@ -773,9 +782,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _isClosing = true;
         _activeScan?.Cancellation.Cancel();
+        _activeFileOperationCts?.Cancel();
         _updateCts?.Cancel();
         _settingsSaveTimer.Stop();
         await CancelActivePortableCopyAsync();
+        await CancelActiveFileOperationAsync();
         await PersistSettingsAsync();
         _settingsPersistedForClose = true;
         UpdateFooterStatus("Updates", "Installing update...");
@@ -2409,7 +2420,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void CopyPortableToPc_Click(object sender, RoutedEventArgs e)
     {
-        if (_activeScan is not null || _activePortableCopy is not null)
+        if (_activeScan is not null || _activePortableCopy is not null || _activeFileOperation)
         {
             ShowToast("Wait for the current operation to finish first.");
             return;
@@ -2418,6 +2429,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_currentScan is not { SourceKind: ScanSourceKind.PortableDevice } currentScan)
         {
             ShowToast("Copy to PC is only available for phone scans.");
+            return;
+        }
+
+        var selectedRows = SelectedDetailRows().ToList();
+        if (selectedRows.Count > 0 && !DetailSelectionActionService.AllRowsUsePortableObjectIdentity(selectedRows))
+        {
+            ShowToast("Copy to PC requires real phone file or folder rows.");
             return;
         }
 
@@ -2528,6 +2546,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
     {
+        if (_activeScan is not null || _activePortableCopy is not null || _activeFileOperation)
+        {
+            ShowToast("Wait for the current operation to finish first.");
+            return;
+        }
+
         if (CurrentScanIsPortable())
         {
             ShowPortableDeviceModificationBlockedMessage();
@@ -2647,11 +2671,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var more = result.Failures.Count > 8
             ? $"{Environment.NewLine}...and {result.Failures.Count - 8:n0} more failure(s)."
             : string.Empty;
-        var cancelled = result.CancelledCount > 0
-            ? $"{Environment.NewLine}{result.CancelledCount:n0} item(s) were cancelled or skipped by Windows."
-            : string.Empty;
-        var message = $"{title} completed with issues.{Environment.NewLine}{Environment.NewLine}" +
-            $"{result.CompletedCount:n0} of {result.RequestedCount:n0} item(s) completed.{cancelled}";
+        var summary = result.CancelledCount > 0
+            ? $"Windows reported that the staged batch was cancelled or partially aborted. Exact per-item completion is unavailable after a shell batch cancellation. Check the source or destination folder for the final item state.{Environment.NewLine}{Environment.NewLine}{result.CancelledCount:n0} staged item(s) were reported as cancelled or skipped."
+            : $"{result.CompletedCount:n0} of {result.RequestedCount:n0} item(s) completed.";
+        var message = $"{title} completed with issues.{Environment.NewLine}{Environment.NewLine}{summary}";
         if (!string.IsNullOrWhiteSpace(preview))
         {
             message += $"{Environment.NewLine}{Environment.NewLine}{preview}{more}";

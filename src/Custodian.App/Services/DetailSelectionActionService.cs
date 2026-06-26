@@ -30,7 +30,10 @@ internal static class DetailSelectionActionService
         var selectedCount = selectedRows.Count;
         var hasSelection = selectedCount > 0;
         var singleSelection = selectedCount == 1;
-        var canUseSelection = hasSelection && (isPortableScan || allSelectedRowsUseFileSystemPaths);
+        var canUseSelection = hasSelection &&
+            (isPortableScan
+                ? AllRowsUsePortableObjectIdentity(selectedRows)
+                : allSelectedRowsUseFileSystemPaths);
         var canModifyLocal = canUseSelection && !isBusy && !isPortableScan;
         var canCopy = canUseSelection && !isBusy;
 
@@ -69,6 +72,9 @@ internal static class DetailSelectionActionService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    internal static bool AllRowsUsePortableObjectIdentity(IReadOnlyCollection<DetailRow> rows)
+        => rows.Count > 0 && rows.All(UsesPortableObjectIdentity);
+
     internal static string SelectionPreview(IReadOnlyList<string> paths)
     {
         var preview = string.Join(Environment.NewLine, paths.Take(6));
@@ -79,6 +85,10 @@ internal static class DetailSelectionActionService
 
     private static bool IsFileSystemPathSyntax(string path)
         => !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path);
+
+    private static bool UsesPortableObjectIdentity(DetailRow row)
+        => !string.IsNullOrWhiteSpace(row.Entry.PortableObjectId) ||
+           !string.IsNullOrWhiteSpace(row.Entry.PortablePersistentId);
 
     private static string SelectionText(int count, bool isPortableScan, bool allSelectedRowsUseFileSystemPathSyntax)
     {
