@@ -2836,11 +2836,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var preparation = await PrepareScanUiAsync(result);
+        var stillVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
 
         if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
         {
             visible.Preparation = preparation;
-            if (isVisibleScan)
+            if (stillVisibleScan)
             {
                 visible.State = CaptureCurrentScanState(result);
             }
@@ -2851,14 +2852,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ReferenceEquals(cached.Result, result))
         {
             cached.Preparation = preparation;
-            if (isVisibleScan)
+            if (stillVisibleScan)
             {
                 cached.State = CaptureCurrentScanState(result);
             }
         }
 
         RefreshTargetStatus(result.RootPath);
-        if (!isVisibleScan)
+        if (!stillVisibleScan)
         {
             return;
         }
