@@ -2619,7 +2619,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             $"Permanently delete {paths.Count:n0} selected item(s)?\n\n{DetailSelectionActionService.SelectionPreview(paths)}\n\nThese items will not be moved to the Recycle Bin. You will not be able to restore them from the Recycle Bin after this operation.",
             "Confirm permanent delete",
             MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
         if (answer != MessageBoxResult.Yes) return;
 
         await RunFileSystemOperationAsync(FileSystemOperationKind.PermanentDelete, paths, destinationFolder: null);
