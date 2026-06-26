@@ -45,15 +45,14 @@ internal sealed class TargetRefreshCoordinator(Func<TargetRefreshReason, Task> r
         TaskCompletionSource currentRefreshCompletion)
     {
         var currentReason = initialReason;
-        TaskCompletionSource? queuedCompletionToComplete = null;
+        var activeCompletion = currentRefreshCompletion;
         try
         {
             while (true)
             {
                 await refreshAsync(currentReason);
 
-                queuedCompletionToComplete?.TrySetResult();
-                queuedCompletionToComplete = null;
+                activeCompletion.TrySetResult();
 
                 if (_queuedRefreshCompletion is null)
                 {
@@ -61,19 +60,16 @@ internal sealed class TargetRefreshCoordinator(Func<TargetRefreshReason, Task> r
                 }
 
                 currentReason = _queuedReason;
-                queuedCompletionToComplete = _queuedRefreshCompletion;
+                activeCompletion = _queuedRefreshCompletion;
                 _queuedRefreshCompletion = null;
                 _queuedReason = TargetRefreshReason.DeviceChange;
             }
-
-            currentRefreshCompletion.TrySetResult();
         }
         catch (Exception ex)
         {
-            queuedCompletionToComplete?.TrySetException(ex);
+            activeCompletion.TrySetException(ex);
             _queuedRefreshCompletion?.TrySetException(ex);
             _queuedRefreshCompletion = null;
-            currentRefreshCompletion.TrySetException(ex);
         }
         finally
         {

@@ -3540,7 +3540,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (!RepairLocalVolumeProjectionSelection(rows, previousPathText, previousSelectedTarget))
             {
-                RestoreTargetSelectionAfterRefresh(previousSelectedTarget, previousPathText);
+                await RestoreTargetSelectionAfterRefreshAsync(previousSelectedTarget, previousPathText);
             }
         }
         catch (Exception ex)
@@ -3632,7 +3632,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return true;
     }
 
-    private bool RestoreTargetSelectionAfterRefresh(TargetRow? previousTarget, string previousPathText)
+    private async Task<bool> RestoreTargetSelectionAfterRefreshAsync(TargetRow? previousTarget, string previousPathText)
     {
         if (previousTarget is null)
         {
@@ -3656,8 +3656,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _suppressTargetSelection = false;
         }
 
+        var currentPathText = PathBox.Text?.Trim() ?? string.Empty;
+        var canRestorePathFromSnapshot = string.Equals(currentPathText, previousPathText, StringComparison.OrdinalIgnoreCase) &&
+            TextMatchesTarget(previousPathText, previousTarget, allowEmpty: true);
+
         if (replacement.Kind != TargetKind.RecycleBin &&
-            TextMatchesTarget(previousPathText, previousTarget, allowEmpty: true))
+            canRestorePathFromSnapshot)
         {
             PathBox.Text = replacement.Kind == TargetKind.PortableDevice
                 ? replacement.DisplayPath
@@ -3665,6 +3669,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SetPortableScanControls(
                 replacement.Kind == TargetKind.PortableDevice,
                 replacement.CloudProvider is not null);
+        }
+
+        if (canRestorePathFromSnapshot &&
+            previousTarget.PortableTarget is { } previousPortable &&
+            replacement.PortableTarget is { } currentPortable &&
+            previousPortable.IsAvailable != currentPortable.IsAvailable)
+        {
+            await SelectTargetAsync(replacement, BeginNavigation());
         }
 
         return true;

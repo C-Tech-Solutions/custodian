@@ -27,7 +27,11 @@ internal sealed class DeviceChangeTargetRefreshService(Action requestRefresh) : 
             return;
         }
 
-        _source.RemoveHook(WndProc);
+        if (!_source.IsDisposed)
+        {
+            _source.RemoveHook(WndProc);
+        }
+
         _source = null;
     }
 
