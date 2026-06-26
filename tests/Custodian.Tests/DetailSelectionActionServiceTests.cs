@@ -22,6 +22,7 @@ public sealed class DetailSelectionActionServiceTests
         Assert.False(state.CanCopy);
         Assert.False(state.CanMove);
         Assert.False(state.CanDelete);
+        Assert.False(state.CanPermanentDelete);
         Assert.False(state.CanCopyPath);
         Assert.False(state.CanExport);
     }
@@ -41,10 +42,13 @@ public sealed class DetailSelectionActionServiceTests
         Assert.True(state.CanCopy);
         Assert.True(state.CanMove);
         Assert.True(state.CanDelete);
+        Assert.True(state.CanPermanentDelete);
         Assert.True(state.CanCopyPath);
         Assert.True(state.CanCopyRows);
         Assert.True(state.CanExport);
         Assert.Equal("Copy", state.CopyText);
+        Assert.Contains("Recycle Bin", state.DeleteToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("without using the Recycle Bin", state.PermanentDeleteToolTip, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -62,6 +66,7 @@ public sealed class DetailSelectionActionServiceTests
         Assert.True(state.CanCopy);
         Assert.True(state.CanMove);
         Assert.True(state.CanDelete);
+        Assert.True(state.CanPermanentDelete);
     }
 
     [Fact]
@@ -80,9 +85,11 @@ public sealed class DetailSelectionActionServiceTests
         Assert.True(state.CanCopy);
         Assert.False(state.CanMove);
         Assert.False(state.CanDelete);
+        Assert.False(state.CanPermanentDelete);
         Assert.Equal("Copy to PC", state.CopyText);
         Assert.Contains("phone", state.MoveToolTip, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("phone", state.DeleteToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("phone", state.PermanentDeleteToolTip, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -120,6 +127,7 @@ public sealed class DetailSelectionActionServiceTests
         Assert.False(state.CanCopy);
         Assert.False(state.CanMove);
         Assert.False(state.CanDelete);
+        Assert.False(state.CanPermanentDelete);
         Assert.True(state.CanCopyPath);
         Assert.True(state.CanCopyRows);
         Assert.True(state.CanExport);
@@ -157,6 +165,7 @@ public sealed class DetailSelectionActionServiceTests
         Assert.False(state.CanCopy);
         Assert.False(state.CanMove);
         Assert.False(state.CanDelete);
+        Assert.False(state.CanPermanentDelete);
         Assert.True(state.CanCopyPath);
         Assert.True(state.CanCopyRows);
         Assert.True(state.CanExport);

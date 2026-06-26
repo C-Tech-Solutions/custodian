@@ -6,7 +6,8 @@ internal enum FileSystemOperationKind
 {
     Copy,
     Move,
-    Recycle
+    Recycle,
+    PermanentDelete
 }
 
 internal sealed record FileSystemOperationFailure(string Path, string Reason);
@@ -54,6 +55,14 @@ internal static class FileSystemOperationService
         CancellationToken cancellationToken = default)
         => RunOnShellStaThreadAsync(
             () => ExecuteBatch(paths, destinationFolder: null, ownerHandle, FileSystemOperationKind.Recycle, cancellationToken),
+            cancellationToken);
+
+    public static Task<FileSystemOperationBatchResult> DeletePermanentlyAsync(
+        IReadOnlyCollection<string> paths,
+        IntPtr ownerHandle,
+        CancellationToken cancellationToken = default)
+        => RunOnShellStaThreadAsync(
+            () => ExecuteBatch(paths, destinationFolder: null, ownerHandle, FileSystemOperationKind.PermanentDelete, cancellationToken),
             cancellationToken);
 
     private static FileSystemOperationBatchResult ExecuteBatch(
@@ -211,6 +220,7 @@ internal static class FileSystemOperationService
                     ThrowIfFailed(operation.MoveItem(sourceItem, destinationItem!, null, IntPtr.Zero));
                     break;
                 case FileSystemOperationKind.Recycle:
+                case FileSystemOperationKind.PermanentDelete:
                     ThrowIfFailed(operation.DeleteItem(sourceItem, IntPtr.Zero));
                     break;
             }
@@ -233,7 +243,7 @@ internal static class FileSystemOperationService
 
     private static string? NormalizeDestination(string? destinationFolder, FileSystemOperationKind operationKind)
     {
-        if (operationKind == FileSystemOperationKind.Recycle)
+        if (operationKind is FileSystemOperationKind.Recycle or FileSystemOperationKind.PermanentDelete)
         {
             return null;
         }

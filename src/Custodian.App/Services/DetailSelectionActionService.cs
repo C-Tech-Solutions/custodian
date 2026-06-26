@@ -11,13 +11,15 @@ internal sealed record DetailSelectionActionState(
     bool CanCopy,
     bool CanMove,
     bool CanDelete,
+    bool CanPermanentDelete,
     bool CanCopyPath,
     bool CanCopyRows,
     bool CanExport,
     string CopyText,
     string CopyToolTip,
     string MoveToolTip,
-    string DeleteToolTip);
+    string DeleteToolTip,
+    string PermanentDeleteToolTip);
 
 internal static class DetailSelectionActionService
 {
@@ -45,6 +47,7 @@ internal static class DetailSelectionActionService
             CanCopy: canCopy,
             CanMove: canModifyLocal,
             CanDelete: canModifyLocal,
+            CanPermanentDelete: canModifyLocal,
             CanCopyPath: hasSelection,
             CanCopyRows: hasSelection,
             CanExport: hasSelection,
@@ -59,6 +62,11 @@ internal static class DetailSelectionActionService
                 ? "Delete is not available for phone scans"
                 : allSelectedRowsUseFileSystemPaths
                     ? "Move selected files or folders to the Recycle Bin"
+                    : "Delete requires real file or folder rows",
+            PermanentDeleteToolTip: isPortableScan
+                ? "Permanent delete is not available for phone scans"
+                : allSelectedRowsUseFileSystemPaths
+                    ? "Permanently delete selected files or folders without using the Recycle Bin"
                     : "Delete requires real file or folder rows");
     }
 
