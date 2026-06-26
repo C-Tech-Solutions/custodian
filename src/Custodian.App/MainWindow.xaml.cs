@@ -692,7 +692,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                    or AppUpdateStatusKind.Downloading
                    or AppUpdateStatusKind.ReadyToRestart);
 
-    private bool CanShowBackgroundUpdateStatus() => _activeScan is null && _activePortableCopy is null && !_isRecycleBinViewActive;
+    private bool CanShowBackgroundUpdateStatus()
+        => _activeScan is null &&
+           _activePortableCopy is null &&
+           !_activeFileOperation &&
+           !_isRecycleBinViewActive;
 
     private void RestoreFooterStatus(string status, string detail)
     {
