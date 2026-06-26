@@ -145,9 +145,9 @@ internal static class FileSystemOperationService
         try
         {
             ThrowIfFailed(operation.SetOwnerWindow(ownerHandle));
-            if (operationKind == FileSystemOperationKind.Recycle)
+            if (operationKind is FileSystemOperationKind.Recycle or FileSystemOperationKind.PermanentDelete)
             {
-                ThrowIfFailed(operation.SetOperationFlags(FofAllowUndo | FofWantNukeWarning | FofxRecycleOnDelete));
+                ThrowIfFailed(operation.SetOperationFlags(OperationFlagsFor(operationKind)));
             }
 
             if (operationKind is FileSystemOperationKind.Copy or FileSystemOperationKind.Move)
@@ -319,6 +319,11 @@ internal static class FileSystemOperationService
 
     private static bool IsCancellationHResult(int hr)
         => hr is HresultCancelled or HresultCopyEngineUserCancelled;
+
+    internal static uint OperationFlagsFor(FileSystemOperationKind operationKind)
+        => operationKind == FileSystemOperationKind.Recycle
+            ? FofAllowUndo | FofWantNukeWarning | FofxRecycleOnDelete
+            : 0;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHCreateItemFromParsingName(
