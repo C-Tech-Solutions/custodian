@@ -129,21 +129,23 @@ public sealed class ScanExporterTests
         Assert.Contains(",,", row); // empty LastWriteUtc followed by empty provider fields
     }
 
-    [Fact]
-    public async Task CsvWritesCloudProviderMetadataOnRows()
+    [Theory]
+    [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    public async Task CsvWritesCloudProviderMetadataOnRows(
+        string providerId,
+        string providerName,
+        string accountLabel,
+        string rootPath)
     {
         var result = SampleResult();
-        result.CloudProvider = new CloudProviderMetadata(
-            "onedrive",
-            "OneDrive",
-            "Personal",
-            @"C:\Users\Me\OneDrive");
+        result.CloudProvider = new CloudProviderMetadata(providerId, providerName, accountLabel, rootPath);
         using var temp = new TempFile(".csv");
 
         await ScanExporter.ExportCsvAsync(result, temp.Path);
         var lines = await ReadAllLinesAsync(temp.Path);
 
-        Assert.EndsWith(@",onedrive,OneDrive,Personal,C:\Users\Me\OneDrive", lines[1]);
+        Assert.EndsWith($",{providerId},{providerName},{accountLabel},{rootPath}", lines[1]);
     }
 
     [Fact]
@@ -179,25 +181,27 @@ public sealed class ScanExporterTests
         }
     }
 
-    [Fact]
-    public async Task JsonWritesCloudProviderMetadata()
+    [Theory]
+    [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    public async Task JsonWritesCloudProviderMetadata(
+        string providerId,
+        string providerName,
+        string accountLabel,
+        string rootPath)
     {
         var result = SampleResult();
-        result.CloudProvider = new CloudProviderMetadata(
-            "onedrive",
-            "OneDrive",
-            "Personal",
-            @"C:\Users\Me\OneDrive");
+        result.CloudProvider = new CloudProviderMetadata(providerId, providerName, accountLabel, rootPath);
         using var temp = new TempFile(".json");
 
         await ScanExporter.ExportJsonAsync(result, temp.Path);
         using var document = JsonDocument.Parse(await System.IO.File.ReadAllBytesAsync(temp.Path));
 
         var provider = document.RootElement.GetProperty("CloudProvider");
-        Assert.Equal("onedrive", provider.GetProperty("ProviderId").GetString());
-        Assert.Equal("OneDrive", provider.GetProperty("ProviderName").GetString());
-        Assert.Equal("Personal", provider.GetProperty("AccountLabel").GetString());
-        Assert.Equal(@"C:\Users\Me\OneDrive", provider.GetProperty("RootPath").GetString());
+        Assert.Equal(providerId, provider.GetProperty("ProviderId").GetString());
+        Assert.Equal(providerName, provider.GetProperty("ProviderName").GetString());
+        Assert.Equal(accountLabel, provider.GetProperty("AccountLabel").GetString());
+        Assert.Equal(rootPath, provider.GetProperty("RootPath").GetString());
     }
 
     private static async Task<string> ReadAllTextAsync(string path)

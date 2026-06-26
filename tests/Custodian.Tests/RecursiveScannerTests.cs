@@ -138,8 +138,8 @@ public sealed class RecursiveScannerTests : IDisposable
     [Fact]
     public async Task CloudProviderScanStampsMetadataAndForcesRecursiveMode()
     {
-        await File.WriteAllBytesAsync(Path.Combine(_root, "onedrive-file.bin"), new byte[10]);
-        var metadata = new CloudProviderMetadata("onedrive", "OneDrive", "Personal", _root);
+        await File.WriteAllBytesAsync(Path.Combine(_root, "nextcloud-file.bin"), new byte[10]);
+        var metadata = new CloudProviderMetadata("nextcloud", "Nextcloud", "cloud.example.test", _root);
 
         var result = await new DiskScanner().ScanAsync(
             new ScanOptions(_root, ScanMode.Mft, CollectAllocatedSize: true, CloudProvider: metadata));

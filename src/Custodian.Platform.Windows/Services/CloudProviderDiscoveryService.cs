@@ -7,6 +7,8 @@ internal sealed class CloudProviderDiscoveryService
 {
     private const string OneDriveProviderId = "onedrive";
     private const string OneDriveProviderName = "OneDrive";
+    private const string NextcloudProviderId = "nextcloud";
+    private const string NextcloudProviderName = "Nextcloud";
     private readonly ICloudProviderDiscoveryEnvironment _environment;
     private readonly object _lock = new();
     private IReadOnlyList<CloudProviderTarget>? _cachedTargets;
@@ -55,7 +57,7 @@ internal sealed class CloudProviderDiscoveryService
     {
         var knownFolders = _environment.GetKnownFolderPaths();
         var targets = new Dictionary<string, CloudProviderTarget>(StringComparer.OrdinalIgnoreCase);
-        foreach (var candidate in GetOneDriveCandidates())
+        foreach (var candidate in GetCloudProviderCandidates())
         {
             if (!TryNormalizeRoot(candidate.RootPath, out var normalizedRoot) ||
                 !_environment.DirectoryExists(normalizedRoot))
@@ -71,17 +73,18 @@ internal sealed class CloudProviderDiscoveryService
                 .ToArray();
 
             var target = new CloudProviderTarget(
-                OneDriveProviderId,
-                OneDriveProviderName,
+                candidate.ProviderId,
+                candidate.ProviderName,
                 candidate.AccountLabel,
                 normalizedRoot,
-                BuildDetailText(candidate.AccountLabel, normalizedRoot, knownFolderNames),
+                BuildDetailText(candidate.ProviderName, candidate.AccountLabel, normalizedRoot, knownFolderNames),
                 knownFolderNames);
+            var targetKey = $"{target.ProviderId}\0{normalizedRoot}";
 
-            if (!targets.TryGetValue(normalizedRoot, out var existing) ||
+            if (!targets.TryGetValue(targetKey, out var existing) ||
                 (string.IsNullOrWhiteSpace(existing.AccountLabel) && !string.IsNullOrWhiteSpace(target.AccountLabel)))
             {
-                targets[normalizedRoot] = target;
+                targets[targetKey] = target;
             }
         }
 
@@ -110,28 +113,158 @@ internal sealed class CloudProviderDiscoveryService
             ?.ToMetadata();
     }
 
-    private IEnumerable<OneDriveRootCandidate> GetOneDriveCandidates()
+    private IEnumerable<CloudProviderRootCandidate> GetCloudProviderCandidates()
     {
-        foreach (var candidate in _environment.GetOneDriveAccountCandidates())
+        foreach (var candidate in GetOneDriveCandidates())
         {
             yield return candidate;
         }
 
-        foreach (var candidate in _environment.GetOneDriveEnvironmentCandidates())
+        foreach (var candidate in GetNextcloudCandidates())
         {
             yield return candidate;
+        }
+    }
+
+    private IEnumerable<CloudProviderRootCandidate> GetOneDriveCandidates()
+    {
+        foreach (var candidate in _environment.GetOneDriveAccountCandidates())
+        {
+            yield return ToOneDriveCandidate(candidate);
+        }
+
+        foreach (var candidate in _environment.GetOneDriveEnvironmentCandidates())
+        {
+            yield return ToOneDriveCandidate(candidate);
         }
 
         var profile = _environment.GetUserProfilePath();
         if (!string.IsNullOrWhiteSpace(profile))
         {
-            yield return new OneDriveRootCandidate(Path.Combine(profile, "OneDrive"), "Personal");
+            yield return ToOneDriveCandidate(new OneDriveRootCandidate(Path.Combine(profile, "OneDrive"), "Personal"));
         }
     }
 
-    private static string BuildDetailText(string accountLabel, string rootPath, IReadOnlyCollection<string> knownFolderNames)
+    private static CloudProviderRootCandidate ToOneDriveCandidate(OneDriveRootCandidate candidate)
+        => new(OneDriveProviderId, OneDriveProviderName, candidate.RootPath, candidate.AccountLabel);
+
+    private IEnumerable<CloudProviderRootCandidate> GetNextcloudCandidates()
     {
-        var account = string.IsNullOrWhiteSpace(accountLabel) ? OneDriveProviderName : accountLabel;
+        foreach (var configFile in _environment.GetNextcloudConfigurationFiles())
+        {
+            foreach (var candidate in ParseNextcloudConfiguration(configFile.Content))
+            {
+                yield return candidate;
+            }
+        }
+
+        foreach (var rootPath in _environment.GetNextcloudProfileCandidates())
+        {
+            yield return new CloudProviderRootCandidate(NextcloudProviderId, NextcloudProviderName, rootPath, string.Empty);
+        }
+    }
+
+    internal static IReadOnlyList<CloudProviderRootCandidate> ParseNextcloudConfiguration(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        var accountLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var syncRoots = new List<(string AccountKey, string RootPath)>();
+        var section = string.Empty;
+
+        foreach (var rawLine in content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith(';'))
+            {
+                continue;
+            }
+
+            if (line.StartsWith('[') && line.EndsWith(']') && line.Length > 2)
+            {
+                section = line[1..^1].Trim();
+                continue;
+            }
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separatorIndex].Trim();
+            var value = TrimConfigurationValue(line[(separatorIndex + 1)..]);
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var qualifiedKey = string.IsNullOrWhiteSpace(section)
+                ? key
+                : $"{section}\\{key}";
+            var parts = qualifiedKey
+                .Replace('/', '\\')
+                .Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (parts.Length == 3 &&
+                parts[0].Equals("Accounts", StringComparison.OrdinalIgnoreCase) &&
+                parts[2].Equals("url", StringComparison.OrdinalIgnoreCase))
+            {
+                var label = BuildNextcloudAccountLabel(value);
+                if (!string.IsNullOrWhiteSpace(label))
+                {
+                    accountLabels[parts[1]] = label;
+                }
+
+                continue;
+            }
+
+            if (parts.Length >= 5 &&
+                parts[0].Equals("Accounts", StringComparison.OrdinalIgnoreCase) &&
+                (parts[2].Equals("FoldersWithPlaceholders", StringComparison.OrdinalIgnoreCase) ||
+                 parts[2].Equals("Folders", StringComparison.OrdinalIgnoreCase)) &&
+                parts[^1].Equals("localPath", StringComparison.OrdinalIgnoreCase))
+            {
+                syncRoots.Add((parts[1], value));
+            }
+        }
+
+        return syncRoots
+            .Select(root => new CloudProviderRootCandidate(
+                NextcloudProviderId,
+                NextcloudProviderName,
+                root.RootPath,
+                accountLabels.GetValueOrDefault(root.AccountKey, string.Empty)))
+            .ToArray();
+    }
+
+    private static string TrimConfigurationValue(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length >= 2 &&
+               ((trimmed[0] == '"' && trimmed[^1] == '"') ||
+                (trimmed[0] == '\'' && trimmed[^1] == '\''))
+            ? trimmed[1..^1].Trim()
+            : trimmed;
+    }
+
+    private static string BuildNextcloudAccountLabel(string value)
+    {
+        if (Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) &&
+            !string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return uri.Host;
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildDetailText(string providerName, string accountLabel, string rootPath, IReadOnlyCollection<string> knownFolderNames)
+    {
+        var account = string.IsNullOrWhiteSpace(accountLabel) ? providerName : accountLabel;
         if (knownFolderNames.Count == 0)
         {
             return $"{account} - {rootPath}";
@@ -215,6 +348,12 @@ internal sealed class CloudProviderDiscoveryService
     }
 }
 
+internal sealed record CloudProviderRootCandidate(
+    string ProviderId,
+    string ProviderName,
+    string RootPath,
+    string AccountLabel);
+
 internal sealed record CloudProviderTarget(
     string ProviderId,
     string ProviderName,
@@ -229,11 +368,15 @@ internal sealed record CloudProviderTarget(
 
 internal sealed record OneDriveRootCandidate(string RootPath, string AccountLabel);
 
+internal sealed record NextcloudConfigurationFile(string FilePath, string Content);
+
 internal interface ICloudProviderDiscoveryEnvironment
 {
     bool IsSupported { get; }
     IEnumerable<OneDriveRootCandidate> GetOneDriveAccountCandidates();
     IEnumerable<OneDriveRootCandidate> GetOneDriveEnvironmentCandidates();
+    IEnumerable<NextcloudConfigurationFile> GetNextcloudConfigurationFiles();
+    IEnumerable<string> GetNextcloudProfileCandidates();
     IReadOnlyDictionary<string, string> GetKnownFolderPaths();
     string? GetUserProfilePath();
     bool DirectoryExists(string path);
@@ -283,6 +426,34 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
     }
 
+    public IEnumerable<NextcloudConfigurationFile> GetNextcloudConfigurationFiles()
+    {
+        foreach (var path in GetNextcloudConfigurationFilePaths().Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var content = ReadConfigurationFile(path);
+            if (content is not null)
+            {
+                yield return new NextcloudConfigurationFile(path, content);
+            }
+        }
+    }
+
+    public IEnumerable<string> GetNextcloudProfileCandidates()
+    {
+        var profile = GetUserProfilePath();
+        if (string.IsNullOrWhiteSpace(profile))
+        {
+            yield break;
+        }
+
+        yield return Path.Combine(profile, "Nextcloud");
+
+        foreach (var directory in EnumerateDirectories(profile, "Nextcloud*"))
+        {
+            yield return directory;
+        }
+    }
+
     public IReadOnlyDictionary<string, string> GetKnownFolderPaths()
     {
         var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -299,6 +470,47 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
     }
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
+
+    private static IEnumerable<string> GetNextcloudConfigurationFilePaths()
+    {
+        var roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrWhiteSpace(roamingAppData))
+        {
+            yield return Path.Combine(roamingAppData, "Nextcloud", "nextcloud.cfg");
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(localAppData, "Nextcloud", "nextcloud.cfg");
+        }
+    }
+
+    private static string? ReadConfigurationFile(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string> EnumerateDirectories(string path, string searchPattern)
+    {
+        try
+        {
+            return Directory.Exists(path)
+                ? Directory.EnumerateDirectories(path, searchPattern, SearchOption.TopDirectoryOnly).ToArray()
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        {
+            return [];
+        }
+    }
 
     private static RegistryKey? OpenOneDriveAccountsKey()
     {

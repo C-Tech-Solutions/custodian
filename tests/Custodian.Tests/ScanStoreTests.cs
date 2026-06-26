@@ -122,15 +122,17 @@ public sealed class ScanStoreTests
         Assert.Equal("file-persistent-id", loaded.Root.Children[0].Children[0].PortablePersistentId);
     }
 
-    [Fact]
-    public async Task SaveThenLoadPreservesCloudProviderMetadata()
+    [Theory]
+    [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    public async Task SaveThenLoadPreservesCloudProviderMetadata(
+        string providerId,
+        string providerName,
+        string accountLabel,
+        string rootPath)
     {
         var result = SampleResult();
-        result.CloudProvider = new CloudProviderMetadata(
-            "onedrive",
-            "OneDrive",
-            "Personal",
-            @"C:\Users\Me\OneDrive");
+        result.CloudProvider = new CloudProviderMetadata(providerId, providerName, accountLabel, rootPath);
         using var temp = new TempScanFile();
         var store = new ScanStore();
 
@@ -138,10 +140,10 @@ public sealed class ScanStoreTests
         var loaded = await store.LoadAsync(temp.Path);
 
         Assert.NotNull(loaded.CloudProvider);
-        Assert.Equal("onedrive", loaded.CloudProvider.ProviderId);
-        Assert.Equal("OneDrive", loaded.CloudProvider.ProviderName);
-        Assert.Equal("Personal", loaded.CloudProvider.AccountLabel);
-        Assert.Equal(@"C:\Users\Me\OneDrive", loaded.CloudProvider.RootPath);
+        Assert.Equal(providerId, loaded.CloudProvider.ProviderId);
+        Assert.Equal(providerName, loaded.CloudProvider.ProviderName);
+        Assert.Equal(accountLabel, loaded.CloudProvider.AccountLabel);
+        Assert.Equal(rootPath, loaded.CloudProvider.RootPath);
     }
 
     [Fact]
@@ -187,15 +189,17 @@ public sealed class ScanStoreTests
         Assert.Null(loaded.CloudProvider);
     }
 
-    [Fact]
-    public async Task LoadDefaultsCloudProviderMetadataForLegacyScanFiles()
+    [Theory]
+    [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    public async Task LoadDefaultsCloudProviderMetadataForLegacyScanFiles(
+        string providerId,
+        string providerName,
+        string accountLabel,
+        string rootPath)
     {
         var result = SampleResult();
-        result.CloudProvider = new CloudProviderMetadata(
-            "onedrive",
-            "OneDrive",
-            "Personal",
-            @"C:\Users\Me\OneDrive");
+        result.CloudProvider = new CloudProviderMetadata(providerId, providerName, accountLabel, rootPath);
         using var temp = new TempScanFile();
         var store = new ScanStore();
 
