@@ -194,6 +194,140 @@ public sealed class CloudProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void GetTargetsIncludesDropboxPersonalAndBusinessRootsFromConfig()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Dropbox\info.json",
+            """
+            {
+              "personal": { "path": "C:\\Users\\Me\\Dropbox" },
+              "business": { "path": "C:\\Users\\Me\\Dropbox (Acme)" }
+            }
+            """));
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox (Acme)");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var targets = service.GetTargets();
+
+        Assert.Equal(2, targets.Count);
+        Assert.Contains(targets, target =>
+            target.ProviderId == "dropbox" &&
+            target.ProviderName == "Dropbox" &&
+            target.AccountLabel == "Personal" &&
+            target.RootPath == @"C:\Users\Me\Dropbox");
+        Assert.Contains(targets, target =>
+            target.ProviderId == "dropbox" &&
+            target.ProviderName == "Dropbox" &&
+            target.AccountLabel == "Business" &&
+            target.RootPath == @"C:\Users\Me\Dropbox (Acme)");
+    }
+
+    [Fact]
+    public void GetTargetsSkipsMissingDropboxConfiguredDirectories()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Dropbox\info.json",
+            """{ "personal": { "path": "C:\\Users\\Me\\MissingDropbox" } }"""));
+        var service = new CloudProviderDiscoveryService(env);
+
+        Assert.Empty(service.GetTargets());
+    }
+
+    [Fact]
+    public void GetTargetsHandlesMalformedDropboxConfigGracefully()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Dropbox\info.json",
+            """{ "personal": { "path": "" }"""));
+        env.AccountCandidates.Add(new OneDriveRootCandidate(@"C:\Users\Me\OneDrive", "Personal"));
+        env.ExistingDirectories.Add(@"C:\Users\Me\OneDrive");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var target = Assert.Single(service.GetTargets());
+
+        Assert.Equal("onedrive", target.ProviderId);
+        Assert.Equal(@"C:\Users\Me\OneDrive", target.RootPath);
+    }
+
+    [Fact]
+    public void GetTargetsUsesConfiguredDropboxRootsInsteadOfProfileFallbacks()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Local\Dropbox\info.json",
+            """{ "business": { "path": "C:\\Users\\Me\\Dropbox (Acme)" } }"""));
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox");
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox Old");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox Old");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox (Acme)");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var target = Assert.Single(service.GetTargets());
+
+        Assert.Equal("dropbox", target.ProviderId);
+        Assert.Equal("Business", target.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\Dropbox (Acme)", target.RootPath);
+    }
+
+    [Fact]
+    public void GetTargetsFallsBackToDropboxProfileCandidateWhenConfigHasNoValidRoot()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Dropbox\info.json",
+            """{ "personal": { "path": "C:\\Users\\Me\\MissingDropbox" } }"""));
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox - Work");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox - Work");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var target = Assert.Single(service.GetTargets());
+
+        Assert.Equal("dropbox", target.ProviderId);
+        Assert.Equal("Dropbox", target.ProviderName);
+        Assert.Equal(string.Empty, target.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\Dropbox - Work", target.RootPath);
+    }
+
+    [Fact]
+    public void GetTargetsDeduplicatesDropboxConfiguredRoots()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Dropbox\info.json",
+            """{ "personal": { "path": "C:\\Users\\Me\\Dropbox\\" } }"""));
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Local\Dropbox\info.json",
+            """{ "personal": { "path": "C:\\Users\\Me\\Dropbox" } }"""));
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var target = Assert.Single(service.GetTargets());
+
+        Assert.Equal("dropbox", target.ProviderId);
+        Assert.Equal(@"C:\Users\Me\Dropbox", target.RootPath);
+    }
+
+    [Fact]
+    public void GetTargetsDeduplicatesDropboxProfileFallbackCandidates()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox");
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox\");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var target = Assert.Single(service.GetTargets());
+
+        Assert.Equal("dropbox", target.ProviderId);
+        Assert.Equal(@"C:\Users\Me\Dropbox", target.RootPath);
+    }
+
+    [Fact]
     public void TryMatchPathMatchesNestedPathButNotSiblingPrefix()
     {
         var env = new FakeCloudProviderEnvironment();
@@ -232,6 +366,27 @@ public sealed class CloudProviderDiscoveryServiceTests
         Assert.Equal("Nextcloud", metadata.ProviderName);
         Assert.Equal("cloud.example.test", metadata.AccountLabel);
         Assert.Equal(@"C:\Users\Me\Nextcloud", metadata.RootPath);
+        Assert.Null(sibling);
+    }
+
+    [Fact]
+    public void TryMatchPathMatchesNestedPathForDropboxButNotSiblingPrefix()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxConfigurationFiles.Add(new DropboxConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Dropbox\info.json",
+            """{ "personal": { "path": "C:\\Users\\Me\\Dropbox" } }"""));
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var metadata = service.TryMatchPath(@"C:\Users\Me\Dropbox\Photos\photo.jpg");
+        var sibling = service.TryMatchPath(@"C:\Users\Me\Dropbox Archive\photo.jpg");
+
+        Assert.NotNull(metadata);
+        Assert.Equal("dropbox", metadata.ProviderId);
+        Assert.Equal("Dropbox", metadata.ProviderName);
+        Assert.Equal("Personal", metadata.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\Dropbox", metadata.RootPath);
         Assert.Null(sibling);
     }
 
@@ -336,6 +491,8 @@ public sealed class CloudProviderDiscoveryServiceTests
         public List<OneDriveRootCandidate> EnvironmentCandidates { get; } = [];
         public List<NextcloudConfigurationFile> ConfigurationFiles { get; } = [];
         public List<string> NextcloudProfileCandidates { get; } = [];
+        public List<DropboxConfigurationFile> DropboxConfigurationFiles { get; } = [];
+        public List<string> DropboxProfileCandidates { get; } = [];
         public Dictionary<string, string> KnownFolders { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> ExistingDirectories { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool IsSupported { get; init; } = true;
@@ -346,6 +503,8 @@ public sealed class CloudProviderDiscoveryServiceTests
         public IEnumerable<OneDriveRootCandidate> GetOneDriveEnvironmentCandidates() => EnvironmentCandidates;
         public IEnumerable<NextcloudConfigurationFile> GetNextcloudConfigurationFiles() => ConfigurationFiles;
         public IEnumerable<string> GetNextcloudProfileCandidates() => NextcloudProfileCandidates;
+        public IEnumerable<DropboxConfigurationFile> GetDropboxConfigurationFiles() => DropboxConfigurationFiles;
+        public IEnumerable<string> GetDropboxProfileCandidates() => DropboxProfileCandidates;
         public IReadOnlyDictionary<string, string> GetKnownFolderPaths()
         {
             if (KnownFolderFailure is not null)
