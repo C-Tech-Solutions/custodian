@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
+using Custodian.Core.Analysis;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
@@ -1442,7 +1443,7 @@ internal static class TuiApplication
                 return;
             }
 
-            if (TuiScanTreeUpdater.RemoveEntry(_currentScan, entry, ref _selectedEntry))
+            if (ScanTreeUpdater.RemoveEntry(_currentScan, entry, ref _selectedEntry))
             {
                 _backStack.Clear();
                 _forwardStack.Clear();

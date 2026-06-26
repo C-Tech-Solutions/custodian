@@ -26,6 +26,8 @@ namespace Custodian.App.Controls;
 /// </summary>
 public sealed class TreemapControl : FrameworkElement
 {
+    private const double SliceAnimationDurationMilliseconds = 180.0;
+
     public static readonly DependencyProperty SlicesProperty = DependencyProperty.Register(
         nameof(Slices),
         typeof(IEnumerable),
@@ -46,9 +48,15 @@ public sealed class TreemapControl : FrameworkElement
     private const double LayoutEpsilon = 1e-6;
     private readonly List<RenderedTile> _tiles = [];
     private readonly List<ChartSlice> _slices = [];
+    private readonly Dictionary<string, double> _displayBytesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _startBytesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _targetBytesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ChartSlice> _lastSlicesByKey = new(StringComparer.Ordinal);
     private INotifyCollectionChanged? _sliceNotifications;
     private bool _isControlLoaded;
     private double _totalBytes;
+    private DateTime _animationStartedUtc;
+    private bool _isAnimating;
     private WpfBrush _backgroundBrush = WpfBrushes.Transparent;
     private WpfBrush _emptyStateBrush = WpfBrushes.Gray;
     private WpfPen _separatorPen = CreatePen(WpfBrushes.White, 1);
@@ -91,6 +99,7 @@ public sealed class TreemapControl : FrameworkElement
     private void TreemapControl_Unloaded(object sender, RoutedEventArgs e)
     {
         _isControlLoaded = false;
+        StopSliceAnimation();
         DetachSliceNotifications();
         ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
     }
@@ -157,11 +166,22 @@ public sealed class TreemapControl : FrameworkElement
 
     private void RefreshSliceCache(IEnumerable? slices)
     {
-        _slices.Clear();
-        _totalBytes = 0;
+        var targetSlices = MaterializeSlices(slices);
+        if (!_isControlLoaded || _slices.Count == 0)
+        {
+            ApplySlicesImmediately(targetSlices);
+            return;
+        }
+
+        StartSliceAnimation(targetSlices);
+    }
+
+    private static List<ChartSlice> MaterializeSlices(IEnumerable? slices)
+    {
+        var targetSlices = new List<ChartSlice>();
         if (slices is null)
         {
-            return;
+            return targetSlices;
         }
 
         foreach (var slice in slices.OfType<ChartSlice>())
@@ -171,17 +191,136 @@ public sealed class TreemapControl : FrameworkElement
                 continue;
             }
 
-            _slices.Add(slice);
-            _totalBytes += slice.RawBytes;
+            targetSlices.Add(slice);
         }
 
-        _slices.Sort(static (left, right) =>
+        targetSlices.Sort(static (left, right) =>
         {
             var sizeCompare = right.RawBytes.CompareTo(left.RawBytes);
             return sizeCompare != 0
                 ? sizeCompare
                 : string.Compare(left.SourceKey, right.SourceKey, StringComparison.Ordinal);
         });
+
+        return targetSlices;
+    }
+
+    private void ApplySlicesImmediately(IReadOnlyList<ChartSlice> targetSlices)
+    {
+        StopSliceAnimation();
+        _slices.Clear();
+        _slices.AddRange(targetSlices);
+        _displayBytesByKey.Clear();
+        _startBytesByKey.Clear();
+        _targetBytesByKey.Clear();
+        _lastSlicesByKey.Clear();
+        _totalBytes = 0;
+        foreach (var slice in targetSlices)
+        {
+            _displayBytesByKey[slice.SourceKey] = slice.RawBytes;
+            _lastSlicesByKey[slice.SourceKey] = slice;
+            _totalBytes += slice.RawBytes;
+        }
+    }
+
+    private void StartSliceAnimation(IReadOnlyList<ChartSlice> targetSlices)
+    {
+        var targetByKey = targetSlices
+            .GroupBy(slice => slice.SourceKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var previousKeys = _slices.Select(slice => slice.SourceKey).Distinct(StringComparer.Ordinal).ToArray();
+        var renderSlices = new List<ChartSlice>(targetSlices);
+        foreach (var key in previousKeys)
+        {
+            if (!targetByKey.ContainsKey(key) && _lastSlicesByKey.TryGetValue(key, out var previousSlice))
+            {
+                renderSlices.Add(previousSlice);
+            }
+        }
+
+        renderSlices.Sort((left, right) =>
+        {
+            var leftTarget = targetByKey.TryGetValue(left.SourceKey, out var leftSlice) ? leftSlice.RawBytes : 0;
+            var rightTarget = targetByKey.TryGetValue(right.SourceKey, out var rightSlice) ? rightSlice.RawBytes : 0;
+            var sizeCompare = rightTarget.CompareTo(leftTarget);
+            return sizeCompare != 0
+                ? sizeCompare
+                : string.Compare(left.SourceKey, right.SourceKey, StringComparison.Ordinal);
+        });
+
+        _slices.Clear();
+        _slices.AddRange(renderSlices);
+        _startBytesByKey.Clear();
+        _targetBytesByKey.Clear();
+        _totalBytes = 0;
+
+        foreach (var slice in renderSlices)
+        {
+            var currentBytes = _displayBytesByKey.TryGetValue(slice.SourceKey, out var displayed)
+                ? displayed
+                : 0.0;
+            var targetBytes = targetByKey.TryGetValue(slice.SourceKey, out var targetSlice)
+                ? targetSlice.RawBytes
+                : 0.0;
+            _startBytesByKey[slice.SourceKey] = currentBytes;
+            _targetBytesByKey[slice.SourceKey] = targetBytes;
+            _displayBytesByKey[slice.SourceKey] = currentBytes;
+            _totalBytes += Math.Max(0, currentBytes);
+        }
+
+        foreach (var slice in targetSlices)
+        {
+            _lastSlicesByKey[slice.SourceKey] = slice;
+        }
+
+        if (!_startBytesByKey.Any(pair => Math.Abs(pair.Value - _targetBytesByKey[pair.Key]) > 0.5))
+        {
+            ApplySlicesImmediately(targetSlices);
+            InvalidateVisual();
+            return;
+        }
+
+        StopSliceAnimation();
+        _isAnimating = true;
+        _animationStartedUtc = DateTime.UtcNow;
+        CompositionTarget.Rendering += CompositionTarget_Rendering;
+        InvalidateVisual();
+    }
+
+    private void CompositionTarget_Rendering(object? sender, EventArgs e)
+    {
+        var progress = Math.Clamp(
+            (DateTime.UtcNow - _animationStartedUtc).TotalMilliseconds / SliceAnimationDurationMilliseconds,
+            0.0,
+            1.0);
+        var eased = 1.0 - Math.Pow(1.0 - progress, 3);
+        _totalBytes = 0;
+        foreach (var pair in _targetBytesByKey)
+        {
+            var start = _startBytesByKey.GetValueOrDefault(pair.Key);
+            var displayed = start + (pair.Value - start) * eased;
+            _displayBytesByKey[pair.Key] = displayed;
+            _totalBytes += Math.Max(0, displayed);
+        }
+
+        if (progress >= 1.0)
+        {
+            var finalSlices = _slices.Where(slice => _targetBytesByKey.GetValueOrDefault(slice.SourceKey) > 0).ToArray();
+            ApplySlicesImmediately(finalSlices);
+        }
+
+        InvalidateVisual();
+    }
+
+    private void StopSliceAnimation()
+    {
+        if (!_isAnimating)
+        {
+            return;
+        }
+
+        CompositionTarget.Rendering -= CompositionTarget_Rendering;
+        _isAnimating = false;
     }
 
     protected override void OnRender(DrawingContext drawingContext)
@@ -199,7 +338,12 @@ public sealed class TreemapControl : FrameworkElement
         // Background plate so the empty area inside the panel matches surface color.
         drawingContext.DrawRectangle(_backgroundBrush, null, new Rect(0, 0, width, height));
 
-        if (_slices.Count == 0 || _totalBytes <= 0)
+        var renderSlices = _slices
+            .Select(slice => (Slice: slice, Bytes: _displayBytesByKey.GetValueOrDefault(slice.SourceKey, slice.RawBytes)))
+            .Where(item => item.Bytes > 0.5)
+            .ToArray();
+        var totalBytes = renderSlices.Sum(item => item.Bytes);
+        if (renderSlices.Length == 0 || totalBytes <= 0)
         {
             DrawEmptyState(drawingContext, width, height);
             return;
@@ -207,7 +351,7 @@ public sealed class TreemapControl : FrameworkElement
 
         // Squarified treemap layout.
         var bounds = new Rect(0, 0, width, height);
-        Squarify(_slices, bounds, _totalBytes);
+        Squarify(renderSlices, bounds, totalBytes);
 
         foreach (var tile in _tiles)
         {
@@ -258,7 +402,7 @@ public sealed class TreemapControl : FrameworkElement
     // ============================================================
     //  Squarified treemap (Bruls, Huijing, van Wijk 2000)
     // ============================================================
-    private void Squarify(IList<ChartSlice> children, Rect rect, double total)
+    private void Squarify(IReadOnlyList<(ChartSlice Slice, double Bytes)> children, Rect rect, double total)
     {
         if (children.Count == 0 || rect.Width <= 0 || rect.Height <= 0 || total <= 0)
         {
@@ -269,7 +413,7 @@ public sealed class TreemapControl : FrameworkElement
         var remaining = new List<(ChartSlice slice, double area)>(children.Count);
         foreach (var child in children)
         {
-            remaining.Add((child, child.RawBytes * scale));
+            remaining.Add((child.Slice, child.Bytes * scale));
         }
 
         Layout(remaining, rect);
