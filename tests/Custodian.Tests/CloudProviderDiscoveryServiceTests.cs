@@ -145,7 +145,7 @@ public sealed class CloudProviderDiscoveryServiceTests
     }
 
     [Fact]
-    public void GetTargetsDeduplicatesNextcloudConfigAndProfileFallbackRoots()
+    public void GetTargetsUsesConfiguredNextcloudRootsInsteadOfProfileFallbacks()
     {
         var env = new FakeCloudProviderEnvironment();
         env.ConfigurationFiles.Add(new NextcloudConfigurationFile(
@@ -153,22 +153,34 @@ public sealed class CloudProviderDiscoveryServiceTests
             """
             [Accounts]
             0\url=https://cloud.example.test
-            0\FoldersWithPlaceholders\1\localPath=C:/Users/Me/Nextcloud/
+            0\FoldersWithPlaceholders\1\localPath=C:/Users/Me/Nextcloud3/
             """));
         env.NextcloudProfileCandidates.Add(@"C:\Users\Me\Nextcloud");
+        env.NextcloudProfileCandidates.Add(@"C:\Users\Me\Nextcloud2");
+        env.NextcloudProfileCandidates.Add(@"C:\Users\Me\Nextcloud3");
         env.ExistingDirectories.Add(@"C:\Users\Me\Nextcloud");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Nextcloud2");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Nextcloud3");
         var service = new CloudProviderDiscoveryService(env);
 
         var target = Assert.Single(service.GetTargets());
 
         Assert.Equal("nextcloud", target.ProviderId);
         Assert.Equal("cloud.example.test", target.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\Nextcloud3", target.RootPath);
     }
 
     [Fact]
-    public void GetTargetsFallsBackToNextcloudProfileCandidate()
+    public void GetTargetsFallsBackToNextcloudProfileCandidateWhenConfigHasNoValidRoot()
     {
         var env = new FakeCloudProviderEnvironment();
+        env.ConfigurationFiles.Add(new NextcloudConfigurationFile(
+            @"C:\Users\Me\AppData\Roaming\Nextcloud\nextcloud.cfg",
+            """
+            [Accounts]
+            0\url=https://cloud.example.test
+            0\FoldersWithPlaceholders\1\localPath=C:/Users/Me/MissingNextcloud/
+            """));
         env.NextcloudProfileCandidates.Add(@"C:\Users\Me\Nextcloud - Work");
         env.ExistingDirectories.Add(@"C:\Users\Me\Nextcloud - Work");
         var service = new CloudProviderDiscoveryService(env);

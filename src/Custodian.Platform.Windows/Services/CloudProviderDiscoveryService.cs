@@ -154,12 +154,19 @@ internal sealed class CloudProviderDiscoveryService
 
     private IEnumerable<CloudProviderRootCandidate> GetNextcloudCandidates()
     {
-        foreach (var configFile in _environment.GetNextcloudConfigurationFiles())
+        var configuredCandidates = _environment.GetNextcloudConfigurationFiles()
+            .SelectMany(configFile => ParseNextcloudConfiguration(configFile.Content))
+            .Where(IsExistingCloudProviderRoot)
+            .ToArray();
+
+        if (configuredCandidates.Length > 0)
         {
-            foreach (var candidate in ParseNextcloudConfiguration(configFile.Content))
+            foreach (var candidate in configuredCandidates)
             {
                 yield return candidate;
             }
+
+            yield break;
         }
 
         foreach (var rootPath in _environment.GetNextcloudProfileCandidates())
@@ -167,6 +174,10 @@ internal sealed class CloudProviderDiscoveryService
             yield return new CloudProviderRootCandidate(NextcloudProviderId, NextcloudProviderName, rootPath, string.Empty);
         }
     }
+
+    private bool IsExistingCloudProviderRoot(CloudProviderRootCandidate candidate)
+        => TryNormalizeRoot(candidate.RootPath, out var normalizedRoot) &&
+            _environment.DirectoryExists(normalizedRoot);
 
     internal static IReadOnlyList<CloudProviderRootCandidate> ParseNextcloudConfiguration(string content)
     {
