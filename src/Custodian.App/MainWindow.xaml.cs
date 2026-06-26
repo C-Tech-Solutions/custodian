@@ -3265,7 +3265,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             UpdatePathDisplay(selected.FullPath);
         }
         SelectedTitleText.Text = string.IsNullOrWhiteSpace(selected.Name) ? selected.FullPath : selected.Name;
-        SelectedSubText.Text = BuildSelectedSubText(viewMode, selected);
+        SelectedSubText.Text = BuildSelectedStatusText(viewMode, selected);
     }
 
     private IReadOnlyList<DetailRow> GetOrCreateGlobalDetailRows(
@@ -3633,7 +3633,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _selectedChartSourceKey = null;
         _selectedEntry = null;
         SelectedTitleText.Text = "Scanning...";
-        SelectedSubText.Text = path;
+        SelectedSubText.Text = "Preparing scan...";
         UpdateFooterStatus("Scanning", "Preparing...");
         EngineBadge.Text = "Scanning";
         EngineBadgeDot.Fill = (WpfBrush?)TryFindResource("AccentBrush") ?? WpfBrushes.DodgerBlue;
@@ -4266,6 +4266,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             allRowsUseFileSystemPaths,
             _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
 
+        SelectionActionsBar.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         SelectionStatusText.Text = state.SelectionText;
         OpenSelectionButton.IsEnabled = state.CanOpen;
         RevealSelectionButton.IsEnabled = state.CanReveal;
@@ -4531,9 +4532,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ => "Contents"
     };
 
-    private static string BuildSelectedSubText(DetailViewMode mode, FileSystemEntry selected)
+    private static string BuildSelectedStatusText(DetailViewMode mode, FileSystemEntry selected)
     {
-        return $"{ViewModeLabel(mode)} · {selected.FullPath} · {SizeFormatter.Format(selected.LogicalSizeBytes)} · {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
+        return $"{ViewModeLabel(mode)} | {SizeFormatter.Format(selected.LogicalSizeBytes)} | {selected.FileCount:n0} files, {selected.DirectoryCount:n0} folders";
     }
 
     private static string RecycleBinItemCountText(long count)
