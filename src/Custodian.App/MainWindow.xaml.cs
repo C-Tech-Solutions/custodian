@@ -69,6 +69,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private CancellationTokenSource? _activePortableCopy;
     private Task? _activePortableCopyTask;
     private bool _activeFileOperation;
+    private CancellationTokenSource? _activeFileOperationCts;
+    private Task? _activeFileOperationTask;
     private CancellationTokenSource? _updateCts;
     private CancellationTokenSource? _recycleBinCts;
     private bool _recycleBinCtsIsRefresh;
@@ -257,12 +259,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isClosing = true;
         IsEnabled = false;
         _activeScan?.Cancellation.Cancel();
+        _activeFileOperationCts?.Cancel();
         _updateCts?.Cancel();
         _recycleBinCts?.Cancel();
         _settingsSaveTimer.Stop();
         try
         {
             await CancelActivePortableCopyAsync();
+            await CancelActiveFileOperationAsync();
             await PersistSettingsAsync();
         }
         catch (Exception ex)
@@ -273,6 +277,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _settingsPersistedForClose = true;
             Close();
+        }
+    }
+
+    private async Task CancelActiveFileOperationAsync()
+    {
+        var fileOperationTask = _activeFileOperationTask;
+        _activeFileOperationCts?.Cancel();
+        if (fileOperationTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await fileOperationTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "File operation ended while closing.");
         }
     }
 
@@ -2319,10 +2345,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var selectedRows = SelectedDetailRows().ToList();
-        var paths = SelectedExistingFileSystemPaths();
+        var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);
         if (selectedRows.Count == 0 || paths.Count == 0)
         {
-            ShowToast("Select one or more existing file or folder rows first.");
+            ShowToast("Select one or more file or folder rows first.");
             return;
         }
 
@@ -2509,10 +2535,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var selectedRows = SelectedDetailRows().ToList();
-        var paths = SelectedExistingFileSystemPaths();
+        var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);
         if (selectedRows.Count == 0 || paths.Count == 0)
         {
-            ShowToast("Select one or more existing file or folder rows.");
+            ShowToast("Select one or more file or folder rows.");
             return;
         }
 
@@ -2524,7 +2550,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var answer = WpfMessageBox.Show(
             this,
-            $"Move {paths.Count:n0} selected item(s) to the Recycle Bin?\n\n{SelectionPreview(paths)}\n\nCustodian will ask Windows to recycle these items, not permanently delete them. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
+            $"Move {paths.Count:n0} selected item(s) to the Recycle Bin?\n\n{DetailSelectionActionService.SelectionPreview(paths)}\n\nCustodian will ask Windows to recycle these items, not permanently delete them. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
             "Confirm Recycle Bin move",
             MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
@@ -2548,6 +2574,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         IReadOnlyCollection<string> paths,
         string? destinationFolder)
     {
+        var cts = new CancellationTokenSource();
+        _activeFileOperationCts = cts;
         _activeFileOperation = true;
         UpdateDetailSelectionActionState();
         var operationText = operationKind switch
@@ -2561,14 +2589,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             var ownerHandle = new WindowInteropHelper(this).Handle;
-            var result = operationKind switch
+            var operationTask = operationKind switch
             {
-                FileSystemOperationKind.Copy => await FileSystemOperationService.CopyToFolderAsync(paths, destinationFolder!, ownerHandle),
-                FileSystemOperationKind.Move => await FileSystemOperationService.MoveToFolderAsync(paths, destinationFolder!, ownerHandle),
-                _ => await FileSystemOperationService.MoveToRecycleBinAsync(paths, ownerHandle)
+                FileSystemOperationKind.Copy => FileSystemOperationService.CopyToFolderAsync(paths, destinationFolder!, ownerHandle, cts.Token),
+                FileSystemOperationKind.Move => FileSystemOperationService.MoveToFolderAsync(paths, destinationFolder!, ownerHandle, cts.Token),
+                _ => FileSystemOperationService.MoveToRecycleBinAsync(paths, ownerHandle, cts.Token)
             };
+            _activeFileOperationTask = operationTask;
 
+            var result = await operationTask;
             ShowFileSystemOperationResult(operationKind, result, destinationFolder);
+        }
+        catch (OperationCanceledException)
+        {
+            ShowToast("File operation cancelled.");
+            UpdateFooterStatus("Cancelled", "File operation cancelled.");
         }
         catch (Exception ex)
         {
@@ -2577,6 +2612,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
+            if (ReferenceEquals(_activeFileOperationCts, cts))
+            {
+                _activeFileOperationCts = null;
+                _activeFileOperationTask = null;
+            }
+
+            cts.Dispose();
             _activeFileOperation = false;
             UpdateDetailSelectionActionState();
             if (_currentScan is not null && !_isRecycleBinViewActive)
@@ -2625,14 +2667,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             FileSystemOperationKind.Move => "Move",
             _ => "Recycle Bin move"
         };
-
-    private static string SelectionPreview(IReadOnlyList<string> paths)
-    {
-        var preview = string.Join(Environment.NewLine, paths.Take(6));
-        return paths.Count > 6
-            ? preview + $"{Environment.NewLine}...and {paths.Count - 6:n0} more."
-            : preview;
-    }
 
     private FileSystemEntry? SelectedEntry()
     {
@@ -4180,7 +4214,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var rows = SelectedDetailRows().ToList();
-        var allRowsUseFileSystemPaths = rows.Count > 0 && rows.All(row => IsExistingFileSystemPath(row.FullPath));
+        var allRowsUseFileSystemPaths = DetailSelectionActionService.AllRowsUseFileSystemPathSyntax(rows);
         var state = DetailSelectionActionService.Build(
             rows,
             CurrentScanIsPortable(),
@@ -4210,13 +4244,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ExportSelectionMenuItem.IsEnabled = state.CanExport;
         DeleteSelectedMenuItem.IsEnabled = state.CanDelete;
     }
-
-    private IReadOnlyList<string> SelectedExistingFileSystemPaths()
-        => SelectedDetailRows()
-            .Select(row => row.FullPath)
-            .Where(IsExistingFileSystemPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
 
     private string? SelectedPath()
     {

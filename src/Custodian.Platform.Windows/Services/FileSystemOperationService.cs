@@ -62,44 +62,27 @@ internal static class FileSystemOperationService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        var sourcePaths = DistinctPaths(paths);
-        var requestedCount = sourcePaths.Count;
-        var completedCount = 0;
-        var cancelledCount = 0;
         var failures = new List<FileSystemOperationFailure>();
+        var requestedCount = paths.Count(path => !string.IsNullOrWhiteSpace(path));
+        var sourcePaths = DistinctPaths(paths, failures);
 
         var normalizedDestination = NormalizeDestination(destinationFolder, operationKind);
-        foreach (var path in sourcePaths)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                if (!File.Exists(path) && !Directory.Exists(path))
-                {
-                    failures.Add(new FileSystemOperationFailure(path, "The file or folder no longer exists."));
-                    continue;
-                }
-
-                var completed = ExecuteOne(path, normalizedDestination, ownerHandle, operationKind);
-                if (completed)
-                {
-                    completedCount++;
-                }
-                else
-                {
-                    cancelledCount++;
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException or InvalidOperationException)
-            {
-                failures.Add(new FileSystemOperationFailure(path, ex.Message));
-            }
-        }
+        var operationResult = ExecuteShellBatch(
+            sourcePaths,
+            normalizedDestination,
+            ownerHandle,
+            operationKind,
+            failures,
+            cancellationToken);
+        var completedCount = operationResult.Completed ? operationResult.StagedCount : 0;
+        var cancelledCount = operationResult.Completed ? 0 : operationResult.StagedCount;
 
         return new FileSystemOperationBatchResult(requestedCount, completedCount, cancelledCount, failures);
     }
 
-    private static List<string> DistinctPaths(IEnumerable<string> paths)
+    private static List<string> DistinctPaths(
+        IEnumerable<string> paths,
+        ICollection<FileSystemOperationFailure> failures)
     {
         var normalized = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -110,14 +93,135 @@ internal static class FileSystemOperationService
                 continue;
             }
 
-            var fullPath = Path.GetFullPath(path);
-            if (seen.Add(fullPath))
+            try
             {
-                normalized.Add(fullPath);
+                var fullPath = Path.GetFullPath(path);
+                if (seen.Add(fullPath))
+                {
+                    normalized.Add(fullPath);
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+            {
+                failures.Add(new FileSystemOperationFailure(path, ex.Message));
             }
         }
 
         return normalized;
+    }
+
+    private static ShellBatchResult ExecuteShellBatch(
+        IReadOnlyList<string> sourcePaths,
+        string? destinationFolder,
+        IntPtr ownerHandle,
+        FileSystemOperationKind operationKind,
+        List<FileSystemOperationFailure> failures,
+        CancellationToken cancellationToken)
+    {
+        if (sourcePaths.Count == 0)
+        {
+            return new ShellBatchResult(0, Completed: true);
+        }
+
+        var operation = CreateFileOperation();
+        IShellItem? destinationItem = null;
+        var sourceItems = new List<IShellItem>();
+        try
+        {
+            ThrowIfFailed(operation.SetOwnerWindow(ownerHandle));
+            if (operationKind == FileSystemOperationKind.Recycle)
+            {
+                ThrowIfFailed(operation.SetOperationFlags(FofAllowUndo | FofWantNukeWarning | FofxRecycleOnDelete));
+            }
+
+            if (operationKind is FileSystemOperationKind.Copy or FileSystemOperationKind.Move)
+            {
+                destinationItem = CreateShellItem(destinationFolder!);
+            }
+
+            foreach (var path in sourcePaths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                StageShellItem(path, destinationItem, operation, operationKind, sourceItems, failures);
+            }
+
+            if (sourceItems.Count == 0)
+            {
+                return new ShellBatchResult(0, Completed: true);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var hr = operation.PerformOperations();
+            if (hr == HresultCancelled)
+            {
+                return new ShellBatchResult(sourceItems.Count, Completed: false);
+            }
+
+            ThrowIfFailed(hr);
+            ThrowIfFailed(operation.GetAnyOperationsAborted(out var aborted));
+            return new ShellBatchResult(sourceItems.Count, Completed: !aborted);
+        }
+        finally
+        {
+            foreach (var sourceItem in sourceItems)
+            {
+                Marshal.ReleaseComObject(sourceItem);
+            }
+
+            if (destinationItem is not null)
+            {
+                Marshal.ReleaseComObject(destinationItem);
+            }
+
+            Marshal.ReleaseComObject(operation);
+        }
+    }
+
+    private static void StageShellItem(
+        string path,
+        IShellItem? destinationItem,
+        IFileOperation operation,
+        FileSystemOperationKind operationKind,
+        ICollection<IShellItem> sourceItems,
+        ICollection<FileSystemOperationFailure> failures)
+    {
+        IShellItem? sourceItem = null;
+        try
+        {
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                failures.Add(new FileSystemOperationFailure(path, "The file or folder no longer exists."));
+                return;
+            }
+
+            sourceItem = CreateShellItem(path);
+            switch (operationKind)
+            {
+                case FileSystemOperationKind.Copy:
+                    ThrowIfFailed(operation.CopyItem(sourceItem, destinationItem!, null, IntPtr.Zero));
+                    break;
+                case FileSystemOperationKind.Move:
+                    ThrowIfFailed(operation.MoveItem(sourceItem, destinationItem!, null, IntPtr.Zero));
+                    break;
+                case FileSystemOperationKind.Recycle:
+                    ThrowIfFailed(operation.DeleteItem(sourceItem, IntPtr.Zero));
+                    break;
+            }
+
+            sourceItems.Add(sourceItem);
+            sourceItem = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException or InvalidOperationException)
+        {
+            failures.Add(new FileSystemOperationFailure(path, ex.Message));
+        }
+        finally
+        {
+            if (sourceItem is not null)
+            {
+                Marshal.ReleaseComObject(sourceItem);
+            }
+        }
     }
 
     private static string? NormalizeDestination(string? destinationFolder, FileSystemOperationKind operationKind)
@@ -141,64 +245,7 @@ internal static class FileSystemOperationService
         return fullPath;
     }
 
-    private static bool ExecuteOne(
-        string path,
-        string? destinationFolder,
-        IntPtr ownerHandle,
-        FileSystemOperationKind operationKind)
-    {
-        var operation = CreateFileOperation();
-        IShellItem? sourceItem = null;
-        IShellItem? destinationItem = null;
-        try
-        {
-            ThrowIfFailed(operation.SetOwnerWindow(ownerHandle));
-            if (operationKind == FileSystemOperationKind.Recycle)
-            {
-                ThrowIfFailed(operation.SetOperationFlags(FofAllowUndo | FofWantNukeWarning | FofxRecycleOnDelete));
-            }
-
-            sourceItem = CreateShellItem(path);
-            switch (operationKind)
-            {
-                case FileSystemOperationKind.Copy:
-                    destinationItem = CreateShellItem(destinationFolder!);
-                    ThrowIfFailed(operation.CopyItem(sourceItem, destinationItem, null, IntPtr.Zero));
-                    break;
-                case FileSystemOperationKind.Move:
-                    destinationItem = CreateShellItem(destinationFolder!);
-                    ThrowIfFailed(operation.MoveItem(sourceItem, destinationItem, null, IntPtr.Zero));
-                    break;
-                case FileSystemOperationKind.Recycle:
-                    ThrowIfFailed(operation.DeleteItem(sourceItem, IntPtr.Zero));
-                    break;
-            }
-
-            var hr = operation.PerformOperations();
-            if (hr == HresultCancelled)
-            {
-                return false;
-            }
-
-            ThrowIfFailed(hr);
-            ThrowIfFailed(operation.GetAnyOperationsAborted(out var aborted));
-            return !aborted;
-        }
-        finally
-        {
-            if (sourceItem is not null)
-            {
-                Marshal.ReleaseComObject(sourceItem);
-            }
-
-            if (destinationItem is not null)
-            {
-                Marshal.ReleaseComObject(destinationItem);
-            }
-
-            Marshal.ReleaseComObject(operation);
-        }
-    }
+    private sealed record ShellBatchResult(int StagedCount, bool Completed);
 
     private static Task<T> RunOnShellStaThreadAsync<T>(Func<T> action, CancellationToken cancellationToken)
     {
@@ -227,7 +274,7 @@ internal static class FileSystemOperationService
 
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        return completion.Task.WaitAsync(cancellationToken);
+        return completion.Task;
     }
 
     private static IShellItem CreateShellItem(string path)

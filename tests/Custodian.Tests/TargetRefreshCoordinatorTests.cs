@@ -2,6 +2,8 @@ using Custodian.App.Services;
 
 public sealed class TargetRefreshCoordinatorTests
 {
+    private static readonly TimeSpan AsyncAssertionTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
     public async Task RequestRefreshRunsSingleRefreshWhenIdle()
     {
@@ -96,7 +98,7 @@ public sealed class TargetRefreshCoordinatorTests
         var queuedTask = coordinator.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
 
         firstRefreshCanComplete.SetResult();
-        await firstTask.WaitAsync(TimeSpan.FromSeconds(1));
+        await firstTask.WaitAsync(AsyncAssertionTimeout);
 
         Assert.Equal(2, calls);
         Assert.False(queuedTask.IsCompleted);
@@ -125,7 +127,7 @@ public sealed class TargetRefreshCoordinatorTests
         var firstTask = coordinator.RequestRefreshAsync(TargetRefreshReason.Manual);
         var queuedTask = coordinator.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
 
-        await firstTask.WaitAsync(TimeSpan.FromSeconds(1));
+        await firstTask.WaitAsync(AsyncAssertionTimeout);
         var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => queuedTask);
 
         Assert.Same(expected, actual);

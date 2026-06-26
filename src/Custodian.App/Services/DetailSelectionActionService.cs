@@ -1,3 +1,4 @@
+using System.IO;
 using Custodian.Core.Presentation;
 
 namespace Custodian.App.Services;
@@ -58,9 +59,30 @@ internal static class DetailSelectionActionService
                     : "Delete requires real file or folder rows");
     }
 
-    private static string SelectionText(int count, bool isPortableScan, bool allSelectedRowsUseFileSystemPaths)
+    internal static bool AllRowsUseFileSystemPathSyntax(IReadOnlyCollection<DetailRow> rows)
+        => rows.Count > 0 && rows.All(row => IsFileSystemPathSyntax(row.FullPath));
+
+    internal static IReadOnlyList<string> FileSystemPaths(IEnumerable<DetailRow> rows)
+        => rows
+            .Select(row => row.FullPath)
+            .Where(IsFileSystemPathSyntax)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    internal static string SelectionPreview(IReadOnlyList<string> paths)
     {
-        if (count > 0 && !isPortableScan && !allSelectedRowsUseFileSystemPaths)
+        var preview = string.Join(Environment.NewLine, paths.Take(6));
+        return paths.Count > 6
+            ? preview + $"{Environment.NewLine}...and {paths.Count - 6:n0} more."
+            : preview;
+    }
+
+    private static bool IsFileSystemPathSyntax(string path)
+        => !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path);
+
+    private static string SelectionText(int count, bool isPortableScan, bool allSelectedRowsUseFileSystemPathSyntax)
+    {
+        if (count > 0 && !isPortableScan && !allSelectedRowsUseFileSystemPathSyntax)
         {
             return count == 1
                 ? "1 non-file row selected"
@@ -75,14 +97,14 @@ internal static class DetailSelectionActionService
         };
     }
 
-    private static string CopyToolTip(bool isPortableScan, bool allSelectedRowsUseFileSystemPaths)
+    private static string CopyToolTip(bool isPortableScan, bool allSelectedRowsUseFileSystemPathSyntax)
     {
         if (isPortableScan)
         {
             return "Copy selected phone items to a PC folder";
         }
 
-        return allSelectedRowsUseFileSystemPaths
+        return allSelectedRowsUseFileSystemPathSyntax
             ? "Copy selected files or folders to another folder"
             : "Copy requires real file or folder rows";
     }

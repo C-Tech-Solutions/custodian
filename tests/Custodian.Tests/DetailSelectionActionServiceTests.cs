@@ -103,6 +103,24 @@ public sealed class DetailSelectionActionServiceTests
     }
 
     [Fact]
+    public void FileSystemPathSyntaxDoesNotRequireFilesToExist()
+    {
+        var rows = new[] { Row(@"C:\DefinitelyMissing\a.txt"), Row(@"C:\DefinitelyMissing\b.txt") };
+
+        Assert.True(DetailSelectionActionService.AllRowsUseFileSystemPathSyntax(rows));
+        Assert.Equal([@"C:\DefinitelyMissing\a.txt", @"C:\DefinitelyMissing\b.txt"], DetailSelectionActionService.FileSystemPaths(rows));
+    }
+
+    [Fact]
+    public void FileSystemPathSyntaxRejectsSyntheticRows()
+    {
+        var rows = new[] { Row(@"C:\Temp\file.txt"), Row(".zip") };
+
+        Assert.False(DetailSelectionActionService.AllRowsUseFileSystemPathSyntax(rows));
+        Assert.Equal([@"C:\Temp\file.txt"], DetailSelectionActionService.FileSystemPaths(rows));
+    }
+
+    [Fact]
     public void BusyStateBlocksFileOperationsButKeepsSelectionExports()
     {
         var state = DetailSelectionActionService.Build(
