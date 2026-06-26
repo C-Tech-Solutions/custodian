@@ -85,6 +85,30 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void FindFilesystemTargetForScanTextResolvesNextcloudTargetAndMetadata()
+    {
+        var cloudTarget = new CloudProviderTarget(
+            "nextcloud",
+            "Nextcloud",
+            "cloud.example.test",
+            @"C:\Users\Me\Nextcloud",
+            @"cloud.example.test - C:\Users\Me\Nextcloud",
+            []);
+        var row = TargetRow.FromCloudProvider(cloudTarget);
+
+        var match = MainWindow.FindFilesystemTargetForScanText([row], [], @"C:\Users\Me\Nextcloud");
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.CloudProvider, match.Kind);
+        Assert.Same(cloudTarget, match.CloudProviderTarget);
+        Assert.NotNull(match.CloudProvider);
+        Assert.Equal("nextcloud", match.CloudProvider.ProviderId);
+        Assert.Equal("Nextcloud", match.CloudProvider.ProviderName);
+        Assert.Equal("cloud.example.test", match.CloudProvider.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\Nextcloud", match.CloudProvider.RootPath);
+    }
+
+    [Fact]
     public void CloudTargetInsertIndexPlacesCloudRowsAfterLocalDrives()
     {
         var recycleBin = TargetRow.RecycleBin();
@@ -369,19 +393,25 @@ public sealed class MainWindowTargetRepairTests
         Assert.Null(match);
     }
 
-    [Fact]
-    public void FindEquivalentTargetRowMatchesCloudProviderByProviderAndRoot()
+    [Theory]
+    [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    public void FindEquivalentTargetRowMatchesCloudProviderByProviderAndRoot(
+        string providerId,
+        string providerName,
+        string accountLabel,
+        string rootPath)
     {
         var previousTarget = new CloudProviderTarget(
-            "onedrive",
-            "OneDrive",
-            "Personal",
-            @"C:\Users\Me\OneDrive",
-            @"Personal - C:\Users\Me\OneDrive",
+            providerId,
+            providerName,
+            accountLabel,
+            rootPath,
+            $"{accountLabel} - {rootPath}",
             []);
         var currentTarget = previousTarget with
         {
-            DetailText = @"Personal - C:\Users\Me\OneDrive - includes Desktop"
+            DetailText = $"{accountLabel} - {rootPath} - includes Desktop"
         };
         var current = TargetRow.FromCloudProvider(currentTarget);
 
@@ -390,15 +420,21 @@ public sealed class MainWindowTargetRepairTests
         Assert.Same(current, match);
     }
 
-    [Fact]
-    public void FindEquivalentTargetRowReturnsNullWhenCloudRowsAreHidden()
+    [Theory]
+    [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    public void FindEquivalentTargetRowReturnsNullWhenCloudRowsAreHidden(
+        string providerId,
+        string providerName,
+        string accountLabel,
+        string rootPath)
     {
         var previousTarget = new CloudProviderTarget(
-            "onedrive",
-            "OneDrive",
-            "Personal",
-            @"C:\Users\Me\OneDrive",
-            @"Personal - C:\Users\Me\OneDrive",
+            providerId,
+            providerName,
+            accountLabel,
+            rootPath,
+            $"{accountLabel} - {rootPath}",
             []);
         var localDrive = TargetRow.FromDrive(new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50));
 
