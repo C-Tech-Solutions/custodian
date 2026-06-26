@@ -390,39 +390,68 @@
                                 Background="{DynamicResource SurfaceSubtle}"
                                 BorderBrush="{DynamicResource Border}"
                                 BorderThickness="0,0,0,1"
-                                Padding="14,12">
+                                Padding="14,8">
                             <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="240"/>
                                 </Grid.ColumnDefinitions>
 
-                                <Grid Grid.ColumnSpan="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="240"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Orientation="Horizontal">
-                                        <Button x:Name="BackButton" Style="{StaticResource ExplorerNavButton}"
-                                                Click="Back_Click" Content="Back" IsEnabled="False"
-                                                ToolTip="Go back to the previous folder (Alt+Left)"/>
-                                        <Button x:Name="ForwardButton" Style="{StaticResource ExplorerNavButton}"
-                                                Click="Forward_Click" Content="Forward" IsEnabled="False"
-                                                ToolTip="Go forward to the next folder (Alt+Right)"/>
-                                        <Button x:Name="UpButton" Style="{StaticResource ExplorerNavButton}"
-                                                Click="Up_Click" Content="Up" IsEnabled="False"
-                                                ToolTip="Go to the parent folder (Alt+Up / Backspace)"/>
-                                        <Button x:Name="RefreshButton" Style="{StaticResource ExplorerNavButton}"
-                                                Click="Refresh_Click" Content="Rescan"
-                                                ToolTip="Scan the folder shown in the path box (F5)"/>
-                                    </StackPanel>
-                                    <ScrollViewer x:Name="BreadcrumbScrollViewer" Grid.Column="1" HorizontalScrollBarVisibility="Auto"
-                                                  VerticalScrollBarVisibility="Disabled" Margin="10,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button x:Name="BackButton" Style="{StaticResource ExplorerNavIconButton}"
+                                            Click="Back_Click" IsEnabled="False"
+                                            AutomationProperties.Name="Back"
+                                            ToolTip="Go back to the previous folder (Alt+Left)">
+                                        <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                            <Path Data="{StaticResource IconChevronLeftGeometry}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                  Style="{StaticResource VectorIconPath}"/>
+                                        </Viewbox>
+                                    </Button>
+                                    <Button x:Name="ForwardButton" Style="{StaticResource ExplorerNavIconButton}"
+                                            Click="Forward_Click" IsEnabled="False"
+                                            AutomationProperties.Name="Forward"
+                                            ToolTip="Go forward to the next folder (Alt+Right)">
+                                        <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                            <Path Data="{StaticResource IconChevronRightGeometry}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                  Style="{StaticResource VectorIconPath}"/>
+                                        </Viewbox>
+                                    </Button>
+                                    <Button x:Name="UpButton" Style="{StaticResource ExplorerNavIconButton}"
+                                            Click="Up_Click" IsEnabled="False"
+                                            AutomationProperties.Name="Up"
+                                            ToolTip="Go to the parent folder (Alt+Up / Backspace)">
+                                        <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                            <Path Data="{StaticResource IconChevronUpGeometry}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                  Style="{StaticResource VectorIconPath}"/>
+                                        </Viewbox>
+                                    </Button>
+                                    <Button x:Name="RefreshButton" Style="{StaticResource ExplorerNavIconButton}"
+                                            Click="Refresh_Click"
+                                            AutomationProperties.Name="Rescan"
+                                            ToolTip="Scan the folder shown in the path box (F5)">
+                                        <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                            <Path Data="{StaticResource IconRefreshGeometry}"
+                                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                  Style="{StaticResource VectorIconPath}"/>
+                                        </Viewbox>
+                                    </Button>
+                                </StackPanel>
+
+                                <Border Grid.Column="1"
+                                        Background="{DynamicResource SurfaceRaised}"
+                                        BorderBrush="{DynamicResource Border}"
+                                        BorderThickness="1"
+                                        CornerRadius="{StaticResource ControlCorner}"
+                                        MinHeight="32"
+                                        Margin="6,0,10,0">
+                                    <ScrollViewer x:Name="BreadcrumbScrollViewer"
+                                                  HorizontalScrollBarVisibility="Hidden"
+                                                  VerticalScrollBarVisibility="Disabled"
+                                                  Margin="7,0">
                                         <ItemsControl ItemsSource="{Binding BreadcrumbItems}">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
@@ -446,84 +475,79 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                     </ScrollViewer>
-                                    <Grid Grid.Column="2">
-                                        <ComboBox x:Name="JumpBox" IsEditable="True"
-                                                  IsTextSearchEnabled="False" StaysOpenOnEdit="True"
-                                                  Padding="30,7,10,7"
-                                                  KeyUp="JumpBox_KeyUp"
-                                                  SelectionChanged="JumpBox_SelectionChanged"
-                                                  ToolTip="Jump to folder (Ctrl+K)">
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Grid MinWidth="220">
-                                                        <Grid.RowDefinitions>
-                                                            <RowDefinition Height="Auto"/>
-                                                            <RowDefinition Height="Auto"/>
-                                                        </Grid.RowDefinitions>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*"/>
-                                                            <ColumnDefinition Width="Auto"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                                   TextTrimming="CharacterEllipsis"/>
-                                                        <TextBlock Grid.Column="1" Text="{Binding Size}"
-                                                                   Foreground="{DynamicResource MutedBrush}"
-                                                                   FontSize="11" Margin="8,0,0,0"/>
-                                                        <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
-                                                                   Text="{Binding FullPath}"
-                                                                   Foreground="{DynamicResource MutedBrush}"
-                                                                   FontSize="11" TextTrimming="CharacterEllipsis"/>
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                        <Viewbox Width="13" Height="13"
-                                                 VerticalAlignment="Center" Margin="10,0,0,0"
-                                                 IsHitTestVisible="False">
-                                            <Path Data="{StaticResource IconSearchGeometry}"
-                                                  Stroke="{DynamicResource MutedBrush}"
-                                                  Style="{StaticResource VectorIconPath}"/>
-                                        </Viewbox>
-                                    </Grid>
-                                </Grid>
-
-                                <StackPanel Grid.Row="1" Margin="0,10,0,0">
-                                    <TextBlock x:Name="SelectedTitleText" Text="No scan loaded"
-                                               Style="{StaticResource DisplayHeader}"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock x:Name="SelectedSubText" Text="Choose a path and scan."
-                                               Foreground="{DynamicResource MutedBrush}"
-                                               TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-                                </StackPanel>
-
-                                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SegmentedGroup}"
-                                        VerticalAlignment="Top" Margin="0,12,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <RadioButton x:Name="ViewContents" Content="Contents" Tag="Contents"
-                                                     GroupName="ViewMode" IsChecked="True" Click="ViewMode_Click"/>
-                                        <RadioButton x:Name="ViewLargestFiles" Content="Largest files" Tag="LargestFiles"
-                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
-                                        <RadioButton x:Name="ViewLargestFolders" Content="Largest folders" Tag="LargestFolders"
-                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
-                                        <RadioButton x:Name="ViewExtensions" Content="Extensions" Tag="Extensions"
-                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
-                                    </StackPanel>
                                 </Border>
+
+                                <Grid Grid.Column="2">
+                                    <ComboBox x:Name="JumpBox" IsEditable="True"
+                                              IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                                              Padding="30,7,10,7"
+                                              KeyUp="JumpBox_KeyUp"
+                                              SelectionChanged="JumpBox_SelectionChanged"
+                                              ToolTip="Jump to folder (Ctrl+K)">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid MinWidth="220">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Size}"
+                                                               Foreground="{DynamicResource MutedBrush}"
+                                                               FontSize="11" Margin="8,0,0,0"/>
+                                                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                                               Text="{Binding FullPath}"
+                                                               Foreground="{DynamicResource MutedBrush}"
+                                                               FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Viewbox Width="13" Height="13"
+                                             VerticalAlignment="Center" Margin="10,0,0,0"
+                                             IsHitTestVisible="False">
+                                        <Path Data="{StaticResource IconSearchGeometry}"
+                                              Stroke="{DynamicResource MutedBrush}"
+                                              Style="{StaticResource VectorIconPath}"/>
+                                    </Viewbox>
+                                </Grid>
                             </Grid>
                         </Border>
 
-                        <!-- Filter bar -->
+                        <!-- Results toolbar -->
                         <Border DockPanel.Dock="Top"
                                 Background="{DynamicResource SurfaceRaised}"
                                 BorderBrush="{DynamicResource Border}"
                                 BorderThickness="0,0,0,1"
-                                Padding="14,8">
+                                Padding="14,7">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*" MinWidth="220"/>
                                 </Grid.ColumnDefinitions>
-                                <Grid>
+
+                                <Border Style="{StaticResource SegmentedGroup}"
+                                        VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="ViewContents" Content="Contents" Tag="Contents"
+                                                     GroupName="ViewMode" IsChecked="True" Click="ViewMode_Click"/>
+                                        <RadioButton x:Name="ViewLargestFiles" Content="Files" Tag="LargestFiles"
+                                                     GroupName="ViewMode" Click="ViewMode_Click"
+                                                     ToolTip="Largest files"/>
+                                        <RadioButton x:Name="ViewLargestFolders" Content="Folders" Tag="LargestFolders"
+                                                     GroupName="ViewMode" Click="ViewMode_Click"
+                                                     ToolTip="Largest folders"/>
+                                        <RadioButton x:Name="ViewExtensions" Content="Extensions" Tag="Extensions"
+                                                     GroupName="ViewMode" Click="ViewMode_Click"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid Grid.Column="1" Margin="12,0,0,0">
                                     <TextBox x:Name="FilterBox" Padding="32,6,28,6"
                                              TextChanged="FilterBox_TextChanged"
                                              KeyDown="FilterBox_KeyDown"
@@ -550,9 +574,74 @@
                                         </Viewbox>
                                     </Button>
                                 </Grid>
-                                <TextBlock Grid.Column="1" x:Name="FilterCountText"
-                                           Foreground="{DynamicResource MutedBrush}" FontSize="11"
-                                           VerticalAlignment="Center" Margin="12,0,0,0"/>
+
+                                <StackPanel Visibility="Collapsed">
+                                    <TextBlock x:Name="SelectedTitleText"
+                                               Text="No scan loaded"/>
+                                    <TextBlock x:Name="SelectedSubText"
+                                               Text="Choose a path and scan."/>
+                                    <TextBlock x:Name="FilterCountText"
+                                               Text=""/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Selection actions -->
+                        <Border x:Name="SelectionActionsBar"
+                                DockPanel.Dock="Top"
+                                Background="{DynamicResource SurfaceSubtle}"
+                                BorderBrush="{DynamicResource Border}"
+                                BorderThickness="0,0,0,1"
+                                Padding="14,6"
+                                Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SelectionStatusText"
+                                           Text="No selection"
+                                           Foreground="{DynamicResource MutedStrong}"
+                                           FontSize="11.5"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,14,0"/>
+                                <WrapPanel Grid.Column="1"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center">
+                                    <Button x:Name="OpenSelectionButton"
+                                            Style="{StaticResource ExplorerNavButton}"
+                                            Content="Open"
+                                            Click="OpenSelected_Click"
+                                            ToolTip="Open the selected item"/>
+                                    <Button x:Name="RevealSelectionButton"
+                                            Style="{StaticResource ExplorerNavButton}"
+                                            Content="Reveal"
+                                            Click="RevealSelected_Click"
+                                            ToolTip="Reveal the selected item in Explorer"/>
+                                    <Button x:Name="CopyPathSelectionButton"
+                                            Style="{StaticResource ExplorerNavButton}"
+                                            Content="Copy Path"
+                                            Click="CopyPath_Click"
+                                            ToolTip="Copy selected paths"/>
+                                    <Button x:Name="CopySelectionButton"
+                                            Content="Copy"
+                                            Click="CopySelection_Click"
+                                            ToolTip="Copy selected files or folders"/>
+                                    <Button x:Name="MoveSelectionButton"
+                                            Content="Move"
+                                            Click="MoveSelection_Click"
+                                            ToolTip="Move selected files or folders"/>
+                                    <Button x:Name="ExportSelectionButton"
+                                            Style="{StaticResource ExplorerNavButton}"
+                                            Content="Export CSV"
+                                            Click="ExportSelectionCsv_Click"
+                                            ToolTip="Export selected rows to CSV"/>
+                                    <Button x:Name="DeleteSelectionButton"
+                                            Content="Delete"
+                                            Click="DeleteSelected_Click"
+                                            ToolTip="Move selected files or folders to the Recycle Bin"/>
+                                </WrapPanel>
                             </Grid>
                         </Border>
 
@@ -602,21 +691,24 @@
                                       VirtualizingPanel.VirtualizationMode="Recycling"
                                       ScrollViewer.CanContentScroll="True"
                                       ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      SelectionChanged="DetailsGrid_SelectionChanged"
                                       MouseDoubleClick="DetailsGrid_MouseDoubleClick"
                                       PreviewMouseRightButtonDown="DetailsGrid_PreviewMouseRightButtonDown"
                                       PreviewKeyDown="DetailsGrid_PreviewKeyDown">
                                 <ListView.ContextMenu>
                                     <ContextMenu Opened="DetailsContextMenu_Opened">
-                                        <MenuItem Header="Open" Click="OpenSelected_Click"/>
-                                        <MenuItem Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                        <MenuItem x:Name="OpenSelectedMenuItem" Header="Open" Click="OpenSelected_Click"/>
+                                        <MenuItem x:Name="RevealSelectedMenuItem" Header="Reveal in Explorer" Click="RevealSelected_Click"/>
+                                        <MenuItem x:Name="CopyToFolderMenuItem" Header="Copy to Folder..." Click="CopySelection_Click"/>
+                                        <MenuItem x:Name="MoveToFolderMenuItem" Header="Move to Folder..." Click="MoveSelection_Click"/>
                                         <MenuItem x:Name="CopyPortableToPcMenuItem" Header="Copy selected files to PC..." Click="CopyPortableToPc_Click"/>
                                         <Separator x:Name="CopyPortableToPcSeparator"/>
                                         <Separator/>
-                                        <MenuItem Header="Copy Path" Click="CopyPath_Click"/>
-                                        <MenuItem Header="Copy Rows" Click="CopyRows_Click"/>
-                                        <MenuItem Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
+                                        <MenuItem x:Name="CopyPathMenuItem" Header="Copy Path" Click="CopyPath_Click"/>
+                                        <MenuItem x:Name="CopyRowsMenuItem" Header="Copy Rows" Click="CopyRows_Click"/>
+                                        <MenuItem x:Name="ExportSelectionMenuItem" Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
                                         <Separator/>
-                                        <MenuItem Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
+                                        <MenuItem x:Name="DeleteSelectedMenuItem" Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
                                     </ContextMenu>
                                 </ListView.ContextMenu>
                                 <ListView.ItemTemplate>

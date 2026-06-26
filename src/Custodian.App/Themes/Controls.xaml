@@ -19,7 +19,9 @@
     <Geometry x:Key="IconSearchGeometry">M 10,4 C 6.7,4 4,6.7 4,10 C 4,13.3 6.7,16 10,16 C 13.3,16 16,13.3 16,10 C 16,6.7 13.3,4 10,4 M 14.5,14.5 L 20,20</Geometry>
     <Geometry x:Key="IconCloseGeometry">M 6,6 L 18,18 M 18,6 L 6,18</Geometry>
     <Geometry x:Key="IconWarningGeometry">M 12,4 L 21,20 L 3,20 Z M 12,9 L 12,14 M 12,17 L 12,17</Geometry>
+    <Geometry x:Key="IconChevronLeftGeometry">M 15,5 L 8,12 L 15,19</Geometry>
     <Geometry x:Key="IconChevronRightGeometry">M 9,5 L 16,12 L 9,19</Geometry>
+    <Geometry x:Key="IconChevronUpGeometry">M 5,15 L 12,8 L 19,15</Geometry>
     <Geometry x:Key="IconFolderGeometry">M 3,7 L 9,7 L 11,9 L 21,9 L 21,19 L 3,19 Z M 3,7 L 3,19</Geometry>
     <Geometry x:Key="IconRecycleBinGeometry">M 8,8 L 8.7,19 C 8.8,20 9.6,21 10.8,21 L 17.2,21 C 18.4,21 19.2,20 19.3,19 L 20,8 M 7,8 L 21,8 M 10,8 L 10.8,4 L 17.2,4 L 18,8 M 12,11 L 12,18 M 16,11 L 16,18</Geometry>
     <Geometry x:Key="IconDriveGeometry">M 5,5 L 19,5 L 21,14 L 21,19 L 3,19 L 3,14 Z M 3,14 L 21,14 M 7,17 L 7,17 M 11,17 L 11,17</Geometry>
@@ -30,6 +32,7 @@
     <Geometry x:Key="IconSuccessGeometry">M 12,4 C 7.6,4 4,7.6 4,12 C 4,16.4 7.6,20 12,20 C 16.4,20 20,16.4 20,12 C 20,7.6 16.4,4 12,4 M 8.5,12.2 L 11,14.7 L 16,9.3</Geometry>
     <Geometry x:Key="IconErrorGeometry">M 12,4 C 7.6,4 4,7.6 4,12 C 4,16.4 7.6,20 12,20 C 16.4,20 20,16.4 20,12 C 20,7.6 16.4,4 12,4 M 9,9 L 15,15 M 15,9 L 9,15</Geometry>
     <Geometry x:Key="IconResetGeometry">M 17.3,8.2 C 16,6.3 13.8,5 11.2,5 C 7.2,5 4,8.1 4,12 C 4,15.9 7.2,19 11.2,19 C 14.4,19 17.1,16.9 18,14 M 17.5,4 L 17.5,8.5 L 13,8.5</Geometry>
+    <Geometry x:Key="IconRefreshGeometry">M 17.4,8.1 C 16.1,6.2 14.1,5 11.7,5 C 8,5 5,8 5,11.7 C 5,15.4 8,18.4 11.7,18.4 C 14.5,18.4 16.9,16.7 17.9,14.2 M 17.5,4.8 L 17.5,8.8 L 13.5,8.8</Geometry>
 
     <Style x:Key="VectorIconPath" TargetType="{x:Type Path}">
         <Setter Property="Fill" Value="Transparent"/>
@@ -167,6 +170,14 @@
         <Setter Property="Margin" Value="0,0,4,0"/>
         <Setter Property="FontSize" Value="11.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
+        <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
+    </Style>
+
+    <Style x:Key="ExplorerNavIconButton" TargetType="{x:Type Button}" BasedOn="{StaticResource IconButton}">
+        <Setter Property="Width" Value="30"/>
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="Margin" Value="0,0,4,0"/>
         <Setter Property="Foreground" Value="{DynamicResource MutedStrong}"/>
         <Setter Property="ToolTipService.InitialShowDelay" Value="350"/>
     </Style>
