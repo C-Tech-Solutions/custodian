@@ -641,6 +641,10 @@
                                             Content="Delete"
                                             Click="DeleteSelected_Click"
                                             ToolTip="Move selected files or folders to the Recycle Bin"/>
+                                    <Button x:Name="PermanentDeleteSelectionButton"
+                                            Content="Delete Permanently"
+                                            Click="PermanentDeleteSelected_Click"
+                                            ToolTip="Permanently delete selected files or folders without using the Recycle Bin"/>
                                 </WrapPanel>
                             </Grid>
                         </Border>
@@ -709,6 +713,7 @@
                                         <MenuItem x:Name="ExportSelectionMenuItem" Header="Export Selection CSV..." Click="ExportSelectionCsv_Click"/>
                                         <Separator/>
                                         <MenuItem x:Name="DeleteSelectedMenuItem" Header="Move to Recycle Bin" Click="DeleteSelected_Click"/>
+                                        <MenuItem x:Name="PermanentDeleteSelectedMenuItem" Header="Delete Permanently" Click="PermanentDeleteSelected_Click"/>
                                     </ContextMenu>
                                 </ListView.ContextMenu>
                                 <ListView.ItemTemplate>

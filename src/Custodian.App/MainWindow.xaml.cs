@@ -2549,41 +2549,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
+        => await DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode.Recycle);
+
+    private async void PermanentDeleteSelected_Click(object sender, RoutedEventArgs e)
+        => await DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode.PermanentDelete);
+
+    private async Task DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode mode)
     {
-        if (_activeScan is not null || _activePortableCopy is not null || _activeFileOperation)
+        var command = DetailSelectionDeleteCommandService.Build(
+            mode,
+            SelectedDetailRows().ToList(),
+            CurrentScanIsPortable(),
+            _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
+
+        if (!command.CanExecute)
         {
-            ShowToast("Wait for the current operation to finish first.");
+            if (command.BlockReason == DetailSelectionDeleteBlockReason.PortableScan)
+            {
+                ShowPortableDeviceModificationBlockedMessage();
+                return;
+            }
+
+            ShowToast(command.ToastMessage ?? "Selection cannot be deleted.");
             return;
         }
 
-        if (CurrentScanIsPortable())
-        {
-            ShowPortableDeviceModificationBlockedMessage();
-            return;
-        }
-
-        var selectedRows = SelectedDetailRows().ToList();
-        var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);
-        if (selectedRows.Count == 0 || paths.Count == 0)
-        {
-            ShowToast("Select one or more file or folder rows.");
-            return;
-        }
-
-        if (paths.Count != selectedRows.Count)
-        {
-            ShowToast("Delete requires real file or folder rows.");
-            return;
-        }
-
-        var answer = WpfMessageBox.Show(
-            this,
-            $"Move {paths.Count:n0} selected item(s) to the Recycle Bin?\n\n{DetailSelectionActionService.SelectionPreview(paths)}\n\nCustodian will ask Windows to recycle these items, not permanently delete them. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
-            "Confirm Recycle Bin move",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        var answer = command.DefaultResult is { } defaultResult
+            ? WpfMessageBox.Show(
+                this,
+                command.ConfirmationMessage,
+                command.ConfirmationTitle,
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                defaultResult)
+            : WpfMessageBox.Show(
+                this,
+                command.ConfirmationMessage,
+                command.ConfirmationTitle,
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
 
-        await RunFileSystemOperationAsync(FileSystemOperationKind.Recycle, paths, destinationFolder: null);
+        await RunFileSystemOperationAsync(command.OperationKind, command.Paths, destinationFolder: null);
     }
 
     private bool ConfirmMoveSelection(int count, string destinationFolder)
@@ -2610,6 +2617,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             FileSystemOperationKind.Copy => "Copying selected items",
             FileSystemOperationKind.Move => "Moving selected items",
+            FileSystemOperationKind.PermanentDelete => "Deleting selected items permanently",
             _ => "Moving selected items to Recycle Bin"
         };
         UpdateFooterStatus(operationText, destinationFolder ?? $"{paths.Count:n0} selected item(s)");
@@ -2621,6 +2629,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 FileSystemOperationKind.Copy => FileSystemOperationService.CopyToFolderAsync(paths, destinationFolder!, ownerHandle, cts.Token),
                 FileSystemOperationKind.Move => FileSystemOperationService.MoveToFolderAsync(paths, destinationFolder!, ownerHandle, cts.Token),
+                FileSystemOperationKind.PermanentDelete => FileSystemOperationService.DeletePermanentlyAsync(paths, ownerHandle, cts.Token),
                 _ => FileSystemOperationService.MoveToRecycleBinAsync(paths, ownerHandle, cts.Token)
             };
             _activeFileOperationTask = operationTask;
@@ -2710,6 +2719,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             FileSystemOperationKind.Copy => "Copy",
             FileSystemOperationKind.Move => "Move",
+            FileSystemOperationKind.PermanentDelete => "Permanent delete",
             _ => "Recycle Bin move"
         };
 
@@ -4279,6 +4289,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ExportSelectionButton.IsEnabled = state.CanExport;
         DeleteSelectionButton.IsEnabled = state.CanDelete;
         DeleteSelectionButton.ToolTip = state.DeleteToolTip;
+        PermanentDeleteSelectionButton.IsEnabled = state.CanPermanentDelete;
+        PermanentDeleteSelectionButton.ToolTip = state.PermanentDeleteToolTip;
 
         OpenSelectedMenuItem.IsEnabled = state.CanOpen;
         RevealSelectedMenuItem.IsEnabled = state.CanReveal;
@@ -4289,6 +4301,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CopyRowsMenuItem.IsEnabled = state.CanCopyRows;
         ExportSelectionMenuItem.IsEnabled = state.CanExport;
         DeleteSelectedMenuItem.IsEnabled = state.CanDelete;
+        PermanentDeleteSelectedMenuItem.IsEnabled = state.CanPermanentDelete;
     }
 
     private string? SelectedPath()
