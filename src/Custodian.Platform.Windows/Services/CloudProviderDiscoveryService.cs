@@ -564,11 +564,17 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
             yield break;
         }
 
-        yield return Path.Combine(profile, "Nextcloud");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defaultPath = Path.Combine(profile, "Nextcloud");
+        seen.Add(defaultPath);
+        yield return defaultPath;
 
         foreach (var directory in EnumerateDirectories(profile, "Nextcloud*"))
         {
-            yield return directory;
+            if (seen.Add(directory))
+            {
+                yield return directory;
+            }
         }
     }
 
@@ -580,11 +586,17 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
             yield break;
         }
 
-        yield return Path.Combine(profile, "Dropbox");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defaultPath = Path.Combine(profile, "Dropbox");
+        seen.Add(defaultPath);
+        yield return defaultPath;
 
         foreach (var directory in EnumerateDirectories(profile, "Dropbox*"))
         {
-            yield return directory;
+            if (seen.Add(directory))
+            {
+                yield return directory;
+            }
         }
     }
 

@@ -313,6 +313,21 @@ public sealed class CloudProviderDiscoveryServiceTests
     }
 
     [Fact]
+    public void GetTargetsDeduplicatesDropboxProfileFallbackCandidates()
+    {
+        var env = new FakeCloudProviderEnvironment();
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox");
+        env.DropboxProfileCandidates.Add(@"C:\Users\Me\Dropbox\");
+        env.ExistingDirectories.Add(@"C:\Users\Me\Dropbox");
+        var service = new CloudProviderDiscoveryService(env);
+
+        var target = Assert.Single(service.GetTargets());
+
+        Assert.Equal("dropbox", target.ProviderId);
+        Assert.Equal(@"C:\Users\Me\Dropbox", target.RootPath);
+    }
+
+    [Fact]
     public void TryMatchPathMatchesNestedPathButNotSiblingPrefix()
     {
         var env = new FakeCloudProviderEnvironment();
