@@ -2622,17 +2622,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _activeFileOperationTask = operationTask;
 
             var result = await operationTask;
-            ShowFileSystemOperationResult(operationKind, result, destinationFolder);
+            if (!_isClosing)
+            {
+                ShowFileSystemOperationResult(operationKind, result, destinationFolder);
+            }
         }
         catch (OperationCanceledException)
         {
-            ShowToast("File operation cancelled.");
-            UpdateFooterStatus("Cancelled", "File operation cancelled.");
+            if (!_isClosing)
+            {
+                ShowToast("File operation cancelled.");
+                UpdateFooterStatus("Cancelled", "File operation cancelled.");
+            }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "{OperationKind} operation failed.", operationKind);
-            ShowOperationError(FileSystemOperationTitle(operationKind) + " failed", ex);
+            if (_isClosing)
+            {
+                Logger.LogWarning(ex, "{OperationKind} operation ended during shutdown.", operationKind);
+            }
+            else
+            {
+                Logger.LogError(ex, "{OperationKind} operation failed.", operationKind);
+                ShowOperationError(FileSystemOperationTitle(operationKind) + " failed", ex);
+            }
         }
         finally
         {
@@ -2644,10 +2657,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             cts.Dispose();
             _activeFileOperation = false;
-            UpdateDetailSelectionActionState();
-            if (_currentScan is not null && !_isRecycleBinViewActive)
+            if (!_isClosing)
             {
-                UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+                UpdateDetailSelectionActionState();
+                if (_currentScan is not null && !_isRecycleBinViewActive)
+                {
+                    UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
+                }
             }
         }
     }
@@ -2671,9 +2687,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var more = result.Failures.Count > 8
             ? $"{Environment.NewLine}...and {result.Failures.Count - 8:n0} more failure(s)."
             : string.Empty;
-        var summary = result.CancelledCount > 0
-            ? $"Windows reported that the staged batch was cancelled or partially aborted. Exact per-item completion is unavailable after a shell batch cancellation. Check the source or destination folder for the final item state.{Environment.NewLine}{Environment.NewLine}{result.CancelledCount:n0} staged item(s) were reported as cancelled or skipped."
-            : $"{result.CompletedCount:n0} of {result.RequestedCount:n0} item(s) completed.";
+        var summary = result.IndeterminateCount > 0
+            ? $"Windows reported that the staged batch was cancelled or partially aborted. Exact per-item completion is unavailable after a shell batch cancellation. Check the source or destination folder for the final item state.{Environment.NewLine}{Environment.NewLine}{result.IndeterminateCount:n0} staged item(s) have indeterminate completion state."
+            : result.CancelledCount > 0
+                ? $"{result.CancelledCount:n0} item(s) were cancelled or skipped by Windows."
+                : $"{result.CompletedCount:n0} of {result.RequestedCount:n0} item(s) completed.";
         var message = $"{title} completed with issues.{Environment.NewLine}{Environment.NewLine}{summary}";
         if (!string.IsNullOrWhiteSpace(preview))
         {

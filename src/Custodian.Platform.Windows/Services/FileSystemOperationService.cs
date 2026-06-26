@@ -15,9 +15,10 @@ internal sealed record FileSystemOperationBatchResult(
     int RequestedCount,
     int CompletedCount,
     int CancelledCount,
+    int IndeterminateCount,
     IReadOnlyList<FileSystemOperationFailure> Failures)
 {
-    public bool HasIssues => CancelledCount > 0 || Failures.Count > 0;
+    public bool HasIssues => CancelledCount > 0 || IndeterminateCount > 0 || Failures.Count > 0;
 }
 
 internal static class FileSystemOperationService
@@ -26,6 +27,7 @@ internal static class FileSystemOperationService
     private const uint FofWantNukeWarning = 0x4000;
     private const uint FofxRecycleOnDelete = 0x00080000;
     private const int HresultCancelled = unchecked((int)0x800704C7);
+    private const int HresultCopyEngineUserCancelled = unchecked((int)0x80270000);
     private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
 
     public static Task<FileSystemOperationBatchResult> CopyToFolderAsync(
@@ -75,9 +77,14 @@ internal static class FileSystemOperationService
             failures,
             cancellationToken);
         var completedCount = operationResult.Completed ? operationResult.StagedCount : 0;
-        var cancelledCount = operationResult.Completed ? 0 : operationResult.StagedCount;
+        var indeterminateCount = operationResult.Completed ? 0 : operationResult.StagedCount;
 
-        return new FileSystemOperationBatchResult(requestedCount, completedCount, cancelledCount, failures);
+        return new FileSystemOperationBatchResult(
+            requestedCount,
+            completedCount,
+            0,
+            indeterminateCount,
+            failures);
     }
 
     private static List<string> DistinctPaths(
@@ -152,7 +159,7 @@ internal static class FileSystemOperationService
 
             cancellationToken.ThrowIfCancellationRequested();
             var hr = operation.PerformOperations();
-            if (hr == HresultCancelled)
+            if (IsCancellationHResult(hr))
             {
                 return new ShellBatchResult(sourceItems.Count, Completed: false);
             }
@@ -298,6 +305,9 @@ internal static class FileSystemOperationService
             Marshal.ThrowExceptionForHR(hr);
         }
     }
+
+    private static bool IsCancellationHResult(int hr)
+        => hr is HresultCancelled or HresultCopyEngineUserCancelled;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHCreateItemFromParsingName(
