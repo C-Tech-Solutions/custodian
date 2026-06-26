@@ -2549,81 +2549,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
-    {
-        if (_activeScan is not null || _activePortableCopy is not null || _activeFileOperation)
-        {
-            ShowToast("Wait for the current operation to finish first.");
-            return;
-        }
-
-        if (CurrentScanIsPortable())
-        {
-            ShowPortableDeviceModificationBlockedMessage();
-            return;
-        }
-
-        var selectedRows = SelectedDetailRows().ToList();
-        var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);
-        if (selectedRows.Count == 0 || paths.Count == 0)
-        {
-            ShowToast("Select one or more file or folder rows.");
-            return;
-        }
-
-        if (paths.Count != selectedRows.Count)
-        {
-            ShowToast("Delete requires real file or folder rows.");
-            return;
-        }
-
-        var answer = WpfMessageBox.Show(
-            this,
-            $"Move {paths.Count:n0} selected item(s) to the Recycle Bin?\n\n{DetailSelectionActionService.SelectionPreview(paths)}\n\nCustodian will ask Windows to recycle these items, not permanently delete them. If Windows warns that it cannot use the Recycle Bin, cancel the operation.",
-            "Confirm Recycle Bin move",
-            MessageBoxButton.YesNo, MessageBoxImage.Warning);
-        if (answer != MessageBoxResult.Yes) return;
-
-        await RunFileSystemOperationAsync(FileSystemOperationKind.Recycle, paths, destinationFolder: null);
-    }
+        => await DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode.Recycle);
 
     private async void PermanentDeleteSelected_Click(object sender, RoutedEventArgs e)
+        => await DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode.PermanentDelete);
+
+    private async Task DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode mode)
     {
-        if (_activeScan is not null || _activePortableCopy is not null || _activeFileOperation)
+        var command = DetailSelectionDeleteCommandService.Build(
+            mode,
+            SelectedDetailRows().ToList(),
+            CurrentScanIsPortable(),
+            _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
+
+        if (!command.CanExecute)
         {
-            ShowToast("Wait for the current operation to finish first.");
+            if (command.BlockReason == DetailSelectionDeleteBlockReason.PortableScan)
+            {
+                ShowPortableDeviceModificationBlockedMessage();
+                return;
+            }
+
+            ShowToast(command.ToastMessage ?? "Selection cannot be deleted.");
             return;
         }
 
-        if (CurrentScanIsPortable())
-        {
-            ShowPortableDeviceModificationBlockedMessage();
-            return;
-        }
-
-        var selectedRows = SelectedDetailRows().ToList();
-        var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);
-        if (selectedRows.Count == 0 || paths.Count == 0)
-        {
-            ShowToast("Select one or more file or folder rows.");
-            return;
-        }
-
-        if (paths.Count != selectedRows.Count)
-        {
-            ShowToast("Permanent delete requires real file or folder rows.");
-            return;
-        }
-
-        var answer = WpfMessageBox.Show(
-            this,
-            $"Permanently delete {paths.Count:n0} selected item(s)?\n\n{DetailSelectionActionService.SelectionPreview(paths)}\n\nThese items will not be moved to the Recycle Bin. You will not be able to restore them from the Recycle Bin after this operation.",
-            "Confirm permanent delete",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
+        var answer = command.DefaultResult is { } defaultResult
+            ? WpfMessageBox.Show(
+                this,
+                command.ConfirmationMessage,
+                command.ConfirmationTitle,
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                defaultResult)
+            : WpfMessageBox.Show(
+                this,
+                command.ConfirmationMessage,
+                command.ConfirmationTitle,
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
 
-        await RunFileSystemOperationAsync(FileSystemOperationKind.PermanentDelete, paths, destinationFolder: null);
+        await RunFileSystemOperationAsync(command.OperationKind, command.Paths, destinationFolder: null);
     }
 
     private bool ConfirmMoveSelection(int count, string destinationFolder)
