@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Custodian.Core.Model;
 
 namespace Custodian.Core.Analysis;
@@ -29,10 +30,11 @@ public static class ScanTreeUpdater
             return new ScanTreeUpdateResult(false, [], selectedEntry);
         }
 
+        var parentMap = BuildParentMap(scan.Root);
         var candidates = entries
             .Where(entry => entry is not null && !ReferenceEquals(scan.Root, entry))
-            .Distinct()
-            .Select(entry => TryBuildAncestorPath(scan.Root, entry, out var ancestors)
+            .Distinct(FileSystemEntryReferenceComparer.Instance)
+            .Select(entry => TryBuildAncestorPath(parentMap, entry, out var ancestors)
                 ? new RemovalCandidate(entry, ancestors)
                 : null)
             .OfType<RemovalCandidate>()
@@ -44,10 +46,11 @@ public static class ScanTreeUpdater
             return new ScanTreeUpdateResult(false, [], selectedEntry);
         }
 
+        var candidateEntries = new HashSet<FileSystemEntry>(
+            candidates.Select(candidate => candidate.Entry),
+            FileSystemEntryReferenceComparer.Instance);
         var selectedCandidates = candidates
-            .Where(candidate => !candidates.Any(other =>
-                !ReferenceEquals(other.Entry, candidate.Entry) &&
-                candidate.Ancestors.Contains(other.Entry)))
+            .Where(candidate => !candidate.Ancestors.Any(candidateEntries.Contains))
             .OrderByDescending(candidate => candidate.Ancestors.Count)
             .ToArray();
 
@@ -64,7 +67,8 @@ public static class ScanTreeUpdater
             SubtractFromAncestors(candidate.Ancestors, candidate.Entry);
             removedEntries.Add(candidate.Entry);
 
-            if (nextSelectedEntry is not null && IsEntryOrDescendant(candidate.Entry, nextSelectedEntry))
+            if (nextSelectedEntry is not null &&
+                IsEntryOrDescendant(parentMap, candidate.Entry, nextSelectedEntry))
             {
                 nextSelectedEntry = parent;
             }
@@ -93,62 +97,82 @@ public static class ScanTreeUpdater
         }
     }
 
+    private static Dictionary<FileSystemEntry, FileSystemEntry> BuildParentMap(FileSystemEntry root)
+    {
+        var parents = new Dictionary<FileSystemEntry, FileSystemEntry>(ReferenceEqualityComparer.Instance);
+        AddChildren(root, parents);
+        return parents;
+    }
+
+    private static void AddChildren(
+        FileSystemEntry parent,
+        Dictionary<FileSystemEntry, FileSystemEntry> parents)
+    {
+        foreach (var child in parent.Children)
+        {
+            parents[child] = parent;
+            if (child.IsDirectory)
+            {
+                AddChildren(child, parents);
+            }
+        }
+    }
+
     private static bool TryBuildAncestorPath(
-        FileSystemEntry root,
+        IReadOnlyDictionary<FileSystemEntry, FileSystemEntry> parentMap,
         FileSystemEntry entry,
         out List<FileSystemEntry> ancestors)
     {
         ancestors = [];
-        return TryBuildAncestorPathCore(root, entry, ancestors);
-    }
-
-    private static bool TryBuildAncestorPathCore(
-        FileSystemEntry current,
-        FileSystemEntry entry,
-        List<FileSystemEntry> ancestors)
-    {
-        foreach (var child in current.Children)
+        var current = entry;
+        while (parentMap.TryGetValue(current, out var parent))
         {
-            if (ReferenceEquals(child, entry))
-            {
-                ancestors.Add(current);
-                return true;
-            }
-
-            if (!child.IsDirectory)
-            {
-                continue;
-            }
-
-            ancestors.Add(current);
-            if (TryBuildAncestorPathCore(child, entry, ancestors))
-            {
-                return true;
-            }
-
-            ancestors.RemoveAt(ancestors.Count - 1);
+            ancestors.Add(parent);
+            current = parent;
         }
 
-        return false;
+        ancestors.Reverse();
+        return ancestors.Count > 0;
     }
 
-    private static bool IsEntryOrDescendant(FileSystemEntry root, FileSystemEntry entry)
+    private static bool IsEntryOrDescendant(
+        IReadOnlyDictionary<FileSystemEntry, FileSystemEntry> parentMap,
+        FileSystemEntry root,
+        FileSystemEntry entry)
     {
-        if (ReferenceEquals(root, entry))
+        var current = entry;
+        while (current is not null)
         {
-            return true;
-        }
-
-        foreach (var child in root.Children)
-        {
-            if (IsEntryOrDescendant(child, entry))
+            if (ReferenceEquals(root, current))
             {
                 return true;
             }
+
+            if (!parentMap.TryGetValue(current, out var parent))
+            {
+                break;
+            }
+
+            current = parent;
         }
 
         return false;
     }
 
     private sealed record RemovalCandidate(FileSystemEntry Entry, List<FileSystemEntry> Ancestors);
+
+    private sealed class FileSystemEntryReferenceComparer : IEqualityComparer<FileSystemEntry>
+    {
+        public static readonly FileSystemEntryReferenceComparer Instance = new();
+
+        private FileSystemEntryReferenceComparer()
+        {
+        }
+
+        public bool Equals(FileSystemEntry? x, FileSystemEntry? y)
+            => ReferenceEquals(x, y);
+
+        public int GetHashCode(FileSystemEntry obj)
+            => RuntimeHelpers.GetHashCode(obj);
+    }
 }

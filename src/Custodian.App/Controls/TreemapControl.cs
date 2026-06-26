@@ -54,7 +54,6 @@ public sealed class TreemapControl : FrameworkElement
     private readonly Dictionary<string, ChartSlice> _lastSlicesByKey = new(StringComparer.Ordinal);
     private INotifyCollectionChanged? _sliceNotifications;
     private bool _isControlLoaded;
-    private double _totalBytes;
     private DateTime _animationStartedUtc;
     private bool _isAnimating;
     private WpfBrush _backgroundBrush = WpfBrushes.Transparent;
@@ -214,12 +213,10 @@ public sealed class TreemapControl : FrameworkElement
         _startBytesByKey.Clear();
         _targetBytesByKey.Clear();
         _lastSlicesByKey.Clear();
-        _totalBytes = 0;
         foreach (var slice in targetSlices)
         {
             _displayBytesByKey[slice.SourceKey] = slice.RawBytes;
             _lastSlicesByKey[slice.SourceKey] = slice;
-            _totalBytes += slice.RawBytes;
         }
     }
 
@@ -252,7 +249,6 @@ public sealed class TreemapControl : FrameworkElement
         _slices.AddRange(renderSlices);
         _startBytesByKey.Clear();
         _targetBytesByKey.Clear();
-        _totalBytes = 0;
 
         foreach (var slice in renderSlices)
         {
@@ -265,7 +261,6 @@ public sealed class TreemapControl : FrameworkElement
             _startBytesByKey[slice.SourceKey] = currentBytes;
             _targetBytesByKey[slice.SourceKey] = targetBytes;
             _displayBytesByKey[slice.SourceKey] = currentBytes;
-            _totalBytes += Math.Max(0, currentBytes);
         }
 
         foreach (var slice in targetSlices)
@@ -294,13 +289,11 @@ public sealed class TreemapControl : FrameworkElement
             0.0,
             1.0);
         var eased = 1.0 - Math.Pow(1.0 - progress, 3);
-        _totalBytes = 0;
         foreach (var pair in _targetBytesByKey)
         {
             var start = _startBytesByKey.GetValueOrDefault(pair.Key);
             var displayed = start + (pair.Value - start) * eased;
             _displayBytesByKey[pair.Key] = displayed;
-            _totalBytes += Math.Max(0, displayed);
         }
 
         if (progress >= 1.0)
