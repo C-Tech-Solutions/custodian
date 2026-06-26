@@ -89,6 +89,24 @@ public sealed class ScanTreeUpdaterTests
     }
 
     [Fact]
+    public void RemoveDirectoryPrunesSkippedEntriesUnderRemovedPath()
+    {
+        var root = BuildScanRoot(out var alpha, out _, out _, out _, out var beta);
+        var result = Result(root);
+        result.SkippedEntries.Add(new SkippedEntry(@"C:\Alpha\Locked", "Access denied"));
+        result.SkippedEntries.Add(new SkippedEntry(@"C:\Alpha\Deep\Denied", "Access denied"));
+        result.SkippedEntries.Add(new SkippedEntry(@"C:\Beta\Locked", "Access denied"));
+        result.SkippedEntries.Add(new SkippedEntry(@"C:\Alphabet\Locked", "Access denied"));
+
+        var update = ScanTreeUpdater.RemoveEntries(result, [alpha], selectedEntry: beta);
+
+        Assert.True(update.Changed);
+        Assert.Equal(
+            [@"C:\Beta\Locked", @"C:\Alphabet\Locked"],
+            result.SkippedEntries.Select(entry => entry.Path));
+    }
+
+    [Fact]
     public void RemoveEntriesIgnoresRootMissingAndDuplicateEntries()
     {
         var root = BuildScanRoot(out var alpha, out _, out _, out _, out _);

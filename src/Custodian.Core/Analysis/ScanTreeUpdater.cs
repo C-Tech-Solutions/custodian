@@ -79,6 +79,7 @@ public static class ScanTreeUpdater
             return new ScanTreeUpdateResult(false, [], selectedEntry);
         }
 
+        PruneSkippedEntries(scan, removedEntries);
         scan.GlobalIndex = ScanGlobalIndexBuilder.Build(scan.Root);
         return new ScanTreeUpdateResult(true, removedEntries, nextSelectedEntry);
     }
@@ -158,6 +159,40 @@ public static class ScanTreeUpdater
 
         return false;
     }
+
+    private static void PruneSkippedEntries(ScanResult scan, IReadOnlyList<FileSystemEntry> removedEntries)
+    {
+        if (scan.SkippedEntries.Count == 0)
+        {
+            return;
+        }
+
+        scan.SkippedEntries.RemoveAll(skipped =>
+            removedEntries.Any(removed => IsPathWithinEntry(skipped.Path, removed.FullPath, removed.IsDirectory)));
+    }
+
+    private static bool IsPathWithinEntry(string path, string entryPath, bool entryIsDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(entryPath))
+        {
+            return false;
+        }
+
+        var normalizedPath = NormalizePath(path);
+        var normalizedEntryPath = NormalizePath(entryPath);
+        if (string.Equals(normalizedPath, normalizedEntryPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return entryIsDirectory &&
+            normalizedPath.Length > normalizedEntryPath.Length &&
+            normalizedPath.StartsWith(normalizedEntryPath, StringComparison.OrdinalIgnoreCase) &&
+            normalizedPath[normalizedEntryPath.Length] == Path.DirectorySeparatorChar;
+    }
+
+    private static string NormalizePath(string path)
+        => Path.TrimEndingDirectorySeparator(path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
 
     private sealed record RemovalCandidate(FileSystemEntry Entry, List<FileSystemEntry> Ancestors);
 

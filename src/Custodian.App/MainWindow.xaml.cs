@@ -2620,6 +2620,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         string? destinationFolder,
         IReadOnlyCollection<FileSystemEntry> sourceEntries)
     {
+        var originatingScan = _isRecycleBinViewActive ? null : _currentScan;
         var cts = new CancellationTokenSource();
         _activeFileOperationCts = cts;
         _activeFileOperation = true;
@@ -2653,6 +2654,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     operationKind,
                     result,
                     sourceEntries,
+                    originatingScan,
                     destinationFolder);
             }
         }
@@ -2701,10 +2703,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         FileSystemOperationKind operationKind,
         FileSystemOperationBatchResult result,
         IReadOnlyCollection<FileSystemEntry> sourceEntries,
+        ScanResult? originatingScan,
         string? destinationFolder)
     {
-        var currentScan = _currentScan;
-        if (currentScan is null || _isRecycleBinViewActive)
+        if (originatingScan is null)
         {
             return;
         }
@@ -2713,21 +2715,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             operationKind,
             result,
             sourceEntries,
-            currentScan,
+            originatingScan,
             destinationFolder);
         if (entriesToRemove.Count == 0)
         {
             return;
         }
 
-        var update = ScanTreeUpdater.RemoveEntries(currentScan, entriesToRemove, _selectedEntry);
+        var selectedEntry = ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive
+            ? _selectedEntry
+            : null;
+        var update = ScanTreeUpdater.RemoveEntries(originatingScan, entriesToRemove, selectedEntry);
         if (!update.Changed)
         {
             return;
         }
 
-        _selectedEntry = update.SelectedEntry ?? currentScan.Root;
-        await RefreshVisibleScanAfterTreeMutationAsync(currentScan);
+        if (ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive)
+        {
+            _selectedEntry = update.SelectedEntry ?? originatingScan.Root;
+        }
+
+        await RefreshScanAfterTreeMutationAsync(originatingScan);
     }
 
     private void ShowFileSystemOperationResult(
@@ -2817,20 +2826,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return cached;
     }
 
-    private async Task RefreshVisibleScanAfterTreeMutationAsync(ScanResult result)
+    private async Task RefreshScanAfterTreeMutationAsync(ScanResult result)
     {
         ClearGlobalDetailRowsCacheFor(result);
-        ResetProjectionRequests();
-        var preparation = await PrepareScanUiAsync(result);
-        if (!ReferenceEquals(_currentScan, result) || _isRecycleBinViewActive)
+        var isVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
+        if (isVisibleScan)
         {
-            return;
+            ResetProjectionRequests();
         }
+
+        var preparation = await PrepareScanUiAsync(result);
 
         if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
         {
             visible.Preparation = preparation;
-            visible.State = CaptureCurrentScanState(result);
+            if (isVisibleScan)
+            {
+                visible.State = CaptureCurrentScanState(result);
+            }
         }
 
         if (TryGetScanCacheKey(result.RootPath, out var key) &&
@@ -2838,7 +2851,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ReferenceEquals(cached.Result, result))
         {
             cached.Preparation = preparation;
-            cached.State = CaptureCurrentScanState(result);
+            if (isVisibleScan)
+            {
+                cached.State = CaptureCurrentScanState(result);
+            }
+        }
+
+        RefreshTargetStatus(result.RootPath);
+        if (!isVisibleScan)
+        {
+            return;
         }
 
         ReplaceCollection(FolderNodes, [preparation.RootNode]);
@@ -2847,7 +2869,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _forwardStack.Clear();
         RefreshFolderJumpRows(JumpBox.Text ?? string.Empty);
         await RefreshDetailsAsync();
-        RefreshTargetStatus(result.RootPath);
         UpdateFooterStatus("Ready", BuildFooterDetail(result));
     }
 
