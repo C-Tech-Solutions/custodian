@@ -39,6 +39,12 @@ public sealed class PieChartControl : FrameworkElement
         typeof(PieChartControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty SelectedSourceKeysProperty = DependencyProperty.Register(
+        nameof(SelectedSourceKeys),
+        typeof(IEnumerable),
+        typeof(PieChartControl),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public static readonly DependencyProperty ZoomFactorProperty = DependencyProperty.Register(
         nameof(ZoomFactor),
         typeof(double),
@@ -89,6 +95,12 @@ public sealed class PieChartControl : FrameworkElement
     {
         get => (ChartSlice?)GetValue(SelectedSliceProperty);
         set => SetValue(SelectedSliceProperty, value);
+    }
+
+    public IEnumerable? SelectedSourceKeys
+    {
+        get => (IEnumerable?)GetValue(SelectedSourceKeysProperty);
+        set => SetValue(SelectedSourceKeysProperty, value);
     }
 
     public double ZoomFactor
@@ -384,7 +396,7 @@ public sealed class PieChartControl : FrameworkElement
             var endAngle = startAngle + sweep;
             var brush = ResolveBrush(slice.Color);
 
-            var isSelected = SelectedSlice is not null && string.Equals(SelectedSlice.SourceKey, slice.SourceKey, StringComparison.Ordinal);
+            var isSelected = IsSelectedSlice(slice);
             var pen = isSelected ? _selectedPen : _separatorPen;
 
             drawingContext.DrawGeometry(brush, pen, BuildSliceGeometry(center, radius, innerRadius, startAngle, endAngle));
@@ -603,16 +615,38 @@ public sealed class PieChartControl : FrameworkElement
             return;
         }
 
+        var isToggleSelection = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
         SelectedSlice = slice;
-        SliceSelected?.Invoke(this, new ChartSliceEventArgs(slice));
         if (clickCount > 1)
         {
-            SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice));
+            SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice, isToggleSelection));
+            return;
         }
+
+        SliceSelected?.Invoke(this, new ChartSliceEventArgs(slice, isToggleSelection));
     }
 
     private bool IsInteractiveSlice(ChartSlice slice)
         => !_targetBytesByKey.TryGetValue(slice.SourceKey, out var targetBytes) || targetBytes > 0.5;
+
+    private bool IsSelectedSlice(ChartSlice slice)
+    {
+        if (SelectedSourceKeys is not null)
+        {
+            foreach (var key in SelectedSourceKeys.OfType<string>())
+            {
+                if (string.Equals(key, slice.SourceKey, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return SelectedSlice is not null &&
+            string.Equals(SelectedSlice.SourceKey, slice.SourceKey, StringComparison.Ordinal);
+    }
 
     private void ClampPanOffset(double radius)
     {

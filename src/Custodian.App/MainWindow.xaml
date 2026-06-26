@@ -1334,6 +1334,7 @@
 
                         <Grid x:Name="BarHost" Visibility="Collapsed">
                             <ListBox x:Name="ChartBars" ItemsSource="{Binding ChartSlices}"
+                                     SelectionMode="Extended"
                                      SelectionChanged="ChartBars_SelectionChanged"
                                      MouseDoubleClick="ChartBars_MouseDoubleClick">
                                 <ListBox.ItemTemplate>
