@@ -9,36 +9,75 @@ internal enum TargetRefreshReason
 
 internal sealed class TargetRefreshCoordinator(Func<TargetRefreshReason, Task> refreshAsync)
 {
-    private bool _isRefreshing;
-    private bool _hasQueuedRefresh;
+    private Task? _currentRefreshTask;
+    private TaskCompletionSource? _queuedRefreshCompletion;
+    private TargetRefreshReason _queuedReason = TargetRefreshReason.DeviceChange;
 
-    public bool IsRefreshing => _isRefreshing;
+    public bool IsRefreshing => _currentRefreshTask is not null;
 
-    public bool HasQueuedRefresh => _hasQueuedRefresh;
+    public bool HasQueuedRefresh => _queuedRefreshCompletion is not null;
 
-    public async Task RequestRefreshAsync(TargetRefreshReason reason)
+    public Task RequestRefreshAsync(TargetRefreshReason reason)
     {
-        if (_isRefreshing)
+        if (_currentRefreshTask is not null)
         {
-            _hasQueuedRefresh = true;
-            return;
+            if (_queuedRefreshCompletion is null)
+            {
+                _queuedRefreshCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _queuedReason = reason;
+            }
+            else if (reason == TargetRefreshReason.Manual)
+            {
+                _queuedReason = TargetRefreshReason.Manual;
+            }
+
+            return _queuedRefreshCompletion.Task;
         }
 
-        _isRefreshing = true;
+        var currentRefreshCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _currentRefreshTask = currentRefreshCompletion.Task;
+        _ = RunRefreshLoopAsync(reason, currentRefreshCompletion);
+        return currentRefreshCompletion.Task;
+    }
+
+    private async Task RunRefreshLoopAsync(
+        TargetRefreshReason initialReason,
+        TaskCompletionSource currentRefreshCompletion)
+    {
+        var currentReason = initialReason;
+        TaskCompletionSource? queuedCompletionToComplete = null;
         try
         {
-            var currentReason = reason;
-            do
+            while (true)
             {
-                _hasQueuedRefresh = false;
                 await refreshAsync(currentReason);
-                currentReason = TargetRefreshReason.DeviceChange;
+
+                queuedCompletionToComplete?.TrySetResult();
+                queuedCompletionToComplete = null;
+
+                if (_queuedRefreshCompletion is null)
+                {
+                    break;
+                }
+
+                currentReason = _queuedReason;
+                queuedCompletionToComplete = _queuedRefreshCompletion;
+                _queuedRefreshCompletion = null;
+                _queuedReason = TargetRefreshReason.DeviceChange;
             }
-            while (_hasQueuedRefresh);
+
+            currentRefreshCompletion.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            queuedCompletionToComplete?.TrySetException(ex);
+            _queuedRefreshCompletion?.TrySetException(ex);
+            _queuedRefreshCompletion = null;
+            currentRefreshCompletion.TrySetException(ex);
         }
         finally
         {
-            _isRefreshing = false;
+            _currentRefreshTask = null;
         }
     }
 }

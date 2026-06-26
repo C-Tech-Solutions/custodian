@@ -3533,9 +3533,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             RefreshEmptyStateTargets();
             await RefreshRecycleBinTargetUsageAsync();
-            if (!RestoreTargetSelectionAfterRefresh(previousSelectedTarget, previousPathText))
+            if (_isClosing)
             {
-                RepairLocalVolumeProjectionSelection(rows, previousPathText, previousSelectedTarget);
+                return;
+            }
+
+            if (!RepairLocalVolumeProjectionSelection(rows, previousPathText, previousSelectedTarget))
+            {
+                RestoreTargetSelectionAfterRefresh(previousSelectedTarget, previousPathText);
             }
         }
         catch (Exception ex)
@@ -3583,20 +3588,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshEmptyStateTargets();
     }
 
-    private void RepairLocalVolumeProjectionSelection(
+    private bool RepairLocalVolumeProjectionSelection(
         IReadOnlyList<DriveRow> driveRows,
         string previousPathText,
         TargetRow? previousSelectedTarget)
     {
         if (previousSelectedTarget?.Kind != TargetKind.PortableDevice)
         {
-            return;
+            return false;
         }
 
         var repairDrive = FindLocalVolumeProjectionRepairDrive(driveRows, previousPathText, previousSelectedTarget);
         if (repairDrive is null)
         {
-            return;
+            return false;
         }
 
         var target = TargetRows.FirstOrDefault(row =>
@@ -3604,7 +3609,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string.Equals(row.RootPath, repairDrive.RootPath, StringComparison.OrdinalIgnoreCase));
         if (target is null)
         {
-            return;
+            return false;
         }
 
         _suppressTargetSelection = true;
@@ -3623,6 +3628,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             ShowStartScanPrompt(repairDrive.RootPath);
         }
+
+        return true;
     }
 
     private bool RestoreTargetSelectionAfterRefresh(TargetRow? previousTarget, string previousPathText)
@@ -3632,7 +3639,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return false;
         }
 
-        var replacement = FindEquivalentTargetRow(TargetRows, previousTarget);
+        var replacement = TargetMatchingService.FindEquivalentTargetRow(TargetRows, previousTarget);
         if (replacement is null)
         {
             return false;
@@ -3662,37 +3669,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         return true;
     }
-
-    internal static TargetRow? FindEquivalentTargetRow(IEnumerable<TargetRow> targetRows, TargetRow previousTarget)
-    {
-        var targets = targetRows as IReadOnlyList<TargetRow> ?? targetRows.ToList();
-        return previousTarget.Kind switch
-        {
-            TargetKind.RecycleBin => targets.FirstOrDefault(row => row.Kind == TargetKind.RecycleBin),
-            TargetKind.Drive => targets.FirstOrDefault(row =>
-                row.Kind == TargetKind.Drive &&
-                string.Equals(row.RootPath, previousTarget.RootPath, StringComparison.OrdinalIgnoreCase)),
-            TargetKind.CloudProvider => targets.FirstOrDefault(row =>
-                row.Kind == TargetKind.CloudProvider &&
-                string.Equals(row.RootPath, previousTarget.RootPath, StringComparison.OrdinalIgnoreCase) &&
-                CloudProvidersMatch(row.CloudProvider, previousTarget.CloudProvider)),
-            TargetKind.PortableDevice when previousTarget.PortableTarget is { } portableTarget =>
-                FindPortableTargetRowForTarget(targets, portableTarget),
-            _ => null
-        };
-    }
-
-    private static bool CloudProvidersMatch(CloudProviderMetadata? current, CloudProviderMetadata? previous)
-    {
-        if (current is null || previous is null)
-        {
-            return current is null && previous is null;
-        }
-
-        return string.Equals(current.ProviderId, previous.ProviderId, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(current.RootPath, previous.RootPath, StringComparison.OrdinalIgnoreCase);
-    }
-
     internal static DriveRow? FindLocalVolumeProjectionRepairDrive(
         IEnumerable<DriveRow> driveRows,
         string previousPathText,
@@ -3839,17 +3815,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             candidates.FirstOrDefault(row => PortableTargetMatchesScanByName(row.PortableTarget!, scan));
     }
 
-    internal static TargetRow? FindPortableTargetRowForTarget(IEnumerable<TargetRow> targetRows, PortableDeviceTarget previousTarget)
-    {
-        var candidates = targetRows
-            .Where(row => row.Kind == TargetKind.PortableDevice && row.PortableTarget is not null)
-            .ToList();
-
-        return candidates.FirstOrDefault(row => PortableTargetMatchesTargetExactly(row.PortableTarget!, previousTarget)) ??
-            candidates.FirstOrDefault(row => PortableTargetMatchesTargetByName(row.PortableTarget!, previousTarget)) ??
-            candidates.FirstOrDefault(row => PortableTargetMatchesDeviceTransition(row.PortableTarget!, previousTarget));
-    }
-
     private static bool PortableTargetMatchesScanExactly(PortableDeviceTarget target, ScanResult scan)
     {
         if (!string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal))
@@ -3882,34 +3847,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return !string.IsNullOrWhiteSpace(displayRoot) &&
             string.Equals(target.DisplayPath, displayRoot, StringComparison.OrdinalIgnoreCase);
     }
-
-    private static bool PortableTargetMatchesTargetExactly(PortableDeviceTarget current, PortableDeviceTarget previous)
-    {
-        if (!string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return string.Equals(current.TargetId, previous.TargetId, StringComparison.Ordinal) ||
-            (!string.IsNullOrWhiteSpace(previous.StorageObjectId) &&
-             string.Equals(current.StorageObjectId, previous.StorageObjectId, StringComparison.Ordinal));
-    }
-
-    private static bool PortableTargetMatchesTargetByName(PortableDeviceTarget current, PortableDeviceTarget previous)
-    {
-        if (!string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return (!string.IsNullOrWhiteSpace(previous.StorageName) &&
-                string.Equals(current.StorageName, previous.StorageName, StringComparison.OrdinalIgnoreCase)) ||
-            string.Equals(current.DisplayPath, previous.DisplayPath, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool PortableTargetMatchesDeviceTransition(PortableDeviceTarget current, PortableDeviceTarget previous)
-        => string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal) &&
-            (!previous.IsAvailable || current.IsAvailable);
 
     private static bool IsPortableDisplaySubpath(string text, string displayRoot)
     {

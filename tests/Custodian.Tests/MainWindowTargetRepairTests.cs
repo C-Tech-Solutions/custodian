@@ -302,7 +302,7 @@ public sealed class MainWindowTargetRepairTests
         var previous = TargetRow.FromDrive(new DriveRow(@"D:\ Media", @"D:\", "1 GB used", "2 GB free", 50));
         var current = TargetRow.FromDrive(new DriveRow(@"D:\ Renamed", @"D:\", "2 GB used", "2 GB free", 50));
 
-        var match = MainWindow.FindEquivalentTargetRow([current], previous);
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
 
         Assert.Same(current, match);
     }
@@ -327,7 +327,7 @@ public sealed class MainWindowTargetRepairTests
             "Portable device storage");
         var current = TargetRow.FromPortable(availableTarget);
 
-        var match = MainWindow.FindEquivalentTargetRow([current], previous);
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
 
         Assert.Same(current, match);
     }
@@ -348,7 +348,7 @@ public sealed class MainWindowTargetRepairTests
         };
         var current = TargetRow.FromCloudProvider(currentTarget);
 
-        var match = MainWindow.FindEquivalentTargetRow([current], TargetRow.FromCloudProvider(previousTarget));
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], TargetRow.FromCloudProvider(previousTarget));
 
         Assert.Same(current, match);
     }
@@ -365,7 +365,7 @@ public sealed class MainWindowTargetRepairTests
             []);
         var localDrive = TargetRow.FromDrive(new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50));
 
-        var match = MainWindow.FindEquivalentTargetRow([TargetRow.RecycleBin(), localDrive], TargetRow.FromCloudProvider(previousTarget));
+        var match = TargetMatchingService.FindEquivalentTargetRow([TargetRow.RecycleBin(), localDrive], TargetRow.FromCloudProvider(previousTarget));
 
         Assert.Null(match);
     }
@@ -376,7 +376,64 @@ public sealed class MainWindowTargetRepairTests
         var previous = TargetRow.FromDrive(new DriveRow(@"E:\ Backup", @"E:\", "1 GB used", "2 GB free", 50));
         var current = TargetRow.FromDrive(new DriveRow(@"D:\ Media", @"D:\", "1 GB used", "2 GB free", 50));
 
-        var match = MainWindow.FindEquivalentTargetRow([current], previous);
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowMatchesAvailablePhoneToUnavailableDevice()
+    {
+        var previousTarget = new PortableDeviceTarget(
+            "wpd:stable-storage",
+            "phone-device-id",
+            "Pixel",
+            "storage-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var unavailable = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "phone-device-id",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([unavailable], TargetRow.FromPortable(previousTarget));
+
+        Assert.Same(unavailable, match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowDoesNotMatchDifferentAvailableStorageOnSamePhone()
+    {
+        var previousTarget = new PortableDeviceTarget(
+            "wpd:sd-card",
+            "phone-device-id",
+            "Pixel",
+            "sd-card-object-id",
+            "SD card",
+            "Pixel/SD card",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var internalStorage = new PortableDeviceTarget(
+            "wpd:internal",
+            "phone-device-id",
+            "Pixel",
+            "internal-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+
+        var match = TargetMatchingService.FindEquivalentTargetRow(
+            [TargetRow.FromPortable(internalStorage)],
+            TargetRow.FromPortable(previousTarget));
 
         Assert.Null(match);
     }

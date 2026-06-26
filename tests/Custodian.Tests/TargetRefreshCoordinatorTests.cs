@@ -24,14 +24,16 @@ public sealed class TargetRefreshCoordinatorTests
     {
         TargetRefreshCoordinator? coordinator = null;
         var calls = 0;
-        coordinator = new TargetRefreshCoordinator(async _ =>
+        coordinator = new TargetRefreshCoordinator(async reason =>
         {
             calls++;
             if (calls == 1)
             {
-                await coordinator!.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
-                await coordinator.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
+                _ = coordinator!.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
+                _ = coordinator.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
             }
+
+            await Task.Yield();
         });
 
         await coordinator.RequestRefreshAsync(TargetRefreshReason.Manual);
@@ -39,5 +41,32 @@ public sealed class TargetRefreshCoordinatorTests
         Assert.Equal(2, calls);
         Assert.False(coordinator.IsRefreshing);
         Assert.False(coordinator.HasQueuedRefresh);
+    }
+
+    [Fact]
+    public async Task QueuedRefreshTaskCompletesOnlyAfterQueuedRefreshRuns()
+    {
+        TargetRefreshCoordinator? coordinator = null;
+        var calls = 0;
+        var firstRefreshCanComplete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator = new TargetRefreshCoordinator(async _ =>
+        {
+            calls++;
+            if (calls == 1)
+            {
+                await firstRefreshCanComplete.Task;
+            }
+        });
+
+        var firstTask = coordinator.RequestRefreshAsync(TargetRefreshReason.Manual);
+        var queuedTask = coordinator.RequestRefreshAsync(TargetRefreshReason.DeviceChange);
+
+        Assert.False(queuedTask.IsCompleted);
+
+        firstRefreshCanComplete.SetResult();
+        await firstTask;
+        await queuedTask;
+
+        Assert.Equal(2, calls);
     }
 }
