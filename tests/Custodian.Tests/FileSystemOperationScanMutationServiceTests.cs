@@ -14,6 +14,38 @@ public sealed class FileSystemOperationScanMutationServiceTests
     public void CleanPermanentDeleteRemovesSourceEntries()
         => AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind.PermanentDelete);
 
+    [Fact]
+    public void CleanRecycleDeleteFromVolumeRootDoesNotRemoveSourceEntries()
+    {
+        var scan = Scan(rootPath: @"C:\");
+        var entry = scan.Root.Children.Single();
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.Recycle,
+            CleanBatch(),
+            [entry],
+            scan,
+            destinationFolder: null);
+
+        Assert.Empty(removed);
+    }
+
+    [Fact]
+    public void CleanPermanentDeleteFromVolumeRootRemovesSourceEntries()
+    {
+        var scan = Scan(rootPath: @"C:\");
+        var entry = scan.Root.Children.Single();
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.PermanentDelete,
+            CleanBatch(),
+            [entry],
+            scan,
+            destinationFolder: null);
+
+        Assert.Equal([entry], removed);
+    }
+
     private static void AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind operationKind)
     {
         var scan = Scan();
@@ -148,12 +180,12 @@ public sealed class FileSystemOperationScanMutationServiceTests
     private static FileSystemOperationBatchResult CleanBatch()
         => new(1, 1, 0, 0, []);
 
-    private static ScanResult Scan()
+    private static ScanResult Scan(string rootPath = @"C:\Root")
     {
         var root = new FileSystemEntry
         {
-            Name = "Root",
-            FullPath = @"C:\Root",
+            Name = Path.GetFileName(rootPath.TrimEnd('\\')),
+            FullPath = rootPath,
             IsDirectory = true,
             LogicalSizeBytes = 10,
             AllocatedSizeBytes = 10,
@@ -162,7 +194,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
         root.Children.Add(new FileSystemEntry
         {
             Name = "a.bin",
-            FullPath = @"C:\Root\a.bin",
+            FullPath = Path.Combine(rootPath, "a.bin"),
             LogicalSizeBytes = 10,
             AllocatedSizeBytes = 10,
             FileCount = 1,

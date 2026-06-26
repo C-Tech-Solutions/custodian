@@ -388,7 +388,7 @@ public sealed class PieChartControl : FrameworkElement
             var pen = isSelected ? _selectedPen : _separatorPen;
 
             drawingContext.DrawGeometry(brush, pen, BuildSliceGeometry(center, radius, innerRadius, startAngle, endAngle));
-            _renderedSlices.Add(new RenderedSlice(slice, startAngle, endAngle));
+            _renderedSlices.Add(new RenderedSlice(slice, startAngle, endAngle, IsInteractiveSlice(slice)));
             startAngle = endAngle;
         }
 
@@ -541,7 +541,9 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var angle = (Math.Atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
-        return _renderedSlices.FirstOrDefault(rendered => angle >= rendered.StartAngle && angle < rendered.EndAngle)?.Slice;
+        return _renderedSlices
+            .FirstOrDefault(rendered => rendered.IsInteractive && angle >= rendered.StartAngle && angle < rendered.EndAngle)
+            ?.Slice;
     }
 
     private double CalculateOuterRadius()
@@ -608,6 +610,9 @@ public sealed class PieChartControl : FrameworkElement
             SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice));
         }
     }
+
+    private bool IsInteractiveSlice(ChartSlice slice)
+        => !_targetBytesByKey.TryGetValue(slice.SourceKey, out var targetBytes) || targetBytes > 0.5;
 
     private void ClampPanOffset(double radius)
     {
@@ -731,5 +736,5 @@ public sealed class PieChartControl : FrameworkElement
         return brush;
     }
 
-    private sealed record RenderedSlice(ChartSlice Slice, double StartAngle, double EndAngle);
+    private sealed record RenderedSlice(ChartSlice Slice, double StartAngle, double EndAngle, bool IsInteractive);
 }

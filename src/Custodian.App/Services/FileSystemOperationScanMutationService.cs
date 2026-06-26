@@ -26,6 +26,8 @@ internal static class FileSystemOperationScanMutationService
         }
 
         if (operationKind == FileSystemOperationKind.Copy ||
+            (operationKind == FileSystemOperationKind.Recycle &&
+             IsScanRootVolumeRoot(currentScan.Root.FullPath)) ||
             (operationKind == FileSystemOperationKind.Move &&
              !IsDestinationOutsideScanRoot(destinationFolder, currentScan.Root.FullPath)))
         {
@@ -62,6 +64,18 @@ internal static class FileSystemOperationScanMutationService
             var normalizedDestination = ScanPathUtility.NormalizeRoot(destinationFolder);
             var normalizedRoot = ScanPathUtility.NormalizeRoot(rootPath);
             return !IsPathWithinRoot(normalizedDestination, normalizedRoot);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsScanRootVolumeRoot(string rootPath)
+    {
+        try
+        {
+            return ScanPathUtility.IsVolumeRoot(rootPath);
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
         {

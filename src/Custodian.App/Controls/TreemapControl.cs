@@ -384,7 +384,7 @@ public sealed class TreemapControl : FrameworkElement
     {
         for (var i = _tiles.Count - 1; i >= 0; i--)
         {
-            if (_tiles[i].Bounds.Contains(p))
+            if (_tiles[i].IsInteractive && _tiles[i].Bounds.Contains(p))
             {
                 return _tiles[i];
             }
@@ -484,7 +484,7 @@ public sealed class TreemapControl : FrameworkElement
             {
                 var item = items[i];
                 var h = item.area / rowWidth;
-                _tiles.Add(new RenderedTile(item.slice, new Rect(rect.X, y, rowWidth, h)));
+                _tiles.Add(new RenderedTile(item.slice, new Rect(rect.X, y, rowWidth, h), IsInteractiveSlice(item.slice)));
                 y += h;
             }
             return new Rect(rect.X + rowWidth, rect.Y, Math.Max(0, rect.Width - rowWidth), rect.Height);
@@ -498,7 +498,7 @@ public sealed class TreemapControl : FrameworkElement
             {
                 var item = items[i];
                 var w = item.area / rowHeight;
-                _tiles.Add(new RenderedTile(item.slice, new Rect(x, rect.Y, w, rowHeight)));
+                _tiles.Add(new RenderedTile(item.slice, new Rect(x, rect.Y, w, rowHeight), IsInteractiveSlice(item.slice)));
                 x += w;
             }
             return new Rect(rect.X, rect.Y + rowHeight, rect.Width, Math.Max(0, rect.Height - rowHeight));
@@ -669,5 +669,8 @@ public sealed class TreemapControl : FrameworkElement
         return pen;
     }
 
-    private sealed record RenderedTile(ChartSlice Slice, Rect Bounds);
+    private bool IsInteractiveSlice(ChartSlice slice)
+        => !_targetBytesByKey.TryGetValue(slice.SourceKey, out var targetBytes) || targetBytes > 0.5;
+
+    private sealed record RenderedTile(ChartSlice Slice, Rect Bounds, bool IsInteractive);
 }

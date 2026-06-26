@@ -104,6 +104,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private IReadOnlyList<CloudProviderTarget> _cloudTargets = [];
     private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
+    private int _globalDetailRowsCacheVersion;
     private CachedScan? _visibleCachedScan;
     private int _detailRefreshVersion;
     private int _chartRefreshVersion;
@@ -2837,6 +2838,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var preparation = await PrepareScanUiAsync(result);
         var stillVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
+        if (stillVisibleScan && !IsEntryReachableFromRoot(result.Root, _selectedEntry ?? result.Root))
+        {
+            _selectedEntry = result.Root;
+        }
 
         if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
         {
@@ -3388,6 +3393,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailViewMode mode,
         Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> cache)
     {
+        var cacheVersion = GetGlobalDetailRowsCacheVersion();
         lock (_globalDetailRowsCacheGate)
         {
             if (cache.TryGetValue(mode, out var cachedRows))
@@ -3399,6 +3405,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var rows = ProjectGlobalDetailRows(result, mode);
         lock (_globalDetailRowsCacheGate)
         {
+            if (cacheVersion != _globalDetailRowsCacheVersion)
+            {
+                return rows;
+            }
+
             if (cache.TryGetValue(mode, out var cachedRows))
             {
                 return cachedRows;
@@ -3424,6 +3435,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return _globalDetailRowsCache;
+    }
+
+    private int GetGlobalDetailRowsCacheVersion()
+    {
+        lock (_globalDetailRowsCacheGate)
+        {
+            return _globalDetailRowsCacheVersion;
+        }
     }
 
     private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)
@@ -3460,6 +3479,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         lock (_globalDetailRowsCacheGate)
         {
+            _globalDetailRowsCacheVersion++;
             _globalDetailRowsCache.Clear();
         }
 
@@ -3470,6 +3490,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         lock (_globalDetailRowsCacheGate)
         {
+            _globalDetailRowsCacheVersion++;
             _globalDetailRowsCache.Clear();
             if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
             {
@@ -3490,6 +3511,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _detailRefreshVersion++;
         _chartRefreshVersion++;
     }
+
+    private static bool IsEntryReachableFromRoot(FileSystemEntry root, FileSystemEntry entry)
+        => root.Flatten().Any(candidate => ReferenceEquals(candidate, entry));
 
     private async Task RefreshChartAsync()
     {
