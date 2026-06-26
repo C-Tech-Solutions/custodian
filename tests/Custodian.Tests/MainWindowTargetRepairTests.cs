@@ -333,6 +333,43 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void FindEquivalentTargetRowDoesNotPickArbitraryStorageForUnavailablePhone()
+    {
+        var previous = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "phone-device-id",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+        var internalStorage = new PortableDeviceTarget(
+            "wpd:internal",
+            "phone-device-id",
+            "Pixel",
+            "internal-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var sdCard = new PortableDeviceTarget(
+            "wpd:sd-card",
+            "phone-device-id",
+            "Pixel",
+            "sd-card-object-id",
+            "SD card",
+            "Pixel/SD card",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+
+        var match = TargetMatchingService.FindEquivalentTargetRow(
+            [TargetRow.FromPortable(internalStorage), TargetRow.FromPortable(sdCard)],
+            previous);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
     public void FindEquivalentTargetRowMatchesCloudProviderByProviderAndRoot()
     {
         var previousTarget = new CloudProviderTarget(

@@ -30,9 +30,22 @@ internal static class TargetMatchingService
             .Where(row => row.Kind == TargetKind.PortableDevice && row.PortableTarget is not null)
             .ToList();
 
-        return candidates.FirstOrDefault(row => PortableTargetMatchesTargetExactly(row.PortableTarget!, previousTarget)) ??
-            candidates.FirstOrDefault(row => PortableTargetMatchesTargetByName(row.PortableTarget!, previousTarget)) ??
-            candidates.FirstOrDefault(row => PortableTargetMatchesDeviceAvailabilityTransition(row.PortableTarget!, previousTarget));
+        var exactMatch = candidates.FirstOrDefault(row => PortableTargetMatchesTargetExactly(row.PortableTarget!, previousTarget));
+        if (exactMatch is not null)
+        {
+            return exactMatch;
+        }
+
+        var nameMatch = candidates.FirstOrDefault(row => PortableTargetMatchesTargetByName(row.PortableTarget!, previousTarget));
+        if (nameMatch is not null)
+        {
+            return nameMatch;
+        }
+
+        var transitionMatches = candidates
+            .Where(row => PortableTargetMatchesDeviceAvailabilityTransition(row.PortableTarget!, previousTarget))
+            .ToList();
+        return transitionMatches.Count == 1 ? transitionMatches[0] : null;
     }
 
     private static bool CloudProvidersMatch(CloudProviderMetadata? current, CloudProviderMetadata? previous)

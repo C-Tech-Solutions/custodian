@@ -3645,6 +3645,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return false;
         }
 
+        var currentPathText = PathBox.Text?.Trim() ?? string.Empty;
+        var canRestorePathFromSnapshot = string.Equals(currentPathText, previousPathText, StringComparison.OrdinalIgnoreCase) &&
+            TextMatchesTarget(previousPathText, previousTarget, allowEmpty: true);
+        if (!canRestorePathFromSnapshot)
+        {
+            return false;
+        }
+
         _suppressTargetSelection = true;
         try
         {
@@ -3656,27 +3664,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _suppressTargetSelection = false;
         }
 
-        var currentPathText = PathBox.Text?.Trim() ?? string.Empty;
-        var canRestorePathFromSnapshot = string.Equals(currentPathText, previousPathText, StringComparison.OrdinalIgnoreCase) &&
-            TextMatchesTarget(previousPathText, previousTarget, allowEmpty: true);
-
-        if (replacement.Kind != TargetKind.RecycleBin &&
-            canRestorePathFromSnapshot)
+        var restoredPathText = replacement.Kind == TargetKind.PortableDevice
+            ? IsPortableDisplaySubpath(previousPathText, previousTarget.DisplayPath)
+                ? previousPathText
+                : replacement.DisplayPath
+            : replacement.RootPath;
+        if (replacement.Kind != TargetKind.RecycleBin)
         {
-            PathBox.Text = replacement.Kind == TargetKind.PortableDevice
-                ? replacement.DisplayPath
-                : replacement.RootPath;
+            PathBox.Text = restoredPathText;
             SetPortableScanControls(
                 replacement.Kind == TargetKind.PortableDevice,
                 replacement.CloudProvider is not null);
         }
 
-        if (canRestorePathFromSnapshot &&
-            previousTarget.PortableTarget is { } previousPortable &&
+        if (previousTarget.PortableTarget is { } previousPortable &&
             replacement.PortableTarget is { } currentPortable &&
             previousPortable.IsAvailable != currentPortable.IsAvailable)
         {
             await SelectTargetAsync(replacement, BeginNavigation());
+            if (replacement.Kind == TargetKind.PortableDevice &&
+                IsPortableDisplaySubpath(previousPathText, previousTarget.DisplayPath))
+            {
+                PathBox.Text = restoredPathText;
+            }
         }
 
         return true;
