@@ -1438,9 +1438,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false, toggleSelection: e.IsToggleSelection), "Chart selection failed");
 
     private void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
-        => RunUiAction(
-            () => SelectChartSliceAsync(e.Slice, drillIntoFolders: !e.IsToggleSelection, toggleSelection: e.IsToggleSelection),
-            "Chart selection failed");
+    {
+        if (e.IsToggleSelection)
+        {
+            return;
+        }
+
+        RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true, toggleSelection: false), "Chart selection failed");
+    }
 
     private void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -3643,14 +3648,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyChartDataset(ChartDataset dataset)
     {
-        ReplaceCollection(ChartSlices, dataset.Slices);
-        ChartTitleText.Text = dataset.Title;
-        ChartTotalText.Text = dataset.HasOther
-            ? $"{dataset.TotalSize} · top {Math.Min(12, dataset.Slices.Count)} + other"
-            : $"{dataset.TotalSize} · {dataset.Slices.Count:n0} item(s)";
+        var wasSuppressing = _suppressChartSelection;
+        _suppressChartSelection = true;
+        try
+        {
+            ReplaceCollection(ChartSlices, dataset.Slices);
+            ChartTitleText.Text = dataset.Title;
+            ChartTotalText.Text = dataset.HasOther
+                ? $"{dataset.TotalSize} · top {Math.Min(12, dataset.Slices.Count)} + other"
+                : $"{dataset.TotalSize} · {dataset.Slices.Count:n0} item(s)";
 
-        _chartSelection.PruneTo(ChartSlices);
-        ApplyChartSelectionToControls(_chartSelection.PrimarySlice(ChartSlices));
+            _chartSelection.PruneTo(ChartSlices);
+            ApplyChartSelectionToControls(_chartSelection.PrimarySlice(ChartSlices));
+        }
+        finally
+        {
+            _suppressChartSelection = wasSuppressing;
+        }
     }
 
     private async Task SelectChartSliceAsync(ChartSlice slice, bool drillIntoFolders, bool toggleSelection)
@@ -3693,24 +3707,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? scrollTo
             : _chartSelection.PrimarySlice(ChartSlices);
 
+        var wasSuppressing = _suppressChartSelection;
         _suppressChartSelection = true;
-        PieChart.SelectedSlice = primarySlice;
-        PieChart.SelectedSourceKeys = selectedKeys;
-        Treemap.SelectedSlice = primarySlice;
-        Treemap.SelectedSourceKeys = selectedKeys;
-        ChartBars.SelectedItems.Clear();
-        foreach (var slice in ChartSlices.Where(selectedSliceSet.Contains))
+        try
         {
-            ChartBars.SelectedItems.Add(slice);
-        }
+            PieChart.SelectedSlice = primarySlice;
+            PieChart.SelectedSourceKeys = selectedKeys;
+            Treemap.SelectedSlice = primarySlice;
+            Treemap.SelectedSourceKeys = selectedKeys;
+            ChartBars.SelectedItems.Clear();
+            foreach (var slice in ChartSlices.Where(selectedSliceSet.Contains))
+            {
+                ChartBars.SelectedItems.Add(slice);
+            }
 
-        if (primarySlice is not null)
+            if (primarySlice is not null)
+            {
+                ChartBars.ScrollIntoView(primarySlice);
+            }
+        }
+        finally
         {
-            ChartBars.ScrollIntoView(primarySlice);
+            _suppressChartSelection = wasSuppressing;
         }
 
         ChartSelectionText.Text = ChartSelectionState.SelectionText(selectedSlices);
-        _suppressChartSelection = false;
         PieChart.InvalidateVisual();
         Treemap.InvalidateVisual();
     }
