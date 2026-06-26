@@ -2,6 +2,7 @@ using Custodian.Core.Model;
 using Custodian.Platform.Windows.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
+using System.Text.Json;
 
 namespace Custodian.Platform.Windows.Services;
 
@@ -11,6 +12,8 @@ internal sealed class CloudProviderDiscoveryService
     private const string OneDriveProviderName = "OneDrive";
     private const string NextcloudProviderId = "nextcloud";
     private const string NextcloudProviderName = "Nextcloud";
+    private const string DropboxProviderId = "dropbox";
+    private const string DropboxProviderName = "Dropbox";
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(CloudProviderDiscoveryService).FullName!);
     private readonly ICloudProviderDiscoveryEnvironment _environment;
     private readonly object _lock = new();
@@ -128,6 +131,11 @@ internal sealed class CloudProviderDiscoveryService
         {
             yield return candidate;
         }
+
+        foreach (var candidate in GetDropboxCandidates())
+        {
+            yield return candidate;
+        }
     }
 
     private IEnumerable<CloudProviderRootCandidate> GetOneDriveCandidates()
@@ -178,6 +186,29 @@ internal sealed class CloudProviderDiscoveryService
     private bool IsExistingCloudProviderRoot(CloudProviderRootCandidate candidate)
         => TryNormalizeRoot(candidate.RootPath, out var normalizedRoot) &&
             _environment.DirectoryExists(normalizedRoot);
+
+    private IEnumerable<CloudProviderRootCandidate> GetDropboxCandidates()
+    {
+        var configuredCandidates = _environment.GetDropboxConfigurationFiles()
+            .SelectMany(configFile => ParseDropboxConfiguration(configFile.Content))
+            .Where(IsExistingCloudProviderRoot)
+            .ToArray();
+
+        if (configuredCandidates.Length > 0)
+        {
+            foreach (var candidate in configuredCandidates)
+            {
+                yield return candidate;
+            }
+
+            yield break;
+        }
+
+        foreach (var rootPath in _environment.GetDropboxProfileCandidates())
+        {
+            yield return new CloudProviderRootCandidate(DropboxProviderId, DropboxProviderName, rootPath, string.Empty);
+        }
+    }
 
     internal static IReadOnlyList<CloudProviderRootCandidate> ParseNextcloudConfiguration(string content)
     {
@@ -254,6 +285,60 @@ internal sealed class CloudProviderDiscoveryService
                 root.RootPath,
                 accountLabels.GetValueOrDefault(root.AccountKey, string.Empty)))
             .ToArray();
+    }
+
+    internal static IReadOnlyList<CloudProviderRootCandidate> ParseDropboxConfiguration(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return [];
+            }
+
+            var candidates = new List<CloudProviderRootCandidate>();
+            AddDropboxAccountCandidate(document.RootElement, "personal", "Personal", candidates);
+            AddDropboxAccountCandidate(document.RootElement, "business", "Business", candidates);
+            return candidates;
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogDebug(ex, "Unable to parse Dropbox configuration.");
+            return [];
+        }
+    }
+
+    private static void AddDropboxAccountCandidate(
+        JsonElement root,
+        string propertyName,
+        string accountLabel,
+        ICollection<CloudProviderRootCandidate> candidates)
+    {
+        if (!root.TryGetProperty(propertyName, out var account) ||
+            account.ValueKind != JsonValueKind.Object ||
+            !account.TryGetProperty("path", out var pathProperty) ||
+            pathProperty.ValueKind != JsonValueKind.String)
+        {
+            return;
+        }
+
+        var rootPath = pathProperty.GetString();
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            return;
+        }
+
+        candidates.Add(new CloudProviderRootCandidate(
+            DropboxProviderId,
+            DropboxProviderName,
+            rootPath,
+            accountLabel));
     }
 
     private static string TrimConfigurationValue(string value)
@@ -386,6 +471,8 @@ internal sealed record OneDriveRootCandidate(string RootPath, string AccountLabe
 
 internal sealed record NextcloudConfigurationFile(string FilePath, string Content);
 
+internal sealed record DropboxConfigurationFile(string FilePath, string Content);
+
 internal interface ICloudProviderDiscoveryEnvironment
 {
     bool IsSupported { get; }
@@ -393,6 +480,8 @@ internal interface ICloudProviderDiscoveryEnvironment
     IEnumerable<OneDriveRootCandidate> GetOneDriveEnvironmentCandidates();
     IEnumerable<NextcloudConfigurationFile> GetNextcloudConfigurationFiles();
     IEnumerable<string> GetNextcloudProfileCandidates();
+    IEnumerable<DropboxConfigurationFile> GetDropboxConfigurationFiles();
+    IEnumerable<string> GetDropboxProfileCandidates();
     IReadOnlyDictionary<string, string> GetKnownFolderPaths();
     string? GetUserProfilePath();
     bool DirectoryExists(string path);
@@ -455,6 +544,18 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
     }
 
+    public IEnumerable<DropboxConfigurationFile> GetDropboxConfigurationFiles()
+    {
+        foreach (var path in GetDropboxConfigurationFilePaths().Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var content = ReadConfigurationFile(path);
+            if (content is not null)
+            {
+                yield return new DropboxConfigurationFile(path, content);
+            }
+        }
+    }
+
     public IEnumerable<string> GetNextcloudProfileCandidates()
     {
         var profile = GetUserProfilePath();
@@ -466,6 +567,22 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         yield return Path.Combine(profile, "Nextcloud");
 
         foreach (var directory in EnumerateDirectories(profile, "Nextcloud*"))
+        {
+            yield return directory;
+        }
+    }
+
+    public IEnumerable<string> GetDropboxProfileCandidates()
+    {
+        var profile = GetUserProfilePath();
+        if (string.IsNullOrWhiteSpace(profile))
+        {
+            yield break;
+        }
+
+        yield return Path.Combine(profile, "Dropbox");
+
+        foreach (var directory in EnumerateDirectories(profile, "Dropbox*"))
         {
             yield return directory;
         }
@@ -503,6 +620,21 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
     }
 
+    private static IEnumerable<string> GetDropboxConfigurationFilePaths()
+    {
+        var roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrWhiteSpace(roamingAppData))
+        {
+            yield return Path.Combine(roamingAppData, "Dropbox", "info.json");
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(localAppData, "Dropbox", "info.json");
+        }
+    }
+
     private static string? ReadConfigurationFile(string path)
     {
         try
@@ -511,7 +643,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
-            Logger.LogDebug(ex, "Unable to read Nextcloud configuration file {Path}.", path);
+            Logger.LogDebug(ex, "Unable to read cloud provider configuration file {Path}.", path);
             return null;
         }
     }
@@ -526,7 +658,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
-            Logger.LogDebug(ex, "Unable to enumerate Nextcloud profile candidate directories under {Path}.", path);
+            Logger.LogDebug(ex, "Unable to enumerate cloud provider profile candidate directories under {Path}.", path);
             return [];
         }
     }

@@ -135,17 +135,36 @@ public sealed class RecursiveScannerTests : IDisposable
         Assert.Equal(0, fileSystem.AllocatedSizeCalls);
     }
 
-    [Fact]
-    public async Task CloudProviderScanStampsMetadataAndForcesRecursiveMode()
+    [Theory]
+    [InlineData("nextcloud", "Nextcloud", "cloud.example.test")]
+    [InlineData("dropbox", "Dropbox", "Personal")]
+    public async Task CloudProviderScanStampsMetadataAndForcesRecursiveMode(
+        string providerId,
+        string providerName,
+        string accountLabel)
     {
-        await File.WriteAllBytesAsync(Path.Combine(_root, "nextcloud-file.bin"), new byte[10]);
-        var metadata = new CloudProviderMetadata("nextcloud", "Nextcloud", "cloud.example.test", _root);
+        await File.WriteAllBytesAsync(Path.Combine(_root, "cloud-file.bin"), new byte[10]);
+        var metadata = new CloudProviderMetadata(providerId, providerName, accountLabel, _root);
 
         var result = await new DiskScanner().ScanAsync(
             new ScanOptions(_root, ScanMode.Mft, CollectAllocatedSize: true, CloudProvider: metadata));
 
         Assert.Equal("Recursive", result.Engine);
         Assert.Equal(ScanSourceKind.FileSystem, result.SourceKind);
+        Assert.Equal(metadata, result.CloudProvider);
+        Assert.Equal(10, result.Root.LogicalSizeBytes);
+    }
+
+    [Fact]
+    public async Task DropboxProviderScanForcesRecursiveModeFromAuto()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(_root, "dropbox-file.bin"), new byte[10]);
+        var metadata = new CloudProviderMetadata("dropbox", "Dropbox", "Personal", _root);
+
+        var result = await new DiskScanner().ScanAsync(
+            new ScanOptions(_root, ScanMode.Auto, CollectAllocatedSize: true, CloudProvider: metadata));
+
+        Assert.Equal("Recursive", result.Engine);
         Assert.Equal(metadata, result.CloudProvider);
         Assert.Equal(10, result.Root.LogicalSizeBytes);
     }

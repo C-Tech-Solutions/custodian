@@ -109,6 +109,30 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void FindFilesystemTargetForScanTextResolvesDropboxTargetAndMetadata()
+    {
+        var cloudTarget = new CloudProviderTarget(
+            "dropbox",
+            "Dropbox",
+            "Business",
+            @"C:\Users\Me\Dropbox (Acme)",
+            @"Business - C:\Users\Me\Dropbox (Acme)",
+            []);
+        var row = TargetRow.FromCloudProvider(cloudTarget);
+
+        var match = MainWindow.FindFilesystemTargetForScanText([row], [], @"C:\Users\Me\Dropbox (Acme)");
+
+        Assert.NotNull(match);
+        Assert.Equal(TargetKind.CloudProvider, match.Kind);
+        Assert.Same(cloudTarget, match.CloudProviderTarget);
+        Assert.NotNull(match.CloudProvider);
+        Assert.Equal("dropbox", match.CloudProvider.ProviderId);
+        Assert.Equal("Dropbox", match.CloudProvider.ProviderName);
+        Assert.Equal("Business", match.CloudProvider.AccountLabel);
+        Assert.Equal(@"C:\Users\Me\Dropbox (Acme)", match.CloudProvider.RootPath);
+    }
+
+    [Fact]
     public void CloudTargetInsertIndexPlacesCloudRowsAfterLocalDrives()
     {
         var recycleBin = TargetRow.RecycleBin();
@@ -396,6 +420,7 @@ public sealed class MainWindowTargetRepairTests
     [Theory]
     [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
     [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    [InlineData("dropbox", "Dropbox", "Business", @"C:\Users\Me\Dropbox (Acme)")]
     public void FindEquivalentTargetRowMatchesCloudProviderByProviderAndRoot(
         string providerId,
         string providerName,
@@ -423,6 +448,7 @@ public sealed class MainWindowTargetRepairTests
     [Theory]
     [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
     [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    [InlineData("dropbox", "Dropbox", "Business", @"C:\Users\Me\Dropbox (Acme)")]
     public void FindEquivalentTargetRowReturnsNullWhenCloudRowsAreHidden(
         string providerId,
         string providerName,

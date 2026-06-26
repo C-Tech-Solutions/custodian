@@ -132,6 +132,7 @@ public sealed class ScanExporterTests
     [Theory]
     [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
     [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    [InlineData("dropbox", "Dropbox", "Business", @"C:\Users\Me\Dropbox (Acme)")]
     public async Task CsvWritesCloudProviderMetadataOnRows(
         string providerId,
         string providerName,
@@ -184,6 +185,7 @@ public sealed class ScanExporterTests
     [Theory]
     [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
     [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    [InlineData("dropbox", "Dropbox", "Business", @"C:\Users\Me\Dropbox (Acme)")]
     public async Task JsonWritesCloudProviderMetadata(
         string providerId,
         string providerName,

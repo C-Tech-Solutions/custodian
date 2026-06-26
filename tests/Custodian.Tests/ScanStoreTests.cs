@@ -125,6 +125,7 @@ public sealed class ScanStoreTests
     [Theory]
     [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
     [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    [InlineData("dropbox", "Dropbox", "Business", @"C:\Users\Me\Dropbox (Acme)")]
     public async Task SaveThenLoadPreservesCloudProviderMetadata(
         string providerId,
         string providerName,
@@ -192,6 +193,7 @@ public sealed class ScanStoreTests
     [Theory]
     [InlineData("onedrive", "OneDrive", "Personal", @"C:\Users\Me\OneDrive")]
     [InlineData("nextcloud", "Nextcloud", "cloud.example.test", @"C:\Users\Me\Nextcloud")]
+    [InlineData("dropbox", "Dropbox", "Business", @"C:\Users\Me\Dropbox (Acme)")]
     public async Task LoadDefaultsCloudProviderMetadataForLegacyScanFiles(
         string providerId,
         string providerName,
