@@ -1,4 +1,6 @@
 using Custodian.Core.Model;
+using Custodian.Platform.Windows.Logging;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
 namespace Custodian.Platform.Windows.Services;
@@ -9,6 +11,7 @@ internal sealed class CloudProviderDiscoveryService
     private const string OneDriveProviderName = "OneDrive";
     private const string NextcloudProviderId = "nextcloud";
     private const string NextcloudProviderName = "Nextcloud";
+    private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(CloudProviderDiscoveryService).FullName!);
     private readonly ICloudProviderDiscoveryEnvironment _environment;
     private readonly object _lock = new();
     private IReadOnlyList<CloudProviderTarget>? _cachedTargets;
@@ -48,6 +51,7 @@ internal sealed class CloudProviderDiscoveryService
             }
             catch (Exception ex) when (IsRecoverableDiscoveryException(ex))
             {
+                Logger.LogDebug(ex, "Cloud provider discovery failed; returning cached targets if available.");
                 return _cachedTargets ?? [];
             }
         }
@@ -330,6 +334,7 @@ internal sealed class CloudProviderDiscoveryService
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to normalize cloud provider path {Path}.", path);
             normalized = string.Empty;
             return false;
         }
@@ -385,6 +390,7 @@ internal interface ICloudProviderDiscoveryEnvironment
 internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderDiscoveryEnvironment
 {
     public static WindowsCloudProviderDiscoveryEnvironment Instance { get; } = new();
+    private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(WindowsCloudProviderDiscoveryEnvironment).FullName!);
 
     private WindowsCloudProviderDiscoveryEnvironment()
     {
@@ -494,6 +500,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to read Nextcloud configuration file {Path}.", path);
             return null;
         }
     }
@@ -508,6 +515,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to enumerate Nextcloud profile candidate directories under {Path}.", path);
             return [];
         }
     }
@@ -520,6 +528,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to open the OneDrive accounts registry key.");
             return null;
         }
     }
@@ -532,6 +541,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to open OneDrive account registry subkey {SubkeyName}.", subkeyName);
             return null;
         }
     }
@@ -552,6 +562,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to read OneDrive account registry subkey {SubkeyName}.", subkeyName);
             return null;
         }
     }
@@ -564,6 +575,7 @@ internal sealed class WindowsCloudProviderDiscoveryEnvironment : ICloudProviderD
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
+            Logger.LogDebug(ex, "Unable to enumerate OneDrive account registry subkeys.");
             return [];
         }
     }
