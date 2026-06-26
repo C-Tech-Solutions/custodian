@@ -297,6 +297,185 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void FindEquivalentTargetRowMatchesDriveByRootPath()
+    {
+        var previous = TargetRow.FromDrive(new DriveRow(@"D:\ Media", @"D:\", "1 GB used", "2 GB free", 50));
+        var current = TargetRow.FromDrive(new DriveRow(@"D:\ Renamed", @"D:\", "2 GB used", "2 GB free", 50));
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
+
+        Assert.Same(current, match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowMatchesUnavailablePhoneToAvailableStorage()
+    {
+        var previous = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "phone-device-id",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+        var availableTarget = new PortableDeviceTarget(
+            "wpd:stable-storage",
+            "phone-device-id",
+            "Pixel",
+            "storage-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var current = TargetRow.FromPortable(availableTarget);
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
+
+        Assert.Same(current, match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowDoesNotPickArbitraryStorageForUnavailablePhone()
+    {
+        var previous = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "phone-device-id",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+        var internalStorage = new PortableDeviceTarget(
+            "wpd:internal",
+            "phone-device-id",
+            "Pixel",
+            "internal-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var sdCard = new PortableDeviceTarget(
+            "wpd:sd-card",
+            "phone-device-id",
+            "Pixel",
+            "sd-card-object-id",
+            "SD card",
+            "Pixel/SD card",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+
+        var match = TargetMatchingService.FindEquivalentTargetRow(
+            [TargetRow.FromPortable(internalStorage), TargetRow.FromPortable(sdCard)],
+            previous);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowMatchesCloudProviderByProviderAndRoot()
+    {
+        var previousTarget = new CloudProviderTarget(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive",
+            @"Personal - C:\Users\Me\OneDrive",
+            []);
+        var currentTarget = previousTarget with
+        {
+            DetailText = @"Personal - C:\Users\Me\OneDrive - includes Desktop"
+        };
+        var current = TargetRow.FromCloudProvider(currentTarget);
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], TargetRow.FromCloudProvider(previousTarget));
+
+        Assert.Same(current, match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowReturnsNullWhenCloudRowsAreHidden()
+    {
+        var previousTarget = new CloudProviderTarget(
+            "onedrive",
+            "OneDrive",
+            "Personal",
+            @"C:\Users\Me\OneDrive",
+            @"Personal - C:\Users\Me\OneDrive",
+            []);
+        var localDrive = TargetRow.FromDrive(new DriveRow(@"C:\ System", @"C:\", "1 GB used", "2 GB free", 50));
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([TargetRow.RecycleBin(), localDrive], TargetRow.FromCloudProvider(previousTarget));
+
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowReturnsNullWhenRemovedTargetHasNoReplacement()
+    {
+        var previous = TargetRow.FromDrive(new DriveRow(@"E:\ Backup", @"E:\", "1 GB used", "2 GB free", 50));
+        var current = TargetRow.FromDrive(new DriveRow(@"D:\ Media", @"D:\", "1 GB used", "2 GB free", 50));
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowMatchesAvailablePhoneToUnavailableDevice()
+    {
+        var previousTarget = new PortableDeviceTarget(
+            "wpd:stable-storage",
+            "phone-device-id",
+            "Pixel",
+            "storage-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var unavailable = TargetRow.FromPortable(PortableDeviceTarget.Unavailable(
+            "phone-device-id",
+            "Pixel",
+            "Unlock the phone and choose USB File Transfer mode."));
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([unavailable], TargetRow.FromPortable(previousTarget));
+
+        Assert.Same(unavailable, match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowDoesNotMatchDifferentAvailableStorageOnSamePhone()
+    {
+        var previousTarget = new PortableDeviceTarget(
+            "wpd:sd-card",
+            "phone-device-id",
+            "Pixel",
+            "sd-card-object-id",
+            "SD card",
+            "Pixel/SD card",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var internalStorage = new PortableDeviceTarget(
+            "wpd:internal",
+            "phone-device-id",
+            "Pixel",
+            "internal-object-id",
+            "Internal storage",
+            "Pixel/Internal storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+
+        var match = TargetMatchingService.FindEquivalentTargetRow(
+            [TargetRow.FromPortable(internalStorage)],
+            TargetRow.FromPortable(previousTarget));
+
+        Assert.Null(match);
+    }
+
+    [Fact]
     public void PortableCopyEntriesFromSelectedRowsRequiresExplicitRows()
     {
         var entries = MainWindow.PortableCopyEntriesFromSelectedRows([]);
