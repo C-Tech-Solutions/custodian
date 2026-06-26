@@ -25,6 +25,7 @@ public sealed class PieChartControl : FrameworkElement
     private const double PanClickTolerance = 3.0;
     private const double PanClickToleranceSquared = PanClickTolerance * PanClickTolerance;
     private const double PanEdgeMargin = 32.0;
+    private const double SliceAnimationDurationMilliseconds = 180.0;
 
     public static readonly DependencyProperty SlicesProperty = DependencyProperty.Register(
         nameof(Slices),
@@ -52,9 +53,14 @@ public sealed class PieChartControl : FrameworkElement
     private static readonly Typeface SemiBoldTypeface = new(new WpfFontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private readonly List<RenderedSlice> _renderedSlices = [];
     private readonly List<ChartSlice> _slices = [];
+    private readonly Dictionary<string, double> _displayBytesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _startBytesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _targetBytesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ChartSlice> _lastSlicesByKey = new(StringComparer.Ordinal);
     private INotifyCollectionChanged? _sliceNotifications;
     private bool _isControlLoaded;
-    private long _totalBytes;
+    private DateTime _animationStartedUtc;
+    private bool _isAnimating;
     private WpfBrush _calloutBrush = CreateBrush(WpfColor.FromRgb(51, 65, 85));
     private WpfPen _calloutPen = CreatePen(CreateBrush(WpfColor.FromRgb(51, 65, 85)), 1);
     private WpfBrush _emptyStateBrush = CreateBrush(WpfColor.FromRgb(100, 116, 139));
@@ -111,6 +117,7 @@ public sealed class PieChartControl : FrameworkElement
     private void PieChartControl_Unloaded(object sender, RoutedEventArgs e)
     {
         _isControlLoaded = false;
+        StopSliceAnimation();
         DetachSliceNotifications();
         ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
     }
@@ -212,11 +219,22 @@ public sealed class PieChartControl : FrameworkElement
 
     private void RefreshSliceCache(IEnumerable? slices)
     {
-        _slices.Clear();
-        _totalBytes = 0;
+        var targetSlices = MaterializeSlices(slices);
+        if (!_isControlLoaded || _slices.Count == 0)
+        {
+            ApplySlicesImmediately(targetSlices);
+            return;
+        }
+
+        StartSliceAnimation(targetSlices);
+    }
+
+    private static List<ChartSlice> MaterializeSlices(IEnumerable? slices)
+    {
+        var targetSlices = new List<ChartSlice>();
         if (slices is null)
         {
-            return;
+            return targetSlices;
         }
 
         foreach (var slice in slices.OfType<ChartSlice>())
@@ -226,9 +244,112 @@ public sealed class PieChartControl : FrameworkElement
                 continue;
             }
 
-            _slices.Add(slice);
-            _totalBytes += slice.RawBytes;
+            targetSlices.Add(slice);
         }
+
+        return targetSlices;
+    }
+
+    private void ApplySlicesImmediately(IReadOnlyList<ChartSlice> targetSlices)
+    {
+        StopSliceAnimation();
+        _slices.Clear();
+        _slices.AddRange(targetSlices);
+        _displayBytesByKey.Clear();
+        _startBytesByKey.Clear();
+        _targetBytesByKey.Clear();
+        _lastSlicesByKey.Clear();
+        foreach (var slice in targetSlices)
+        {
+            _displayBytesByKey[slice.SourceKey] = slice.RawBytes;
+            _lastSlicesByKey[slice.SourceKey] = slice;
+        }
+    }
+
+    private void StartSliceAnimation(IReadOnlyList<ChartSlice> targetSlices)
+    {
+        var targetByKey = targetSlices
+            .GroupBy(slice => slice.SourceKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var previousKeys = _slices.Select(slice => slice.SourceKey).Distinct(StringComparer.Ordinal).ToArray();
+        var renderSlices = new List<ChartSlice>(targetSlices);
+        foreach (var key in previousKeys)
+        {
+            if (!targetByKey.ContainsKey(key) && _lastSlicesByKey.TryGetValue(key, out var previousSlice))
+            {
+                renderSlices.Add(previousSlice);
+            }
+        }
+
+        _slices.Clear();
+        _slices.AddRange(renderSlices);
+        _startBytesByKey.Clear();
+        _targetBytesByKey.Clear();
+
+        foreach (var slice in renderSlices)
+        {
+            var currentBytes = _displayBytesByKey.TryGetValue(slice.SourceKey, out var displayed)
+                ? displayed
+                : 0.0;
+            var targetBytes = targetByKey.TryGetValue(slice.SourceKey, out var targetSlice)
+                ? targetSlice.RawBytes
+                : 0.0;
+            _startBytesByKey[slice.SourceKey] = currentBytes;
+            _targetBytesByKey[slice.SourceKey] = targetBytes;
+            _displayBytesByKey[slice.SourceKey] = currentBytes;
+        }
+
+        foreach (var slice in targetSlices)
+        {
+            _lastSlicesByKey[slice.SourceKey] = slice;
+        }
+
+        if (!_startBytesByKey.Any(pair => Math.Abs(pair.Value - _targetBytesByKey[pair.Key]) > 0.5))
+        {
+            ApplySlicesImmediately(targetSlices);
+            InvalidateVisual();
+            return;
+        }
+
+        StopSliceAnimation();
+        _isAnimating = true;
+        _animationStartedUtc = DateTime.UtcNow;
+        CompositionTarget.Rendering += CompositionTarget_Rendering;
+        InvalidateVisual();
+    }
+
+    private void CompositionTarget_Rendering(object? sender, EventArgs e)
+    {
+        var progress = Math.Clamp(
+            (DateTime.UtcNow - _animationStartedUtc).TotalMilliseconds / SliceAnimationDurationMilliseconds,
+            0.0,
+            1.0);
+        var eased = 1.0 - Math.Pow(1.0 - progress, 3);
+        foreach (var pair in _targetBytesByKey)
+        {
+            var start = _startBytesByKey.GetValueOrDefault(pair.Key);
+            var displayed = start + (pair.Value - start) * eased;
+            _displayBytesByKey[pair.Key] = displayed;
+        }
+
+        if (progress >= 1.0)
+        {
+            var finalSlices = _slices.Where(slice => _targetBytesByKey.GetValueOrDefault(slice.SourceKey) > 0).ToArray();
+            ApplySlicesImmediately(finalSlices);
+        }
+
+        InvalidateVisual();
+    }
+
+    private void StopSliceAnimation()
+    {
+        if (!_isAnimating)
+        {
+            return;
+        }
+
+        CompositionTarget.Rendering -= CompositionTarget_Rendering;
+        _isAnimating = false;
     }
 
     protected override void OnRender(DrawingContext drawingContext)
@@ -236,7 +357,12 @@ public sealed class PieChartControl : FrameworkElement
         base.OnRender(drawingContext);
         _renderedSlices.Clear();
 
-        if (_slices.Count == 0 || _totalBytes <= 0)
+        var renderSlices = _slices
+            .Select(slice => (Slice: slice, Bytes: _displayBytesByKey.GetValueOrDefault(slice.SourceKey, slice.RawBytes)))
+            .Where(item => item.Bytes > 0.5)
+            .ToArray();
+        var totalBytes = renderSlices.Sum(item => item.Bytes);
+        if (renderSlices.Length == 0 || totalBytes <= 0)
         {
             DrawEmptyState(drawingContext);
             return;
@@ -251,9 +377,10 @@ public sealed class PieChartControl : FrameworkElement
 
         var center = CalculateChartCenter();
         var startAngle = 0.0;
-        foreach (var slice in _slices)
+        foreach (var item in renderSlices)
         {
-            var sweep = Math.Max(0.4, (double)slice.RawBytes / _totalBytes * 360);
+            var slice = item.Slice;
+            var sweep = Math.Max(0.4, item.Bytes / totalBytes * 360);
             var endAngle = startAngle + sweep;
             var brush = ResolveBrush(slice.Color);
 
@@ -261,7 +388,7 @@ public sealed class PieChartControl : FrameworkElement
             var pen = isSelected ? _selectedPen : _separatorPen;
 
             drawingContext.DrawGeometry(brush, pen, BuildSliceGeometry(center, radius, innerRadius, startAngle, endAngle));
-            _renderedSlices.Add(new RenderedSlice(slice, startAngle, endAngle));
+            _renderedSlices.Add(new RenderedSlice(slice, startAngle, endAngle, IsInteractiveSlice(slice)));
             startAngle = endAngle;
         }
 
@@ -274,7 +401,7 @@ public sealed class PieChartControl : FrameworkElement
             }
         }
 
-        DrawCenterText(drawingContext, center, _slices.Count);
+        DrawCenterText(drawingContext, center, renderSlices.Length);
     }
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
@@ -414,7 +541,9 @@ public sealed class PieChartControl : FrameworkElement
         }
 
         var angle = (Math.Atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
-        return _renderedSlices.FirstOrDefault(rendered => angle >= rendered.StartAngle && angle < rendered.EndAngle)?.Slice;
+        return _renderedSlices
+            .FirstOrDefault(rendered => rendered.IsInteractive && angle >= rendered.StartAngle && angle < rendered.EndAngle)
+            ?.Slice;
     }
 
     private double CalculateOuterRadius()
@@ -481,6 +610,9 @@ public sealed class PieChartControl : FrameworkElement
             SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(slice));
         }
     }
+
+    private bool IsInteractiveSlice(ChartSlice slice)
+        => !_targetBytesByKey.TryGetValue(slice.SourceKey, out var targetBytes) || targetBytes > 0.5;
 
     private void ClampPanOffset(double radius)
     {
@@ -604,5 +736,5 @@ public sealed class PieChartControl : FrameworkElement
         return brush;
     }
 
-    private sealed record RenderedSlice(ChartSlice Slice, double StartAngle, double EndAngle);
+    private sealed record RenderedSlice(ChartSlice Slice, double StartAngle, double EndAngle, bool IsInteractive);
 }

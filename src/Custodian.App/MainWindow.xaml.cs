@@ -21,6 +21,7 @@ using Custodian.App.Services;
 using Custodian.Platform.Windows.Logging;
 using Custodian.Platform.Windows.Services;
 using Microsoft.Extensions.Logging;
+using Custodian.Core.Analysis;
 using Custodian.Core.Export;
 using Custodian.Core.Formatting;
 using Custodian.Core.Model;
@@ -103,6 +104,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private IReadOnlyList<CloudProviderTarget> _cloudTargets = [];
     private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
+    private int _globalDetailRowsCacheVersion;
     private CachedScan? _visibleCachedScan;
     private int _detailRefreshVersion;
     private int _chartRefreshVersion;
@@ -2393,7 +2395,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        await RunFileSystemOperationAsync(operationKind, paths, dialog.SelectedPath);
+        await RunFileSystemOperationAsync(
+            operationKind,
+            paths,
+            dialog.SelectedPath,
+            selectedRows.Select(row => row.Entry).ToArray());
     }
 
     private void CopyPath_Click(object sender, RoutedEventArgs e)
@@ -2556,9 +2562,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode mode)
     {
+        var selectedRows = SelectedDetailRows().ToList();
         var command = DetailSelectionDeleteCommandService.Build(
             mode,
-            SelectedDetailRows().ToList(),
+            selectedRows,
             CurrentScanIsPortable(),
             _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
 
@@ -2590,7 +2597,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 MessageBoxImage.Warning);
         if (answer != MessageBoxResult.Yes) return;
 
-        await RunFileSystemOperationAsync(command.OperationKind, command.Paths, destinationFolder: null);
+        await RunFileSystemOperationAsync(
+            command.OperationKind,
+            command.Paths,
+            destinationFolder: null,
+            selectedRows.Select(row => row.Entry).ToArray());
     }
 
     private bool ConfirmMoveSelection(int count, string destinationFolder)
@@ -2607,8 +2618,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task RunFileSystemOperationAsync(
         FileSystemOperationKind operationKind,
         IReadOnlyCollection<string> paths,
-        string? destinationFolder)
+        string? destinationFolder,
+        IReadOnlyCollection<FileSystemEntry> sourceEntries)
     {
+        var originatingScan = _isRecycleBinViewActive ? null : _currentScan;
         var cts = new CancellationTokenSource();
         _activeFileOperationCts = cts;
         _activeFileOperation = true;
@@ -2638,6 +2651,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!_isClosing)
             {
                 ShowFileSystemOperationResult(operationKind, result, destinationFolder);
+                await ApplyFileSystemOperationScanMutationAsync(
+                    operationKind,
+                    result,
+                    sourceEntries,
+                    originatingScan,
+                    destinationFolder);
             }
         }
         catch (OperationCanceledException)
@@ -2679,6 +2698,46 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 }
             }
         }
+    }
+
+    private async Task ApplyFileSystemOperationScanMutationAsync(
+        FileSystemOperationKind operationKind,
+        FileSystemOperationBatchResult result,
+        IReadOnlyCollection<FileSystemEntry> sourceEntries,
+        ScanResult? originatingScan,
+        string? destinationFolder)
+    {
+        if (originatingScan is null)
+        {
+            return;
+        }
+
+        var entriesToRemove = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            operationKind,
+            result,
+            sourceEntries,
+            originatingScan,
+            destinationFolder);
+        if (entriesToRemove.Count == 0)
+        {
+            return;
+        }
+
+        var selectedEntry = ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive
+            ? _selectedEntry
+            : null;
+        var update = ScanTreeUpdater.RemoveEntries(originatingScan, entriesToRemove, selectedEntry);
+        if (!update.Changed)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive)
+        {
+            _selectedEntry = update.SelectedEntry ?? originatingScan.Root;
+        }
+
+        await RefreshScanAfterTreeMutationAsync(originatingScan);
     }
 
     private void ShowFileSystemOperationResult(
@@ -2766,6 +2825,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         MarkSessionScanCacheKeyUsed(key, enforceLimit: true);
         RefreshTargetStatus(result.RootPath);
         return cached;
+    }
+
+    private async Task RefreshScanAfterTreeMutationAsync(ScanResult result)
+    {
+        ClearGlobalDetailRowsCacheFor(result);
+        var isVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
+        if (isVisibleScan)
+        {
+            ResetProjectionRequests();
+        }
+
+        var preparation = await PrepareScanUiAsync(result);
+        var stillVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
+        if (stillVisibleScan && !IsEntryReachableFromRoot(result.Root, _selectedEntry ?? result.Root))
+        {
+            _selectedEntry = result.Root;
+        }
+
+        if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
+        {
+            visible.Preparation = preparation;
+            if (stillVisibleScan)
+            {
+                visible.State = CaptureCurrentScanState(result);
+            }
+        }
+
+        if (TryGetScanCacheKey(result.RootPath, out var key) &&
+            _sessionScanCache.TryGetValue(key, out var cached) &&
+            ReferenceEquals(cached.Result, result))
+        {
+            cached.Preparation = preparation;
+            if (stillVisibleScan)
+            {
+                cached.State = CaptureCurrentScanState(result);
+            }
+        }
+
+        RefreshTargetStatus(result.RootPath);
+        if (!stillVisibleScan)
+        {
+            return;
+        }
+
+        ReplaceCollection(FolderNodes, [preparation.RootNode]);
+        _folderJumpIndex = preparation.FolderJumpIndex;
+        _backStack.Clear();
+        _forwardStack.Clear();
+        RefreshFolderJumpRows(JumpBox.Text ?? string.Empty);
+        await RefreshDetailsAsync();
+        UpdateFooterStatus("Ready", BuildFooterDetail(result));
     }
 
     private bool TryGetCachedScan(string rootPath, out CachedScan cached)
@@ -3283,6 +3393,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DetailViewMode mode,
         Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> cache)
     {
+        var cacheVersion = GetGlobalDetailRowsCacheVersion();
         lock (_globalDetailRowsCacheGate)
         {
             if (cache.TryGetValue(mode, out var cachedRows))
@@ -3294,6 +3405,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var rows = ProjectGlobalDetailRows(result, mode);
         lock (_globalDetailRowsCacheGate)
         {
+            if (cacheVersion != _globalDetailRowsCacheVersion)
+            {
+                return rows;
+            }
+
             if (cache.TryGetValue(mode, out var cachedRows))
             {
                 return cachedRows;
@@ -3319,6 +3435,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return _globalDetailRowsCache;
+    }
+
+    private int GetGlobalDetailRowsCacheVersion()
+    {
+        lock (_globalDetailRowsCacheGate)
+        {
+            return _globalDetailRowsCacheVersion;
+        }
     }
 
     private static IReadOnlyList<DetailRow> ProjectGlobalDetailRows(ScanResult result, DetailViewMode mode)
@@ -3355,10 +3479,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         lock (_globalDetailRowsCacheGate)
         {
+            _globalDetailRowsCacheVersion++;
             _globalDetailRowsCache.Clear();
         }
 
         ResetProjectionRequests();
+    }
+
+    private void ClearGlobalDetailRowsCacheFor(ScanResult result)
+    {
+        lock (_globalDetailRowsCacheGate)
+        {
+            _globalDetailRowsCacheVersion++;
+            _globalDetailRowsCache.Clear();
+            if (_visibleCachedScan is { } visible && ReferenceEquals(visible.Result, result))
+            {
+                visible.GlobalDetailRowsCache.Clear();
+            }
+
+            if (TryGetScanCacheKey(result.RootPath, out var key) &&
+                _sessionScanCache.TryGetValue(key, out var cached) &&
+                ReferenceEquals(cached.Result, result))
+            {
+                cached.GlobalDetailRowsCache.Clear();
+            }
+        }
     }
 
     private void ResetProjectionRequests()
@@ -3366,6 +3511,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _detailRefreshVersion++;
         _chartRefreshVersion++;
     }
+
+    private static bool IsEntryReachableFromRoot(FileSystemEntry root, FileSystemEntry entry)
+        => root.Flatten().Any(candidate => ReferenceEquals(candidate, entry));
 
     private async Task RefreshChartAsync()
     {
@@ -3454,6 +3602,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
+            _selectedChartSourceKey = null;
             ChartSelectionText.Text = "Select a slice to locate it in the grid.";
         }
         _suppressChartSelection = false;
@@ -4621,7 +4770,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         public string RootKey { get; } = rootKey;
         public ScanResult Result { get; } = result;
         public CachedScanState State { get; set; } = state;
-        public ScanUiPreparation Preparation { get; } = preparation;
+        public ScanUiPreparation Preparation { get; set; } = preparation;
         public Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> GlobalDetailRowsCache { get; } = [];
     }
 
