@@ -528,8 +528,7 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*" MinWidth="180"/>
-                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*" MinWidth="220"/>
                                 </Grid.ColumnDefinitions>
 
                                 <Border Style="{StaticResource SegmentedGroup}"
@@ -548,7 +547,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Grid Grid.Column="1" Margin="12,0">
+                                <Grid Grid.Column="1" Margin="12,0,0,0">
                                     <TextBox x:Name="FilterBox" Padding="32,6,28,6"
                                              TextChanged="FilterBox_TextChanged"
                                              KeyDown="FilterBox_KeyDown"
@@ -576,21 +575,13 @@
                                     </Button>
                                 </Grid>
 
-                                <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                            VerticalAlignment="Center">
+                                <StackPanel Visibility="Collapsed">
                                     <TextBlock x:Name="SelectedTitleText"
-                                               Text="No scan loaded"
-                                               Visibility="Collapsed"/>
+                                               Text="No scan loaded"/>
                                     <TextBlock x:Name="SelectedSubText"
-                                               Text="Choose a path and scan."
-                                               Foreground="{DynamicResource MutedBrush}"
-                                               FontSize="11"
-                                               MaxWidth="260"
-                                               TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center"/>
+                                               Text="Choose a path and scan."/>
                                     <TextBlock x:Name="FilterCountText"
-                                               Foreground="{DynamicResource MutedBrush}" FontSize="11"
-                                               VerticalAlignment="Center" Margin="12,0,0,0"/>
+                                               Text=""/>
                                 </StackPanel>
                             </Grid>
                         </Border>
