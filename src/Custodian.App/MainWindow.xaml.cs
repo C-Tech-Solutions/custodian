@@ -55,6 +55,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string DefaultEmptyStateDetail = "Pick a drive or folder, then press Scan. You can also drag a folder onto this window.";
 
     private static readonly TimeSpan StartupUpdateCheckTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan TargetRefreshDebounceInterval = TimeSpan.FromMilliseconds(750);
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(MainWindow).FullName!);
     private readonly DiskScanner _scanner = new();
     private readonly PortableDeviceService _portableDevices = new();
@@ -62,6 +63,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
     private readonly MouseHistoryNavigationService _mouseHistoryNavigation;
+    private readonly TargetRefreshCoordinator _targetRefreshCoordinator;
+    private readonly DeviceChangeTargetRefreshService _deviceChangeTargetRefresh;
     private ActiveScanJob? _activeScan;
     private CancellationTokenSource? _activePortableCopy;
     private Task? _activePortableCopyTask;
@@ -77,7 +80,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string? _selectedChartSourceKey;
     private bool _suppressChartSelection;
     private bool _suppressJumpSelection;
-    private bool _isRefreshingTargets;
     private readonly Stack<FileSystemEntry> _backStack = new();
     private readonly Stack<FileSystemEntry> _forwardStack = new();
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
@@ -92,6 +94,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _scanCurrentPath = string.Empty;
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _folderJumpDebounceTimer;
+    private readonly DispatcherTimer _targetRefreshDebounceTimer;
     private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
     private IReadOnlyList<CloudProviderTarget> _cloudTargets = [];
     private readonly object _globalDetailRowsCacheGate = new();
@@ -138,6 +141,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GoBack,
             () => !_isRecycleBinViewActive && _forwardStack.Count > 0 && _selectedEntry is not null,
             GoForward);
+        _targetRefreshCoordinator = new TargetRefreshCoordinator(RefreshTargetsCoreAsync);
+        _deviceChangeTargetRefresh = new DeviceChangeTargetRefreshService(ScheduleDeviceChangeTargetRefresh);
 
         _settings = UiSettingsStore.Load();
         ApplySettingsEarly();
@@ -167,6 +172,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _folderJumpDebounceTimer.Stop();
             RefreshFolderJumpRows(JumpBox.Text);
         };
+        _targetRefreshDebounceTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TargetRefreshDebounceInterval
+        };
+        _targetRefreshDebounceTimer.Tick += TargetRefreshDebounceTimer_Tick;
 
         SeedPathFromSettings();
         InstallKeyBindings();
@@ -187,7 +197,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StateChanged += (_, _) => ScheduleSettingsSave();
         Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
-        SourceInitialized += (_, _) => ApplyNativeTitleBarTheme();
+        SourceInitialized += MainWindow_SourceInitialized;
 
         ThemeManager.ThemeChanged += ThemeManager_ThemeChanged;
         RefreshThemeMenuChecks();
@@ -199,11 +209,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Loaded -= MainWindow_Loaded;
-        await LoadDriveRowsAsync();
+        await RefreshTargetsAsync(TargetRefreshReason.Startup);
         if (_settings.AutoUpdateOnStartup)
         {
             await CheckForUpdatesAsync(UpdateCheckMode.StartupAutoDownload);
         }
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        ApplyNativeTitleBarTheme();
+        _deviceChangeTargetRefresh.Attach(this);
     }
 
     private void ThemeManager_ThemeChanged(object? sender, AppTheme theme)
@@ -217,6 +233,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         ThemeManager.ThemeChanged -= ThemeManager_ThemeChanged;
+        _targetRefreshDebounceTimer.Stop();
+        _deviceChangeTargetRefresh.Dispose();
+        SourceInitialized -= MainWindow_SourceInitialized;
         Closed -= MainWindow_Closed;
     }
 
@@ -3437,10 +3456,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateEmptyStateVisibility();
     }
 
-    private async Task LoadDriveRowsAsync()
+    private async Task RefreshTargetsAsync(TargetRefreshReason reason, WpfButton? button = null)
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        if (button is not null)
+        {
+            button.IsEnabled = false;
+        }
+
+        try
+        {
+            await _targetRefreshCoordinator.RequestRefreshAsync(reason);
+        }
+        finally
+        {
+            if (button is not null)
+            {
+                button.IsEnabled = true;
+            }
+        }
+    }
+
+    private async Task RefreshTargetsCoreAsync(TargetRefreshReason reason)
     {
         try
         {
+            Logger.LogDebug("Refreshing target list because {Reason}.", reason);
             var previousPathText = PathBox.Text?.Trim() ?? string.Empty;
             var previousSelectedTarget = DriveList.SelectedItem as TargetRow;
             var driveRowsTask = Task.Run(BuildDriveRows);
@@ -3488,7 +3533,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             RefreshEmptyStateTargets();
             await RefreshRecycleBinTargetUsageAsync();
-            RepairLocalVolumeProjectionSelection(rows, previousPathText, previousSelectedTarget);
+            if (!RestoreTargetSelectionAfterRefresh(previousSelectedTarget, previousPathText))
+            {
+                RepairLocalVolumeProjectionSelection(rows, previousPathText, previousSelectedTarget);
+            }
         }
         catch (Exception ex)
         {
@@ -3577,6 +3625,74 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private bool RestoreTargetSelectionAfterRefresh(TargetRow? previousTarget, string previousPathText)
+    {
+        if (previousTarget is null)
+        {
+            return false;
+        }
+
+        var replacement = FindEquivalentTargetRow(TargetRows, previousTarget);
+        if (replacement is null)
+        {
+            return false;
+        }
+
+        _suppressTargetSelection = true;
+        try
+        {
+            DriveList.SelectedItem = replacement;
+            DriveList.ScrollIntoView(replacement);
+        }
+        finally
+        {
+            _suppressTargetSelection = false;
+        }
+
+        if (replacement.Kind != TargetKind.RecycleBin &&
+            TextMatchesTarget(previousPathText, previousTarget, allowEmpty: true))
+        {
+            PathBox.Text = replacement.Kind == TargetKind.PortableDevice
+                ? replacement.DisplayPath
+                : replacement.RootPath;
+            SetPortableScanControls(
+                replacement.Kind == TargetKind.PortableDevice,
+                replacement.CloudProvider is not null);
+        }
+
+        return true;
+    }
+
+    internal static TargetRow? FindEquivalentTargetRow(IEnumerable<TargetRow> targetRows, TargetRow previousTarget)
+    {
+        var targets = targetRows as IReadOnlyList<TargetRow> ?? targetRows.ToList();
+        return previousTarget.Kind switch
+        {
+            TargetKind.RecycleBin => targets.FirstOrDefault(row => row.Kind == TargetKind.RecycleBin),
+            TargetKind.Drive => targets.FirstOrDefault(row =>
+                row.Kind == TargetKind.Drive &&
+                string.Equals(row.RootPath, previousTarget.RootPath, StringComparison.OrdinalIgnoreCase)),
+            TargetKind.CloudProvider => targets.FirstOrDefault(row =>
+                row.Kind == TargetKind.CloudProvider &&
+                string.Equals(row.RootPath, previousTarget.RootPath, StringComparison.OrdinalIgnoreCase) &&
+                CloudProvidersMatch(row.CloudProvider, previousTarget.CloudProvider)),
+            TargetKind.PortableDevice when previousTarget.PortableTarget is { } portableTarget =>
+                FindPortableTargetRowForTarget(targets, portableTarget),
+            _ => null
+        };
+    }
+
+    private static bool CloudProvidersMatch(CloudProviderMetadata? current, CloudProviderMetadata? previous)
+    {
+        if (current is null || previous is null)
+        {
+            return current is null && previous is null;
+        }
+
+        return string.Equals(current.ProviderId, previous.ProviderId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(current.RootPath, previous.RootPath, StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static DriveRow? FindLocalVolumeProjectionRepairDrive(
         IEnumerable<DriveRow> driveRows,
         string previousPathText,
@@ -3652,30 +3768,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void RefreshTargets_Click(object sender, RoutedEventArgs e)
     {
-        if (_isRefreshingTargets)
+        await RefreshTargetsAsync(TargetRefreshReason.Manual, sender as WpfButton);
+    }
+
+    private void ScheduleDeviceChangeTargetRefresh()
+    {
+        if (_isClosing || !IsLoaded)
         {
             return;
         }
 
-        _isRefreshingTargets = true;
-        if (sender is WpfButton button)
-        {
-            button.IsEnabled = false;
-        }
+        _targetRefreshDebounceTimer.Stop();
+        _targetRefreshDebounceTimer.Start();
+    }
 
-        try
-        {
-            await LoadDriveRowsAsync();
-        }
-        finally
-        {
-            if (sender is WpfButton refreshButton)
-            {
-                refreshButton.IsEnabled = true;
-            }
-
-            _isRefreshingTargets = false;
-        }
+    private void TargetRefreshDebounceTimer_Tick(object? sender, EventArgs e)
+    {
+        _targetRefreshDebounceTimer.Stop();
+        RunUiAction(
+            () => RefreshTargetsAsync(TargetRefreshReason.DeviceChange),
+            "Target refresh failed");
     }
 
     private void RefreshEmptyStateTargets()
@@ -3727,6 +3839,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             candidates.FirstOrDefault(row => PortableTargetMatchesScanByName(row.PortableTarget!, scan));
     }
 
+    internal static TargetRow? FindPortableTargetRowForTarget(IEnumerable<TargetRow> targetRows, PortableDeviceTarget previousTarget)
+    {
+        var candidates = targetRows
+            .Where(row => row.Kind == TargetKind.PortableDevice && row.PortableTarget is not null)
+            .ToList();
+
+        return candidates.FirstOrDefault(row => PortableTargetMatchesTargetExactly(row.PortableTarget!, previousTarget)) ??
+            candidates.FirstOrDefault(row => PortableTargetMatchesTargetByName(row.PortableTarget!, previousTarget)) ??
+            candidates.FirstOrDefault(row => PortableTargetMatchesDeviceTransition(row.PortableTarget!, previousTarget));
+    }
+
     private static bool PortableTargetMatchesScanExactly(PortableDeviceTarget target, ScanResult scan)
     {
         if (!string.Equals(target.DeviceId, scan.PortableDeviceId, StringComparison.Ordinal))
@@ -3759,6 +3882,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return !string.IsNullOrWhiteSpace(displayRoot) &&
             string.Equals(target.DisplayPath, displayRoot, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool PortableTargetMatchesTargetExactly(PortableDeviceTarget current, PortableDeviceTarget previous)
+    {
+        if (!string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return string.Equals(current.TargetId, previous.TargetId, StringComparison.Ordinal) ||
+            (!string.IsNullOrWhiteSpace(previous.StorageObjectId) &&
+             string.Equals(current.StorageObjectId, previous.StorageObjectId, StringComparison.Ordinal));
+    }
+
+    private static bool PortableTargetMatchesTargetByName(PortableDeviceTarget current, PortableDeviceTarget previous)
+    {
+        if (!string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return (!string.IsNullOrWhiteSpace(previous.StorageName) &&
+                string.Equals(current.StorageName, previous.StorageName, StringComparison.OrdinalIgnoreCase)) ||
+            string.Equals(current.DisplayPath, previous.DisplayPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool PortableTargetMatchesDeviceTransition(PortableDeviceTarget current, PortableDeviceTarget previous)
+        => string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal) &&
+            (!previous.IsAvailable || current.IsAvailable);
 
     private static bool IsPortableDisplaySubpath(string text, string displayRoot)
     {
