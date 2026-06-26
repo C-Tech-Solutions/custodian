@@ -275,7 +275,8 @@ internal static class FileSystemOperationService
             }
         })
         {
-            IsBackground = true,
+            // Keep the process alive if the WPF window closes while the shell is finishing a batch.
+            IsBackground = false,
             Name = "Custodian File Operation Shell"
         };
 
