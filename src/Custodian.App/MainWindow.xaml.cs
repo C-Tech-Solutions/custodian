@@ -2759,7 +2759,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _selectedEntry = update.SelectedEntry ?? originatingScan.Root;
         }
 
-        await RefreshScanAfterTreeMutationAsync(originatingScan);
+        await RefreshScanAfterTreeMutationAsync(originatingScan, destinationFolder);
     }
 
     private void ShowFileSystemOperationResult(
@@ -2849,7 +2849,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return cached;
     }
 
-    private async Task RefreshScanAfterTreeMutationAsync(ScanResult result)
+    private async Task RefreshScanAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
     {
         ClearGlobalDetailRowsCacheFor(result);
         var isVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
@@ -2885,7 +2885,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }
 
-        await RefreshTargetUsageAfterTreeMutationAsync(result);
+        await RefreshTargetUsageAfterTreeMutationAsync(result, destinationFolder);
         if (!stillVisibleScan)
         {
             return;
@@ -2900,7 +2900,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateFooterStatus("Ready", BuildFooterDetail(result));
     }
 
-    private async Task RefreshTargetUsageAfterTreeMutationAsync(ScanResult result)
+    private async Task RefreshTargetUsageAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
     {
         var previousSelectedTarget = DriveList.SelectedItem as TargetRow;
         var freshDriveRows = await Task.Run(BuildDriveRows);
@@ -2909,11 +2909,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _suppressTargetSelection = true;
         try
         {
-            refreshedDriveRoots = TargetUsageRefreshService.RefreshDriveTargetsForPath(
+            refreshedDriveRoots = TargetUsageRefreshService.RefreshDriveTargetsForPaths(
                 TargetRows,
                 DriveRows,
                 freshDriveRows,
-                result.RootPath,
+                [result.RootPath, destinationFolder],
                 IsScanCached,
                 IsScanActive);
         }

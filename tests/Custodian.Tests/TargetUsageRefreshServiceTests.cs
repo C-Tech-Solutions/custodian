@@ -74,6 +74,37 @@ public sealed class TargetUsageRefreshServiceTests
         Assert.Equal(oldD, driveRows[1]);
     }
 
+    [Fact]
+    public void RefreshDriveTargetsForPathsUpdatesSourceAndDestinationDrives()
+    {
+        var oldC = new DriveRow(@"C:\ System", @"C:\", "1 GB used", "9 GB free", 10);
+        var freshC = new DriveRow(@"C:\ System", @"C:\", "2 GB used", "8 GB free", 20);
+        var oldD = new DriveRow(@"D:\ Media", @"D:\", "3 GB used", "7 GB free", 30);
+        var freshD = new DriveRow(@"D:\ Media", @"D:\", "4 GB used", "6 GB free", 40);
+        var targetRows = new List<TargetRow>
+        {
+            TargetRow.FromDrive(oldC, scanCached: true),
+            TargetRow.FromDrive(oldD, scanActive: true)
+        };
+        var driveRows = new List<DriveRow> { oldC, oldD };
+
+        var refreshed = TargetUsageRefreshService.RefreshDriveTargetsForPaths(
+            targetRows,
+            driveRows,
+            [freshC, freshD],
+            [@"C:\Users\Me\Temp", @"D:\Archive"],
+            root => string.Equals(root, @"C:\", StringComparison.OrdinalIgnoreCase),
+            root => string.Equals(root, @"D:\", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Equal([@"C:\", @"D:\"], refreshed);
+        Assert.Equal("2 GB used", targetRows[0].UsedText);
+        Assert.Equal("Scanned", targetRows[0].ScanStatusText);
+        Assert.Equal("4 GB used", targetRows[1].UsedText);
+        Assert.Equal("Scanning", targetRows[1].ScanStatusText);
+        Assert.Equal("2 GB used", driveRows[0].UsedText);
+        Assert.Equal("4 GB used", driveRows[1].UsedText);
+    }
+
     [Theory]
     [InlineData(@"C:\", @"C:\", true)]
     [InlineData(@"C:\Users\Me", @"C:\", true)]

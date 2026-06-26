@@ -13,15 +13,41 @@ internal static class TargetUsageRefreshService
         string scanPath,
         Func<string, bool> isScanCached,
         Func<string, bool> isScanActive)
+        => RefreshDriveTargetsForPaths(
+            targetRows,
+            driveRows,
+            freshDriveRows,
+            [scanPath],
+            isScanCached,
+            isScanActive);
+
+    internal static IReadOnlyList<string> RefreshDriveTargetsForPaths(
+        IList<TargetRow> targetRows,
+        IList<DriveRow> driveRows,
+        IReadOnlyList<DriveRow> freshDriveRows,
+        IEnumerable<string?> affectedPaths,
+        Func<string, bool> isScanCached,
+        Func<string, bool> isScanActive)
     {
         ArgumentNullException.ThrowIfNull(targetRows);
         ArgumentNullException.ThrowIfNull(driveRows);
         ArgumentNullException.ThrowIfNull(freshDriveRows);
+        ArgumentNullException.ThrowIfNull(affectedPaths);
         ArgumentNullException.ThrowIfNull(isScanCached);
         ArgumentNullException.ThrowIfNull(isScanActive);
 
+        var paths = affectedPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            return [];
+        }
+
         var affectedDrives = freshDriveRows
-            .Where(row => IsPathWithinRoot(scanPath, row.RootPath))
+            .Where(row => paths.Any(path => IsPathWithinRoot(path, row.RootPath)))
             .ToArray();
         if (affectedDrives.Length == 0)
         {
