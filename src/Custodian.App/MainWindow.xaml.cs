@@ -4276,7 +4276,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             allRowsUseFileSystemPaths,
             _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
 
-        SelectionActionsBar.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SelectionActionsBar.Visibility = Visibility.Visible;
         SelectionStatusText.Text = state.SelectionText;
         OpenSelectionButton.IsEnabled = state.CanOpen;
         RevealSelectionButton.IsEnabled = state.CanReveal;
