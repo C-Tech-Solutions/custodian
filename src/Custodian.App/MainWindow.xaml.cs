@@ -1449,9 +1449,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressChartSelection) return;
         RunUiAction(async () =>
         {
-            if (_suppressChartSelection) return;
             var selectedSlices = ChartBars.SelectedItems.OfType<ChartSlice>().ToArray();
             _chartSelection.ReplaceWith(selectedSlices);
             ApplyChartSelectionToControls(_chartSelection.PrimarySlice(ChartSlices));
@@ -2904,13 +2904,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var previousSelectedTarget = DriveList.SelectedItem as TargetRow;
         var freshDriveRows = await Task.Run(BuildDriveRows);
-        var refreshedDriveRoots = TargetUsageRefreshService.RefreshDriveTargetsForPath(
-            TargetRows,
-            DriveRows,
-            freshDriveRows,
-            result.RootPath,
-            IsScanCached,
-            IsScanActive);
+        IReadOnlyList<string> refreshedDriveRoots;
+        var wasSuppressingTargetSelection = _suppressTargetSelection;
+        _suppressTargetSelection = true;
+        try
+        {
+            refreshedDriveRoots = TargetUsageRefreshService.RefreshDriveTargetsForPath(
+                TargetRows,
+                DriveRows,
+                freshDriveRows,
+                result.RootPath,
+                IsScanCached,
+                IsScanActive);
+        }
+        finally
+        {
+            _suppressTargetSelection = wasSuppressingTargetSelection;
+        }
 
         RefreshTargetStatus(result.RootPath);
         foreach (var rootPath in refreshedDriveRoots)
@@ -3784,7 +3794,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         DetailsGrid.SelectedItems.Clear();
         DetailRow? firstRow = null;
-        foreach (var row in DetailRows.Where(predicate))
+        foreach (var row in DetailRowsView.Cast<object>().OfType<DetailRow>().Where(predicate))
         {
             DetailsGrid.SelectedItems.Add(row);
             firstRow ??= row;
