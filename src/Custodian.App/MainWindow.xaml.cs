@@ -2927,8 +2927,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RefreshTargetUsageAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
     {
-        var previousSelectedTarget = DriveList.SelectedItem as TargetRow;
         var freshDriveRows = await Task.Run(BuildDriveRows);
+        var selectedTargetBeforeRefresh = DriveList.SelectedItem as TargetRow;
         IReadOnlyList<string> refreshedDriveRoots;
         var wasSuppressingTargetSelection = _suppressTargetSelection;
         _suppressTargetSelection = true;
@@ -2953,7 +2953,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             RefreshTargetStatus(rootPath);
         }
 
-        RestoreSelectedTargetRow(previousSelectedTarget);
+        RestoreSelectedTargetRow(selectedTargetBeforeRefresh);
         RefreshEmptyStateTargets();
     }
 
