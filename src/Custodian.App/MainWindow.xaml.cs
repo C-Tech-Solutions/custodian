@@ -2991,7 +2991,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         await RefreshTargetUsageAfterTreeMutationAsync(result, destinationFolder);
-        if (!stillVisibleScan)
+        var visibleAfterTargetRefresh = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
+        if (!visibleAfterTargetRefresh)
         {
             return;
         }
