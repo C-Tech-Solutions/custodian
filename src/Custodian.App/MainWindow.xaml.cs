@@ -1518,7 +1518,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void ChartSelection_PreviewKeyDown(object sender, WpfKeyEventArgs e)
-        => HandleSelectionDeleteShortcut(e);
+    {
+        if (DetailSelectionDeleteShortcutService.Resolve(e.Key, Keyboard.Modifiers) is not { } deleteMode)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        RunUiAction(async () =>
+        {
+            await SelectDetailRowsForChartSelectionAsync();
+            await DeleteSelectedFileSystemItemsAsync(deleteMode);
+        }, "Delete failed");
+    }
 
     private bool HandleSelectionDeleteShortcut(WpfKeyEventArgs e)
     {
@@ -2958,6 +2970,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        var wasSuppressingTargetSelection = _suppressTargetSelection;
         _suppressTargetSelection = true;
         try
         {
@@ -2965,7 +2978,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            _suppressTargetSelection = false;
+            _suppressTargetSelection = wasSuppressingTargetSelection;
         }
     }
 
