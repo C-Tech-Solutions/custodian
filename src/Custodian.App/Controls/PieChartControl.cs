@@ -112,6 +112,11 @@ public sealed class PieChartControl : FrameworkElement
     public event EventHandler<ChartSliceEventArgs>? SliceSelected;
     public event EventHandler<ChartSliceEventArgs>? SliceDoubleClicked;
 
+    static PieChartControl()
+    {
+        FocusableProperty.OverrideMetadata(typeof(PieChartControl), new FrameworkPropertyMetadata(true));
+    }
+
     public PieChartControl()
     {
         Loaded += PieChartControl_Loaded;
@@ -419,6 +424,7 @@ public sealed class PieChartControl : FrameworkElement
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
         base.OnMouseDown(e);
+        Focus();
         if (e.ChangedButton != MouseButton.Left)
         {
             return;

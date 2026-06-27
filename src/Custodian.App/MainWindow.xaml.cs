@@ -1499,10 +1499,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void DetailsGrid_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
-        if (DetailSelectionDeleteShortcutService.Resolve(e.Key, Keyboard.Modifiers) is { } deleteMode)
+        if (HandleSelectionDeleteShortcut(e))
         {
-            e.Handled = true;
-            RunUiAction(() => DeleteSelectedFileSystemItemsAsync(deleteMode), "Delete failed");
             return;
         }
 
@@ -1517,6 +1515,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GoUp();
             e.Handled = true;
         }
+    }
+
+    private void ChartSelection_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+        => HandleSelectionDeleteShortcut(e);
+
+    private bool HandleSelectionDeleteShortcut(WpfKeyEventArgs e)
+    {
+        if (DetailSelectionDeleteShortcutService.Resolve(e.Key, Keyboard.Modifiers) is not { } deleteMode)
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        RunUiAction(() => DeleteSelectedFileSystemItemsAsync(deleteMode), "Delete failed");
+        return true;
     }
 
     private void ActivateRow(DetailRow row)

@@ -15,7 +15,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
         => AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind.PermanentDelete);
 
     [Fact]
-    public void CleanRecycleDeleteFromVolumeRootDoesNotRemoveSourceEntries()
+    public void CleanRecycleDeleteFromVolumeRootRemovesSourceEntries()
     {
         var scan = Scan(rootPath: @"C:\");
         var entry = scan.Root.Children.Single();
@@ -26,6 +26,65 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null);
+
+        Assert.Equal([entry], removed);
+    }
+
+    [Fact]
+    public void RecycleIndeterminateWithMissingSourceRemovesSourceEntries()
+    {
+        var scan = Scan();
+        var entry = scan.Root.Children.Single();
+        var batch = new FileSystemOperationBatchResult(1, 0, 0, 1, []);
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.Recycle,
+            batch,
+            [entry],
+            scan,
+            destinationFolder: null,
+            pathExists: _ => false);
+
+        Assert.Equal([entry], removed);
+    }
+
+    [Fact]
+    public void RecycleIndeterminateWithExistingSourceDoesNotRemoveSourceEntries()
+    {
+        var scan = Scan();
+        var entry = scan.Root.Children.Single();
+        var batch = new FileSystemOperationBatchResult(1, 0, 0, 1, []);
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.Recycle,
+            batch,
+            [entry],
+            scan,
+            destinationFolder: null,
+            pathExists: _ => true);
+
+        Assert.Empty(removed);
+    }
+
+    [Fact]
+    public void RecycleIndeterminateWithFailureDoesNotRemoveMissingSourceEntries()
+    {
+        var scan = Scan();
+        var entry = scan.Root.Children.Single();
+        var batch = new FileSystemOperationBatchResult(
+            1,
+            0,
+            0,
+            1,
+            [new FileSystemOperationFailure(entry.FullPath, "denied")]);
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.Recycle,
+            batch,
+            [entry],
+            scan,
+            destinationFolder: null,
+            pathExists: _ => false);
 
         Assert.Empty(removed);
     }
