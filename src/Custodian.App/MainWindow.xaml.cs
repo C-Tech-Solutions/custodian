@@ -2761,7 +2761,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 UpdateDetailSelectionActionState();
                 if (refreshScanAfterOperation is not null)
                 {
-                    await StartScanAsync(refreshScanAfterOperation);
+                    await StartScanAfterFileOperationAsync(refreshScanAfterOperation);
                 }
                 else if (_currentScan is not null && !_isRecycleBinViewActive)
                 {
@@ -2823,6 +2823,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         await RefreshScanAfterTreeMutationAsync(originatingScan, destinationFolder);
         return null;
+    }
+
+    private async Task StartScanAfterFileOperationAsync(PendingScan request)
+    {
+        try
+        {
+            await StartScanAsync(request);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Automatic scan refresh after file operation failed.");
+            ShowOperationError("Refresh scan failed", ex);
+        }
     }
 
     private void ShowFileSystemOperationResult(
