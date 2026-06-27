@@ -368,6 +368,11 @@ public sealed class TreemapControl : FrameworkElement
     {
         base.OnMouseDown(e);
         Focus();
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left)
+        {
+            return;
+        }
+
         var tile = TileAt(e.GetPosition(this));
         if (tile is null)
         {
