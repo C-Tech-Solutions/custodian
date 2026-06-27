@@ -3061,27 +3061,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RemoveSessionScanCache(string rootPath)
     {
-        if (!TryGetScanCacheKey(rootPath, out var key))
-        {
-            return;
-        }
+        var removal = SessionScanCacheMutationService.Remove(
+            rootPath,
+            _sessionScanCache,
+            _sessionScanCacheOrder,
+            _visibleScanKey,
+            path => TryGetScanCacheKey(path, out var key) ? key : null);
 
-        for (var node = _sessionScanCacheOrder.First; node is not null; node = node.Next)
-        {
-            if (string.Equals(node.Value, key, StringComparison.OrdinalIgnoreCase))
-            {
-                _sessionScanCacheOrder.Remove(node);
-                break;
-            }
-        }
-
-        if (_sessionScanCache.Remove(key, out var removed))
+        if (removal.RemovedScan is { } removed)
         {
             ClearGlobalDetailRowsCacheFor(removed.Result);
             RefreshTargetStatus(removed.Result.RootPath);
         }
 
-        if (string.Equals(_visibleScanKey, key, StringComparison.OrdinalIgnoreCase))
+        if (removal.RemovedVisibleScan)
         {
             _visibleCachedScan = null;
         }
@@ -3853,43 +3846,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task SelectDetailRowsForChartSelectionAsync()
     {
-        var selectedSlices = _chartSelection.SelectedSlices(ChartSlices);
-        var actionableSlices = ChartSelectionState.ActionableSlices(selectedSlices);
-        if (actionableSlices.Count == 0)
+        var selectionPlan = ChartDetailSelectionService.BuildPlan(_chartSelection.SelectedSlices(ChartSlices), _chartScope);
+        if (!selectionPlan.HasActionableSelection)
         {
             DetailsGrid.SelectedItems.Clear();
             UpdateDetailSelectionActionState();
             return;
         }
 
-        var hasEntrySlices = actionableSlices.Any(slice => slice.Entry is not null);
-        var desiredView = hasEntrySlices
-            ? _chartScope switch
-            {
-                ChartScope.LargestFiles => DetailViewMode.LargestFiles,
-                ChartScope.LargestFolders => DetailViewMode.LargestFolders,
-                _ => DetailViewMode.Contents
-            }
-            : DetailViewMode.Extensions;
-
-        if (_viewMode != desiredView)
+        if (_viewMode != selectionPlan.DesiredView)
         {
-            SetViewMode(desiredView);
+            SetViewMode(selectionPlan.DesiredView);
             await RefreshDetailsAsync(refreshContext: false);
         }
 
-        var entryPaths = actionableSlices
-            .Where(slice => slice.Entry is not null)
-            .Select(slice => slice.Entry!.FullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var extensionKeys = actionableSlices
-            .Where(slice => slice.Kind == ChartSliceKind.Extension)
-            .Select(slice => slice.SourceKey)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        SelectDetailRows(row =>
-            entryPaths.Contains(row.FullPath) ||
-            (!string.IsNullOrWhiteSpace(row.Extension) && extensionKeys.Contains(row.Extension)));
+        SelectDetailRows(selectionPlan.Matches);
     }
 
     private void SelectDetailRow(Func<DetailRow, bool> predicate)
