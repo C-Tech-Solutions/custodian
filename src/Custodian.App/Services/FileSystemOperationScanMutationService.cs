@@ -51,19 +51,6 @@ internal static class FileSystemOperationScanMutationService
         return removableEntries;
     }
 
-    public static bool RequiresFullScanRefreshFor(
-        FileSystemOperationKind operationKind,
-        FileSystemOperationBatchResult result,
-        IReadOnlyCollection<FileSystemEntry> sourceEntries,
-        ScanResult? currentScan,
-        Func<string, SourcePathProbeResult>? pathProbe = null)
-    {
-        ArgumentNullException.ThrowIfNull(result);
-        ArgumentNullException.ThrowIfNull(sourceEntries);
-
-        return false;
-    }
-
     private static bool IsCleanCompletedBatch(FileSystemOperationBatchResult result)
         => !result.HasIssues &&
             result.RequestedCount > 0 &&

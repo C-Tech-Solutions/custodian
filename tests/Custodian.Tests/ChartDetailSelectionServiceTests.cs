@@ -65,13 +65,9 @@ public sealed class ChartDetailSelectionServiceTests
     }
 
     [Fact]
-    public void DeleteRowsKeepExtensionSlicesSynthetic()
+    public void DeleteRowsIgnoreExtensionSlices()
     {
-        var rows = ChartDetailSelectionService.BuildDeleteRows([ExtensionSlice(".zip")]);
-
-        var row = Assert.Single(rows);
-        Assert.Equal(".zip", row.FullPath);
-        Assert.Equal("Extension", row.Kind);
+        Assert.Empty(ChartDetailSelectionService.BuildDeleteRows([ExtensionSlice(".zip")]));
     }
 
     [Fact]

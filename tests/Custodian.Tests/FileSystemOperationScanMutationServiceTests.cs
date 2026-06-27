@@ -15,18 +15,19 @@ public sealed class FileSystemOperationScanMutationServiceTests
         => AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind.PermanentDelete);
 
     [Fact]
-    public void CleanRecycleDeleteFromFolderRootDoesNotRequireFullScanRefresh()
+    public void CleanRecycleDeleteFromFolderRootRemovesSourceEntries()
     {
         var scan = Scan();
         var entry = scan.Root.Children.Single();
 
-        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
             FileSystemOperationKind.Recycle,
             CleanBatch(),
             [entry],
-            scan);
+            scan,
+            destinationFolder: null);
 
-        Assert.False(requiresRefresh);
+        Assert.Equal([entry], removed);
     }
 
     [Fact]
@@ -41,14 +42,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null);
-        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
-            FileSystemOperationKind.Recycle,
-            CleanBatch(),
-            [entry],
-            scan);
-
         Assert.Equal([entry], removed);
-        Assert.False(requiresRefresh);
     }
 
     [Fact]
@@ -83,15 +77,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
             scan,
             destinationFolder: null,
             pathProbe: _ => SourcePathProbeResult.Missing);
-        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
-            FileSystemOperationKind.Recycle,
-            batch,
-            [entry],
-            scan,
-            pathProbe: _ => SourcePathProbeResult.Missing);
-
         Assert.Equal([entry], removed);
-        Assert.False(requiresRefresh);
     }
 
     [Fact]
@@ -165,14 +151,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null);
-        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
-            FileSystemOperationKind.PermanentDelete,
-            CleanBatch(),
-            [entry],
-            scan);
-
         Assert.Equal([entry], removed);
-        Assert.False(requiresRefresh);
     }
 
     private static void AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind operationKind)

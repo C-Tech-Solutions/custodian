@@ -1475,6 +1475,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _chartSelection.ReplaceWith(selectedSlices);
             ApplyChartSelectionToControls(_chartSelection.PrimarySlice(ChartSlices));
             await SelectDetailRowsForChartSelectionAsync();
+            FocusActiveChartSurface();
             RememberCurrentScanState();
         }, "Chart selection failed");
     }
@@ -2812,19 +2813,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return null;
         }
 
-        if (FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
-                operationKind,
-                result,
-                sourceEntries,
-                originatingScan))
-        {
-            var refreshRequest = CreatePendingScanFromScan(originatingScan);
-            RemoveSessionScanCache(originatingScan.RootPath);
-            return ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive
-                ? refreshRequest
-                : null;
-        }
-
         var entriesToRemove = FileSystemOperationScanMutationService.RemovedEntriesFor(
             operationKind,
             result,
@@ -3827,7 +3815,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         await SelectDetailRowsForChartSelectionAsync();
+        FocusActiveChartSurface();
         RememberCurrentScanState();
+    }
+
+    private void FocusActiveChartSurface()
+    {
+        _ = _chartDisplayMode switch
+        {
+            ChartDisplayMode.Pie => Keyboard.Focus(PieChart),
+            ChartDisplayMode.Bars => Keyboard.Focus(ChartBars),
+            _ => Keyboard.Focus(Treemap)
+        };
     }
 
     private void ClearChartSelection()
