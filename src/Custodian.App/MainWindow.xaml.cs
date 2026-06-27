@@ -3889,26 +3889,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await RefreshDetailsAsync(refreshContext: false);
         }
 
-        SelectDetailRows(selectionPlan.Matches, focusGrid: false);
+        var matchingRowCount = DetailRows.Count(selectionPlan.Matches);
+        var selectedRowCount = SelectDetailRows(selectionPlan.Matches, focusGrid: false);
+        if (selectedRowCount < matchingRowCount && !string.IsNullOrEmpty(_filterText))
+        {
+            ClearFilter();
+            SelectDetailRows(selectionPlan.Matches, focusGrid: false);
+        }
     }
 
     private void SelectDetailRow(Func<DetailRow, bool> predicate)
         => SelectDetailRows(predicate);
 
-    private void SelectDetailRows(Func<DetailRow, bool> predicate, bool focusGrid = true)
+    private int SelectDetailRows(Func<DetailRow, bool> predicate, bool focusGrid = true)
     {
         DetailsGrid.SelectedItems.Clear();
         DetailRow? firstRow = null;
+        var selectedCount = 0;
         foreach (var row in DetailRowsView.Cast<object>().OfType<DetailRow>().Where(predicate))
         {
             DetailsGrid.SelectedItems.Add(row);
+            selectedCount++;
             firstRow ??= row;
         }
 
         if (firstRow is null)
         {
             UpdateDetailSelectionActionState();
-            return;
+            return selectedCount;
         }
 
         DetailsGrid.ScrollIntoView(firstRow);
@@ -3916,6 +3924,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             DetailsGrid.Focus();
         }
+
+        return selectedCount;
     }
 
     private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
