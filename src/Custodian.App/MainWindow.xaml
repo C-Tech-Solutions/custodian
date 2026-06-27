@@ -15,6 +15,7 @@
         TextOptions.TextRenderingMode="ClearType"
         UseLayoutRounding="True"
         AllowDrop="True"
+        PreviewKeyDown="Window_PreviewKeyDown"
         Drop="Window_Drop"
         DragOver="Window_DragOver">
 
@@ -1278,10 +1279,12 @@
                                Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                Margin="14,8,14,12" TextWrapping="Wrap"/>
 
-                    <Grid MinHeight="280" Margin="11,10,11,0">
+                    <Grid x:Name="ChartSurfaceHost" MinHeight="280" Margin="11,10,11,0">
                         <Grid x:Name="TreemapHost">
                             <controls:TreemapControl x:Name="Treemap"
+                                                     Focusable="True"
                                                      Slices="{Binding ChartSlices}"
+                                                     PreviewKeyDown="ChartSelection_PreviewKeyDown"
                                                      SliceSelected="Chart_SliceSelected"
                                                      SliceDoubleClicked="Chart_SliceDoubleClicked"/>
                         </Grid>
@@ -1291,9 +1294,11 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <controls:PieChartControl x:Name="PieChart"
+                                                      Focusable="True"
                                                       Slices="{Binding ChartSlices}"
                                                       ZoomFactor="{Binding ElementName=PieZoomSlider, Path=Value}"
                                                       ClipToBounds="True"
+                                                      PreviewKeyDown="ChartSelection_PreviewKeyDown"
                                                       SliceSelected="Chart_SliceSelected"
                                                       SliceDoubleClicked="Chart_SliceDoubleClicked"/>
                             <ItemsControl Grid.Row="1" Margin="0,6,0,0" ItemsSource="{Binding ChartSlices}">
@@ -1334,7 +1339,9 @@
 
                         <Grid x:Name="BarHost" Visibility="Collapsed">
                             <ListBox x:Name="ChartBars" ItemsSource="{Binding ChartSlices}"
+                                     SelectionMode="Extended"
                                      SelectionChanged="ChartBars_SelectionChanged"
+                                     PreviewKeyDown="ChartSelection_PreviewKeyDown"
                                      MouseDoubleClick="ChartBars_MouseDoubleClick">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>

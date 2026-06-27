@@ -82,7 +82,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private DetailViewMode _viewMode = DetailViewMode.Contents;
     private ChartScope _chartScope = ChartScope.SelectedFolder;
     private ChartDisplayMode _chartDisplayMode = ChartDisplayMode.Treemap;
-    private string? _selectedChartSourceKey;
+    private readonly ChartSelectionState _chartSelection = new();
     private bool _suppressChartSelection;
     private bool _suppressJumpSelection;
     private readonly Stack<FileSystemEntry> _backStack = new();
@@ -800,7 +800,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         System.Windows.Application.Current.Shutdown();
     }
 
-    private async Task StartScanAsync()
+    private async Task StartScanAsync(PendingScan? explicitRequest = null)
     {
         if (_activeScan is not null || _activePortableCopy is not null) return;
         if (_activeFileOperation)
@@ -809,11 +809,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var request = CreatePendingScan();
+        var request = explicitRequest ?? CreatePendingScan();
         if (request is null)
         {
             UpdateFooterStatus("Choose a path to scan.", string.Empty);
             return;
+        }
+
+        if (explicitRequest is not null &&
+            !string.Equals(PathBox.Text?.Trim(), request.DisplayPath, StringComparison.OrdinalIgnoreCase))
+        {
+            UpdatePathDisplay(request.DisplayPath);
         }
 
         if (request.PortableTarget is { IsAvailable: false } unavailableTarget)
@@ -1408,7 +1414,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_suppressChartScopeSelection) return;
         if (ChartScopeBox.SelectedItem is not ComboBoxItem { Tag: string tag } || !Enum.TryParse(tag, out ChartScope scope)) return;
         _chartScope = scope;
-        _selectedChartSourceKey = null;
+        ClearChartSelection();
         RunUiAction(RefreshChartAsync, "Chart refresh failed");
         RememberCurrentScanState();
     }
@@ -1435,17 +1441,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void Chart_SliceSelected(object sender, ChartSliceEventArgs e)
-        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false), "Chart selection failed");
+        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: false, toggleSelection: e.IsToggleSelection), "Chart selection failed");
 
     private void Chart_SliceDoubleClicked(object sender, ChartSliceEventArgs e)
-        => RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true), "Chart selection failed");
+    {
+        if (e.IsToggleSelection)
+        {
+            return;
+        }
+
+        RunUiAction(() => SelectChartSliceAsync(e.Slice, drillIntoFolders: true, toggleSelection: false), "Chart selection failed");
+    }
 
     private void ChartBars_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressChartSelection) return;
         RunUiAction(async () =>
         {
-            if (_suppressChartSelection || ChartBars.SelectedItem is not ChartSlice slice) return;
-            await SelectChartSliceAsync(slice, drillIntoFolders: false);
+            var selectedSlices = ChartBars.SelectedItems.OfType<ChartSlice>().ToArray();
+            _chartSelection.ReplaceWith(selectedSlices);
+            ApplyChartSelectionToControls(_chartSelection.PrimarySlice(ChartSlices));
+            await SelectDetailRowsForChartSelectionAsync();
+            FocusActiveChartSurface();
+            RememberCurrentScanState();
         }, "Chart selection failed");
     }
 
@@ -1453,7 +1471,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         RunUiAction(async () =>
         {
-            if (ChartBars.SelectedItem is ChartSlice slice) await SelectChartSliceAsync(slice, drillIntoFolders: true);
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control) return;
+            if (ChartBars.SelectedItem is ChartSlice slice)
+            {
+                await SelectChartSliceAsync(slice, drillIntoFolders: true, toggleSelection: false);
+            }
         }, "Chart selection failed");
     }
 
@@ -1482,8 +1504,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void DetailsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         => UpdateDetailSelectionActionState();
 
+    private void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (e.Handled || ChartSelectionKeyboardService.IsTextInputFocus(Keyboard.FocusedElement))
+        {
+            return;
+        }
+
+        if (DetailSelectionDeleteShortcutService.ResolveForChartSelection(e.Key, Keyboard.Modifiers) is not { } deleteMode ||
+            !ChartSelectionKeyboardService.ShouldRouteDeleteShortcut(
+                Keyboard.FocusedElement,
+                ChartSurfaceHost,
+                _chartSelection.Count > 0))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        RunUiAction(() => DeleteChartSelectionAsync(deleteMode), "Delete failed");
+    }
+
     private void DetailsGrid_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (HandleSelectionDeleteShortcut(e))
+        {
+            return;
+        }
+
         if (e.Key == Key.Enter && DetailsGrid.SelectedItem is DetailRow row)
         {
             ActivateRow(row);
@@ -1495,6 +1542,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             GoUp();
             e.Handled = true;
         }
+    }
+
+    private void ChartSelection_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (_chartSelection.Count == 0)
+        {
+            return;
+        }
+
+        if (DetailSelectionDeleteShortcutService.ResolveForChartSelection(e.Key, Keyboard.Modifiers) is not { } deleteMode)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        RunUiAction(() => DeleteChartSelectionAsync(deleteMode), "Delete failed");
+    }
+
+    private bool HandleSelectionDeleteShortcut(WpfKeyEventArgs e)
+    {
+        if (DetailSelectionDeleteShortcutService.Resolve(e.Key, Keyboard.Modifiers) is not { } deleteMode)
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        RunUiAction(() => DeleteSelectedFileSystemItemsAsync(deleteMode), "Delete failed");
+        return true;
+    }
+
+    private async Task DeleteChartSelectionAsync(DetailSelectionDeleteMode deleteMode)
+    {
+        var selectedRows = ChartDetailSelectionService.BuildDeleteRows(_chartSelection.SelectedSlices(ChartSlices));
+        await SelectDetailRowsForChartSelectionAsync();
+        await DeleteFileSystemItemsAsync(deleteMode, selectedRows);
     }
 
     private void ActivateRow(DetailRow row)
@@ -2562,7 +2644,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode mode)
     {
-        var selectedRows = SelectedDetailRows().ToList();
+        await DeleteFileSystemItemsAsync(mode, SelectedDetailRows().ToList());
+    }
+
+    private async Task DeleteFileSystemItemsAsync(
+        DetailSelectionDeleteMode mode,
+        IReadOnlyCollection<DetailRow> selectedRows)
+    {
         var command = DetailSelectionDeleteCommandService.Build(
             mode,
             selectedRows,
@@ -2737,7 +2825,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _selectedEntry = update.SelectedEntry ?? originatingScan.Root;
         }
 
-        await RefreshScanAfterTreeMutationAsync(originatingScan);
+        await RefreshScanAfterTreeMutationAsync(originatingScan, destinationFolder);
     }
 
     private void ShowFileSystemOperationResult(
@@ -2827,7 +2915,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return cached;
     }
 
-    private async Task RefreshScanAfterTreeMutationAsync(ScanResult result)
+    private async Task RefreshScanAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
     {
         ClearGlobalDetailRowsCacheFor(result);
         var isVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
@@ -2863,8 +2951,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }
 
-        RefreshTargetStatus(result.RootPath);
-        if (!stillVisibleScan)
+        await RefreshTargetUsageAfterTreeMutationAsync(result, destinationFolder);
+        var visibleAfterTargetRefresh = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
+        if (!visibleAfterTargetRefresh)
         {
             return;
         }
@@ -2876,6 +2965,63 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshFolderJumpRows(JumpBox.Text ?? string.Empty);
         await RefreshDetailsAsync();
         UpdateFooterStatus("Ready", BuildFooterDetail(result));
+    }
+
+    private async Task RefreshTargetUsageAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
+    {
+        var freshDriveRows = await Task.Run(BuildDriveRows);
+        var selectedTargetBeforeRefresh = DriveList.SelectedItem as TargetRow;
+        IReadOnlyList<string> refreshedDriveRoots;
+        var wasSuppressingTargetSelection = _suppressTargetSelection;
+        _suppressTargetSelection = true;
+        try
+        {
+            refreshedDriveRoots = TargetUsageRefreshService.RefreshDriveTargetsForPaths(
+                TargetRows,
+                DriveRows,
+                freshDriveRows,
+                [result.RootPath, destinationFolder],
+                IsScanCached,
+                IsScanActive);
+        }
+        finally
+        {
+            _suppressTargetSelection = wasSuppressingTargetSelection;
+        }
+
+        RefreshTargetStatus(result.RootPath);
+        foreach (var rootPath in refreshedDriveRoots)
+        {
+            RefreshTargetStatus(rootPath);
+        }
+
+        RestoreSelectedTargetRow(selectedTargetBeforeRefresh);
+        RefreshEmptyStateTargets();
+    }
+
+    private void RestoreSelectedTargetRow(TargetRow? previousSelectedTarget)
+    {
+        if (previousSelectedTarget is null)
+        {
+            return;
+        }
+
+        var replacement = TargetMatchingService.FindEquivalentTargetRow(TargetRows, previousSelectedTarget);
+        if (replacement is null || ReferenceEquals(DriveList.SelectedItem, replacement))
+        {
+            return;
+        }
+
+        var wasSuppressingTargetSelection = _suppressTargetSelection;
+        _suppressTargetSelection = true;
+        try
+        {
+            DriveList.SelectedItem = replacement;
+        }
+        finally
+        {
+            _suppressTargetSelection = wasSuppressingTargetSelection;
+        }
     }
 
     private bool TryGetCachedScan(string rootPath, out CachedScan cached)
@@ -3287,7 +3433,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _selectedEntry = ResolveCachedSelection(result, cached.State);
         SetViewMode(cached.State.ViewMode);
         SetChartScope(cached.State.ChartScope);
-        _selectedChartSourceKey = null;
+        ClearChartSelection();
         RefreshFolderJumpRows(string.Empty);
         await RefreshDetailsAsync();
         if (!IsCurrentScanRestore(cached.RootKey, navigationVersion))
@@ -3524,11 +3670,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ChartSlices.Clear();
             ChartTitleText.Text = "Disk distribution";
             ChartTotalText.Text = "Run a scan to render chart data.";
-            ChartSelectionText.Text = "Select a slice to locate it in the grid.";
-            PieChart.SelectedSlice = null;
-            PieChart.InvalidateVisual();
-            Treemap.SelectedSlice = null;
-            Treemap.InvalidateVisual();
+            ClearChartSelection();
             return;
         }
 
@@ -3584,91 +3726,158 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ApplyChartDataset(ChartDataset dataset)
     {
-        ReplaceCollection(ChartSlices, dataset.Slices);
-        ChartTitleText.Text = dataset.Title;
-        ChartTotalText.Text = dataset.HasOther
-            ? $"{dataset.TotalSize} · top {Math.Min(12, dataset.Slices.Count)} + other"
-            : $"{dataset.TotalSize} · {dataset.Slices.Count:n0} item(s)";
-
-        var selectedSlice = ChartSlices.FirstOrDefault(s => string.Equals(s.SourceKey, _selectedChartSourceKey, StringComparison.Ordinal));
+        var wasSuppressing = _suppressChartSelection;
         _suppressChartSelection = true;
-        PieChart.SelectedSlice = selectedSlice;
-        Treemap.SelectedSlice = selectedSlice;
-        ChartBars.SelectedItem = selectedSlice;
-        if (selectedSlice is not null)
+        try
         {
-            ChartBars.ScrollIntoView(selectedSlice);
-            ChartSelectionText.Text = $"{selectedSlice.Label}: {selectedSlice.FormattedSize} ({selectedSlice.PercentText})";
+            ReplaceCollection(ChartSlices, dataset.Slices);
+            ChartTitleText.Text = dataset.Title;
+            ChartTotalText.Text = dataset.HasOther
+                ? $"{dataset.TotalSize} · top {Math.Min(12, dataset.Slices.Count)} + other"
+                : $"{dataset.TotalSize} · {dataset.Slices.Count:n0} item(s)";
+
+            _chartSelection.PruneTo(ChartSlices);
+            ApplyChartSelectionToControls(_chartSelection.PrimarySlice(ChartSlices));
+        }
+        finally
+        {
+            _suppressChartSelection = wasSuppressing;
+        }
+    }
+
+    private async Task SelectChartSliceAsync(ChartSlice slice, bool drillIntoFolders, bool toggleSelection)
+    {
+        if (toggleSelection)
+        {
+            _chartSelection.Toggle(slice);
+            drillIntoFolders = false;
         }
         else
         {
-            _selectedChartSourceKey = null;
-            ChartSelectionText.Text = "Select a slice to locate it in the grid.";
+            _chartSelection.SelectSingle(slice);
         }
-        _suppressChartSelection = false;
-        PieChart.InvalidateVisual();
-        Treemap.InvalidateVisual();
-    }
 
-    private async Task SelectChartSliceAsync(ChartSlice slice, bool drillIntoFolders)
-    {
-        _selectedChartSourceKey = slice.SourceKey;
-        ChartSelectionText.Text = $"{slice.Label}: {slice.FormattedSize} ({slice.PercentText})";
+        ApplyChartSelectionToControls(slice);
 
-        _suppressChartSelection = true;
-        PieChart.SelectedSlice = slice;
-        Treemap.SelectedSlice = slice;
-        ChartBars.SelectedItem = slice;
-        ChartBars.ScrollIntoView(slice);
-        _suppressChartSelection = false;
-        PieChart.InvalidateVisual();
-        Treemap.InvalidateVisual();
-
-        if (slice.Kind == ChartSliceKind.Other) return;
-
-        if (drillIntoFolders && slice.Entry is { IsDirectory: true } folder)
+        if (!toggleSelection && drillIntoFolders && slice.Entry is { IsDirectory: true } folder)
         {
             SetChartScope(ChartScope.SelectedFolder);
             await NavigateToFolderAsync(folder);
             return;
         }
 
-        await SelectDetailRowForSliceAsync(slice);
+        await SelectDetailRowsForChartSelectionAsync();
+        FocusActiveChartSurface();
         RememberCurrentScanState();
     }
 
-    private async Task SelectDetailRowForSliceAsync(ChartSlice slice)
+    private void FocusActiveChartSurface()
     {
-        if (slice.Kind == ChartSliceKind.Extension)
+        _ = _chartDisplayMode switch
         {
-            SetViewMode(DetailViewMode.Extensions);
-            await RefreshDetailsAsync(refreshContext: false);
-            SelectDetailRow(row => string.Equals(row.Extension, slice.SourceKey, StringComparison.OrdinalIgnoreCase));
+            ChartDisplayMode.Pie => Keyboard.Focus(PieChart),
+            ChartDisplayMode.Bars => Keyboard.Focus(ChartBars),
+            _ => Keyboard.Focus(Treemap)
+        };
+    }
+
+    private void ClearChartSelection()
+    {
+        _chartSelection.Clear();
+        ApplyChartSelectionToControls(scrollTo: null);
+    }
+
+    private void ApplyChartSelectionToControls(ChartSlice? scrollTo)
+    {
+        var selectedKeys = _chartSelection.SourceKeys.ToArray();
+        var selectedSlices = _chartSelection.SelectedSlices(ChartSlices);
+        var selectedSliceSet = selectedSlices.ToHashSet();
+        var primarySlice = scrollTo is not null && _chartSelection.IsSelected(scrollTo)
+            ? scrollTo
+            : _chartSelection.PrimarySlice(ChartSlices);
+
+        var wasSuppressing = _suppressChartSelection;
+        _suppressChartSelection = true;
+        try
+        {
+            PieChart.SelectedSlice = primarySlice;
+            PieChart.SelectedSourceKeys = selectedKeys;
+            Treemap.SelectedSlice = primarySlice;
+            Treemap.SelectedSourceKeys = selectedKeys;
+            ChartBars.SelectedItems.Clear();
+            foreach (var slice in ChartSlices.Where(selectedSliceSet.Contains))
+            {
+                ChartBars.SelectedItems.Add(slice);
+            }
+
+            if (primarySlice is not null)
+            {
+                ChartBars.ScrollIntoView(primarySlice);
+            }
+        }
+        finally
+        {
+            _suppressChartSelection = wasSuppressing;
+        }
+
+        ChartSelectionText.Text = ChartSelectionState.SelectionText(selectedSlices);
+        PieChart.InvalidateVisual();
+        Treemap.InvalidateVisual();
+    }
+
+    private async Task SelectDetailRowsForChartSelectionAsync()
+    {
+        var selectionPlan = ChartDetailSelectionService.BuildPlan(_chartSelection.SelectedSlices(ChartSlices), _chartScope);
+        if (!selectionPlan.HasActionableSelection)
+        {
+            DetailsGrid.SelectedItems.Clear();
+            UpdateDetailSelectionActionState();
             return;
         }
-        if (slice.Entry is null) return;
 
-        var desiredView = _chartScope switch
+        if (_viewMode != selectionPlan.DesiredView)
         {
-            ChartScope.LargestFiles => DetailViewMode.LargestFiles,
-            ChartScope.LargestFolders => DetailViewMode.LargestFolders,
-            _ => DetailViewMode.Contents
-        };
-        if (_viewMode != desiredView)
-        {
-            SetViewMode(desiredView);
+            SetViewMode(selectionPlan.DesiredView);
             await RefreshDetailsAsync(refreshContext: false);
         }
-        SelectDetailRow(row => string.Equals(row.FullPath, slice.Entry.FullPath, StringComparison.OrdinalIgnoreCase));
+
+        var matchingRowCount = DetailRows.Count(selectionPlan.Matches);
+        var selectedRowCount = SelectDetailRows(selectionPlan.Matches, focusGrid: false);
+        if (selectedRowCount < matchingRowCount && !string.IsNullOrEmpty(_filterText))
+        {
+            ClearFilter();
+            SelectDetailRows(selectionPlan.Matches, focusGrid: false);
+        }
     }
 
     private void SelectDetailRow(Func<DetailRow, bool> predicate)
+        => SelectDetailRows(predicate);
+
+    private int SelectDetailRows(Func<DetailRow, bool> predicate, bool focusGrid = true)
     {
-        var row = DetailRows.FirstOrDefault(predicate);
-        if (row is null) return;
-        DetailsGrid.SelectedItem = row;
-        DetailsGrid.ScrollIntoView(row);
-        DetailsGrid.Focus();
+        DetailsGrid.SelectedItems.Clear();
+        DetailRow? firstRow = null;
+        var selectedCount = 0;
+        foreach (var row in DetailRowsView.Cast<object>().OfType<DetailRow>().Where(predicate))
+        {
+            DetailsGrid.SelectedItems.Add(row);
+            selectedCount++;
+            firstRow ??= row;
+        }
+
+        if (firstRow is null)
+        {
+            UpdateDetailSelectionActionState();
+            return selectedCount;
+        }
+
+        DetailsGrid.ScrollIntoView(firstRow);
+        if (focusGrid)
+        {
+            DetailsGrid.Focus();
+        }
+
+        return selectedCount;
     }
 
     private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)
@@ -3695,7 +3904,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         _selectedEntry = entry;
         SetViewMode(DetailViewMode.Contents);
-        _selectedChartSourceKey = null;
+        ClearChartSelection();
         await RefreshDetailsAsync();
         RememberCurrentScanState();
         AnimateGridFadeIn();
@@ -3789,7 +3998,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _folderJumpIndex = [];
         _backStack.Clear();
         _forwardStack.Clear();
-        _selectedChartSourceKey = null;
+        ClearChartSelection();
         _selectedEntry = null;
         SelectedTitleText.Text = "Scanning...";
         SelectedSubText.Text = "Preparing scan...";
@@ -3841,7 +4050,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ClearGlobalDetailRowsCache();
         _currentScan = null;
         _selectedEntry = null;
-        _selectedChartSourceKey = null;
+        ClearChartSelection();
         _folderJumpIndex = [];
         _backStack.Clear();
         _forwardStack.Clear();

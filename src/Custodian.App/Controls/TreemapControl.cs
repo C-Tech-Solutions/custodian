@@ -40,6 +40,12 @@ public sealed class TreemapControl : FrameworkElement
         typeof(TreemapControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty SelectedSourceKeysProperty = DependencyProperty.Register(
+        nameof(SelectedSourceKeys),
+        typeof(IEnumerable),
+        typeof(TreemapControl),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
     private static readonly WpfFontFamily LabelFontFamily = new("Segoe UI Variable Text, Segoe UI");
     private static readonly Typeface LabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface SemiBoldLabelTypeface = new(LabelFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
@@ -71,6 +77,12 @@ public sealed class TreemapControl : FrameworkElement
     {
         get => (ChartSlice?)GetValue(SelectedSliceProperty);
         set => SetValue(SelectedSliceProperty, value);
+    }
+
+    public IEnumerable? SelectedSourceKeys
+    {
+        get => (IEnumerable?)GetValue(SelectedSourceKeysProperty);
+        set => SetValue(SelectedSourceKeysProperty, value);
     }
 
     public event EventHandler<ChartSliceEventArgs>? SliceSelected;
@@ -356,18 +368,26 @@ public sealed class TreemapControl : FrameworkElement
     {
         base.OnMouseDown(e);
         Focus();
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left)
+        {
+            return;
+        }
+
         var tile = TileAt(e.GetPosition(this));
         if (tile is null)
         {
             return;
         }
 
+        var isToggleSelection = (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == System.Windows.Input.ModifierKeys.Control;
         SelectedSlice = tile.Slice;
-        SliceSelected?.Invoke(this, new ChartSliceEventArgs(tile.Slice));
         if (e.ClickCount > 1)
         {
-            SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(tile.Slice));
+            SliceDoubleClicked?.Invoke(this, new ChartSliceEventArgs(tile.Slice, isToggleSelection));
+            return;
         }
+
+        SliceSelected?.Invoke(this, new ChartSliceEventArgs(tile.Slice, isToggleSelection));
     }
 
     protected override void OnMouseMove(WpfMouseEventArgs e)
@@ -514,7 +534,7 @@ public sealed class TreemapControl : FrameworkElement
         if (rect.Width < 1 || rect.Height < 1) return;
 
         var fill = ResolveBrush(tile.Slice.Color);
-        var isSelected = SelectedSlice is not null && string.Equals(SelectedSlice.SourceKey, tile.Slice.SourceKey, StringComparison.Ordinal);
+        var isSelected = IsSelectedSlice(tile.Slice);
 
         dc.DrawRoundedRectangle(fill, null, rect, 3, 3);
 
@@ -671,6 +691,25 @@ public sealed class TreemapControl : FrameworkElement
 
     private bool IsInteractiveSlice(ChartSlice slice)
         => !_targetBytesByKey.TryGetValue(slice.SourceKey, out var targetBytes) || targetBytes > 0.5;
+
+    private bool IsSelectedSlice(ChartSlice slice)
+    {
+        if (SelectedSourceKeys is not null)
+        {
+            foreach (var key in SelectedSourceKeys.OfType<string>())
+            {
+                if (string.Equals(key, slice.SourceKey, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return SelectedSlice is not null &&
+            string.Equals(SelectedSlice.SourceKey, slice.SourceKey, StringComparison.Ordinal);
+    }
 
     private sealed record RenderedTile(ChartSlice Slice, Rect Bounds, bool IsInteractive);
 }

@@ -52,13 +52,14 @@ internal sealed class TargetRefreshCoordinator(Func<TargetRefreshReason, Task> r
             {
                 await refreshAsync(currentReason);
 
-                activeCompletion.TrySetResult();
-
                 if (_queuedRefreshCompletion is null)
                 {
+                    _currentRefreshTask = null;
+                    activeCompletion.TrySetResult();
                     break;
                 }
 
+                activeCompletion.TrySetResult();
                 currentReason = _queuedReason;
                 activeCompletion = _queuedRefreshCompletion;
                 _queuedRefreshCompletion = null;
@@ -67,6 +68,7 @@ internal sealed class TargetRefreshCoordinator(Func<TargetRefreshReason, Task> r
         }
         catch (Exception ex)
         {
+            _currentRefreshTask = null;
             activeCompletion.TrySetException(ex);
             _queuedRefreshCompletion?.TrySetException(ex);
             _queuedRefreshCompletion = null;
