@@ -4,14 +4,30 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
+_No unreleased changes._
+
+## 1.5.0 - 2026-06-27
+
 ### Added
 
 - Added a standalone full-screen terminal UI with scan/open/save/export workflows, terminal-native charts, session cache restore, Recycle Bin inspection, Android/MTP scan and copy actions, update checks, and elevation settings.
+- Added a permanent delete action for local filesystem selections, with stronger confirmation copy and result wording separate from Recycle Bin deletes.
+- Added provider-aware Nextcloud and Dropbox target discovery that scans local sync roots through the existing cloud-provider flow and preserves provider metadata in saved scans and exports.
+- Added chart multi-select for pie, treemap, and bar charts, syncing selected chart slices into the detail grid so existing file actions can operate on matching rows.
+- Added detail-grid `Delete` and `Shift+Delete` shortcuts for Recycle Bin and permanent delete actions.
 
 ### Changed
 
 - Moved Windows platform services into a shared project so the desktop app and TUI use the same MTP, Recycle Bin, update, elevation, logging, and settings behavior.
 - Updated portable, Velopack, and legacy installer packaging to include `tui\Custodian.Tui.exe`.
+- Updated clean delete, permanent delete, and move-outside-root operations to remove affected rows from the active scan without forcing a full rescan.
+- Updated scan projections after clean mutations so detail rows, folder trees, summaries, charts, largest lists, extension rows, breadcrumbs, footer totals, and target status refresh together.
+- Updated the left Targets list to recompute affected usage bars and labels after file operations that can change drive free space.
+
+### Fixed
+
+- Prevented configured Nextcloud roots from being duplicated by stale profile-folder fallback targets.
+- Kept Recycle Bin delete UI updates consistent with permanent delete after successful shell operations.
 
 ## 1.4.0 - 2026-06-24
 
