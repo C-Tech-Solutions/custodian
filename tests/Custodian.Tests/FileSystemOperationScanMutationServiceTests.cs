@@ -43,7 +43,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null,
-            pathExists: _ => false);
+            pathProbe: _ => SourcePathProbeResult.Missing);
 
         Assert.Equal([entry], removed);
     }
@@ -61,7 +61,25 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null,
-            pathExists: _ => true);
+            pathProbe: _ => SourcePathProbeResult.Exists);
+
+        Assert.Empty(removed);
+    }
+
+    [Fact]
+    public void RecycleIndeterminateWithUnknownSourceStateDoesNotRemoveSourceEntries()
+    {
+        var scan = Scan();
+        var entry = scan.Root.Children.Single();
+        var batch = new FileSystemOperationBatchResult(1, 0, 0, 1, []);
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.Recycle,
+            batch,
+            [entry],
+            scan,
+            destinationFolder: null,
+            pathProbe: _ => SourcePathProbeResult.Unknown);
 
         Assert.Empty(removed);
     }
@@ -84,7 +102,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null,
-            pathExists: _ => false);
+            pathProbe: _ => SourcePathProbeResult.Missing);
 
         Assert.Empty(removed);
     }

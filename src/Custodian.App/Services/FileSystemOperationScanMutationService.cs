@@ -13,7 +13,7 @@ internal static class FileSystemOperationScanMutationService
         IReadOnlyCollection<FileSystemEntry> sourceEntries,
         ScanResult? currentScan,
         string? destinationFolder,
-        Func<string, bool>? pathExists = null)
+        Func<string, SourcePathProbeResult>? pathProbe = null)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(sourceEntries);
@@ -43,7 +43,7 @@ internal static class FileSystemOperationScanMutationService
             .Where(entry => entry is not null)
             .Distinct()
             .ToArray();
-        if (!ShouldRemoveSources(operationKind, result, removableEntries, pathExists ?? PathExists))
+        if (!ShouldRemoveSources(operationKind, result, removableEntries, pathProbe ?? ProbeSourcePath))
         {
             return [];
         }
@@ -60,7 +60,7 @@ internal static class FileSystemOperationScanMutationService
         FileSystemOperationKind operationKind,
         FileSystemOperationBatchResult result,
         IReadOnlyCollection<FileSystemEntry> sourceEntries,
-        Func<string, bool> pathExists)
+        Func<string, SourcePathProbeResult> pathProbe)
     {
         if (IsCleanCompletedBatch(result))
         {
@@ -68,13 +68,13 @@ internal static class FileSystemOperationScanMutationService
         }
 
         return operationKind == FileSystemOperationKind.Recycle &&
-            IsRecycleBatchCompletedBySourceDisappearance(result, sourceEntries, pathExists);
+            IsRecycleBatchCompletedBySourceDisappearance(result, sourceEntries, pathProbe);
     }
 
     private static bool IsRecycleBatchCompletedBySourceDisappearance(
         FileSystemOperationBatchResult result,
         IReadOnlyCollection<FileSystemEntry> sourceEntries,
-        Func<string, bool> pathExists)
+        Func<string, SourcePathProbeResult> pathProbe)
     {
         if (result.CancelledCount > 0 ||
             result.Failures.Count > 0 ||
@@ -87,7 +87,7 @@ internal static class FileSystemOperationScanMutationService
 
         return sourceEntries.All(entry =>
             !string.IsNullOrWhiteSpace(entry.FullPath) &&
-            !pathExists(entry.FullPath));
+            pathProbe(entry.FullPath) == SourcePathProbeResult.Missing);
     }
 
     private static bool IsDestinationOutsideScanRoot(string? destinationFolder, string rootPath)
@@ -122,6 +122,27 @@ internal static class FileSystemOperationScanMutationService
              normalizedPath[normalizedRoot.Length] == Path.DirectorySeparatorChar);
     }
 
-    private static bool PathExists(string path)
-        => File.Exists(path) || Directory.Exists(path);
+    private static SourcePathProbeResult ProbeSourcePath(string path)
+    {
+        try
+        {
+            _ = File.GetAttributes(path);
+            return SourcePathProbeResult.Exists;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return SourcePathProbeResult.Missing;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            return SourcePathProbeResult.Unknown;
+        }
+    }
+}
+
+internal enum SourcePathProbeResult
+{
+    Exists,
+    Missing,
+    Unknown
 }
