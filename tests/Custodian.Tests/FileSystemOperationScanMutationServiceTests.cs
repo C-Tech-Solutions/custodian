@@ -30,7 +30,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
     }
 
     [Fact]
-    public void CleanRecycleDeleteFromVolumeRootRequiresFullScanRefresh()
+    public void CleanRecycleDeleteFromVolumeRootRemovesSourceEntriesWithoutFullScanRefresh()
     {
         var scan = Scan(rootPath: @"C:\");
         var entry = scan.Root.Children.Single();
@@ -47,8 +47,8 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan);
 
-        Assert.Empty(removed);
-        Assert.True(requiresRefresh);
+        Assert.Equal([entry], removed);
+        Assert.False(requiresRefresh);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class FileSystemOperationScanMutationServiceTests
     }
 
     [Fact]
-    public void RecycleIndeterminateWithMissingSourceFromVolumeRootRequiresFullScanRefresh()
+    public void RecycleIndeterminateWithMissingSourceFromVolumeRootRemovesSourceEntriesWithoutFullScanRefresh()
     {
         var scan = Scan(rootPath: @"C:\");
         var entry = scan.Root.Children.Single();
@@ -90,8 +90,8 @@ public sealed class FileSystemOperationScanMutationServiceTests
             scan,
             pathProbe: _ => SourcePathProbeResult.Missing);
 
-        Assert.Empty(removed);
-        Assert.True(requiresRefresh);
+        Assert.Equal([entry], removed);
+        Assert.False(requiresRefresh);
     }
 
     [Fact]

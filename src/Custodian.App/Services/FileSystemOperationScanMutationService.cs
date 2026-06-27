@@ -48,11 +48,6 @@ internal static class FileSystemOperationScanMutationService
             return [];
         }
 
-        if (operationKind == FileSystemOperationKind.Recycle && IsDriveRoot(currentScan.Root.FullPath))
-        {
-            return [];
-        }
-
         return removableEntries;
     }
 
@@ -66,22 +61,7 @@ internal static class FileSystemOperationScanMutationService
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(sourceEntries);
 
-        if (operationKind != FileSystemOperationKind.Recycle ||
-            currentScan?.Root is null ||
-            string.IsNullOrWhiteSpace(currentScan.Root.FullPath) ||
-            sourceEntries.Count == 0 ||
-            !IsDriveRoot(currentScan.Root.FullPath))
-        {
-            return false;
-        }
-
-        var removableEntries = sourceEntries
-            .Where(entry => entry is not null)
-            .Distinct()
-            .ToArray();
-
-        return removableEntries.Length > 0 &&
-            ShouldRemoveSources(operationKind, result, removableEntries, pathProbe ?? ProbeSourcePath);
+        return false;
     }
 
     private static bool IsCleanCompletedBatch(FileSystemOperationBatchResult result)
@@ -153,28 +133,6 @@ internal static class FileSystemOperationScanMutationService
             normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase) &&
             (normalizedRoot.EndsWith(Path.DirectorySeparatorChar) ||
              normalizedPath[normalizedRoot.Length] == Path.DirectorySeparatorChar);
-    }
-
-    private static bool IsDriveRoot(string rootPath)
-    {
-        try
-        {
-            var normalizedRoot = ScanPathUtility.NormalizeRoot(rootPath);
-            var pathRoot = Path.GetPathRoot(normalizedRoot);
-            if (string.IsNullOrWhiteSpace(pathRoot))
-            {
-                return false;
-            }
-
-            return string.Equals(
-                normalizedRoot,
-                ScanPathUtility.NormalizeRoot(pathRoot),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
-        {
-            return false;
-        }
     }
 
     private static SourcePathProbeResult ProbeSourcePath(string path)
