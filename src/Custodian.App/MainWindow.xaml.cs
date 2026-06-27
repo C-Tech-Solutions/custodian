@@ -1516,6 +1516,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void DetailsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         => UpdateDetailSelectionActionState();
 
+    private void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (e.Handled || ChartSelectionKeyboardService.IsTextInputFocus(Keyboard.FocusedElement))
+        {
+            return;
+        }
+
+        if (DetailSelectionDeleteShortcutService.ResolveForChartSelection(e.Key, Keyboard.Modifiers) is not { } deleteMode ||
+            !ChartSelectionKeyboardService.ShouldRouteDeleteShortcut(
+                Keyboard.FocusedElement,
+                ChartSurfaceHost,
+                DetailsGrid,
+                _chartSelection.Count > 0,
+                Keyboard.Modifiers))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        RunUiAction(() => DeleteChartSelectionAsync(deleteMode), "Delete failed");
+    }
+
     private void DetailsGrid_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
         if (HandleSelectionDeleteShortcut(e))
@@ -1538,17 +1560,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ChartSelection_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
-        if (DetailSelectionDeleteShortcutService.Resolve(e.Key, Keyboard.Modifiers) is not { } deleteMode)
+        if (DetailSelectionDeleteShortcutService.ResolveForChartSelection(e.Key, Keyboard.Modifiers) is not { } deleteMode)
         {
             return;
         }
 
         e.Handled = true;
-        RunUiAction(async () =>
-        {
-            await SelectDetailRowsForChartSelectionAsync();
-            await DeleteSelectedFileSystemItemsAsync(deleteMode);
-        }, "Delete failed");
+        RunUiAction(() => DeleteChartSelectionAsync(deleteMode), "Delete failed");
     }
 
     private bool HandleSelectionDeleteShortcut(WpfKeyEventArgs e)
@@ -1561,6 +1579,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         e.Handled = true;
         RunUiAction(() => DeleteSelectedFileSystemItemsAsync(deleteMode), "Delete failed");
         return true;
+    }
+
+    private async Task DeleteChartSelectionAsync(DetailSelectionDeleteMode deleteMode)
+    {
+        await SelectDetailRowsForChartSelectionAsync();
+        await DeleteSelectedFileSystemItemsAsync(deleteMode);
     }
 
     private void ActivateRow(DetailRow row)

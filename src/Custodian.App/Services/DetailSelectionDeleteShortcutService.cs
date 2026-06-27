@@ -18,4 +18,21 @@ internal static class DetailSelectionDeleteShortcutService
             _ => null
         };
     }
+
+    internal static DetailSelectionDeleteMode? ResolveForChartSelection(Key key, ModifierKeys modifiers)
+    {
+        if (key != Key.Delete)
+        {
+            return null;
+        }
+
+        if ((modifiers & ~(ModifierKeys.Control | ModifierKeys.Shift)) != ModifierKeys.None)
+        {
+            return null;
+        }
+
+        return (modifiers & ModifierKeys.Shift) == ModifierKeys.Shift
+            ? DetailSelectionDeleteMode.PermanentDelete
+            : DetailSelectionDeleteMode.Recycle;
+    }
 }

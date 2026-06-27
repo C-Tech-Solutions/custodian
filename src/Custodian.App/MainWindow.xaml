@@ -15,6 +15,7 @@
         TextOptions.TextRenderingMode="ClearType"
         UseLayoutRounding="True"
         AllowDrop="True"
+        PreviewKeyDown="Window_PreviewKeyDown"
         Drop="Window_Drop"
         DragOver="Window_DragOver">
 
@@ -1278,7 +1279,7 @@
                                Foreground="{DynamicResource MutedBrush}" FontSize="11"
                                Margin="14,8,14,12" TextWrapping="Wrap"/>
 
-                    <Grid MinHeight="280" Margin="11,10,11,0">
+                    <Grid x:Name="ChartSurfaceHost" MinHeight="280" Margin="11,10,11,0">
                         <Grid x:Name="TreemapHost">
                             <controls:TreemapControl x:Name="Treemap"
                                                      Focusable="True"

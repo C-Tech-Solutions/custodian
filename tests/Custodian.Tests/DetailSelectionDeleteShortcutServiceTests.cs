@@ -35,4 +35,45 @@ public sealed class DetailSelectionDeleteShortcutServiceTests
     {
         Assert.Null(DetailSelectionDeleteShortcutService.Resolve(Key.Enter, ModifierKeys.None));
     }
+
+    [Fact]
+    public void ChartSelectionDeleteMapsToRecycle()
+        => Assert.Equal(
+            DetailSelectionDeleteMode.Recycle,
+            DetailSelectionDeleteShortcutService.ResolveForChartSelection(Key.Delete, ModifierKeys.None));
+
+    [Fact]
+    public void ChartSelectionControlDeleteMapsToRecycle()
+        => Assert.Equal(
+            DetailSelectionDeleteMode.Recycle,
+            DetailSelectionDeleteShortcutService.ResolveForChartSelection(Key.Delete, ModifierKeys.Control));
+
+    [Fact]
+    public void ChartSelectionShiftDeleteMapsToPermanentDelete()
+        => Assert.Equal(
+            DetailSelectionDeleteMode.PermanentDelete,
+            DetailSelectionDeleteShortcutService.ResolveForChartSelection(Key.Delete, ModifierKeys.Shift));
+
+    [Fact]
+    public void ChartSelectionControlShiftDeleteMapsToPermanentDelete()
+        => Assert.Equal(
+            DetailSelectionDeleteMode.PermanentDelete,
+            DetailSelectionDeleteShortcutService.ResolveForChartSelection(
+                Key.Delete,
+                ModifierKeys.Control | ModifierKeys.Shift));
+
+    [Theory]
+    [InlineData(ModifierKeys.Alt)]
+    [InlineData(ModifierKeys.Windows)]
+    [InlineData(ModifierKeys.Control | ModifierKeys.Alt)]
+    public void ChartSelectionIgnoresUnsupportedModifiers(ModifierKeys modifiers)
+    {
+        Assert.Null(DetailSelectionDeleteShortcutService.ResolveForChartSelection(Key.Delete, modifiers));
+    }
+
+    [Fact]
+    public void ChartSelectionIgnoresNonDeleteKeys()
+    {
+        Assert.Null(DetailSelectionDeleteShortcutService.ResolveForChartSelection(Key.Enter, ModifierKeys.Control));
+    }
 }
