@@ -2673,6 +2673,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _activeFileOperationCts = cts;
         _activeFileOperation = true;
         UpdateDetailSelectionActionState();
+        var refreshScanAfterOperation = false;
         var operationText = operationKind switch
         {
             FileSystemOperationKind.Copy => "Copying selected items",
@@ -2698,7 +2699,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!_isClosing)
             {
                 ShowFileSystemOperationResult(operationKind, result, destinationFolder);
-                await ApplyFileSystemOperationScanMutationAsync(
+                refreshScanAfterOperation = await ApplyFileSystemOperationScanMutationAsync(
                     operationKind,
                     result,
                     sourceEntries,
@@ -2739,7 +2740,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!_isClosing)
             {
                 UpdateDetailSelectionActionState();
-                if (_currentScan is not null && !_isRecycleBinViewActive)
+                if (refreshScanAfterOperation)
+                {
+                    await StartScanAsync();
+                }
+                else if (_currentScan is not null && !_isRecycleBinViewActive)
                 {
                     UpdateFooterStatus("Ready", BuildFooterDetail(_currentScan));
                 }
@@ -2747,7 +2752,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task ApplyFileSystemOperationScanMutationAsync(
+    private async Task<bool> ApplyFileSystemOperationScanMutationAsync(
         FileSystemOperationKind operationKind,
         FileSystemOperationBatchResult result,
         IReadOnlyCollection<FileSystemEntry> sourceEntries,
@@ -2756,7 +2761,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (originatingScan is null)
         {
-            return;
+            return false;
+        }
+
+        if (FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
+                operationKind,
+                result,
+                sourceEntries,
+                originatingScan))
+        {
+            RemoveSessionScanCache(originatingScan.RootPath);
+            return ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive;
         }
 
         var entriesToRemove = FileSystemOperationScanMutationService.RemovedEntriesFor(
@@ -2767,7 +2782,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             destinationFolder);
         if (entriesToRemove.Count == 0)
         {
-            return;
+            return false;
         }
 
         var selectedEntry = ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive
@@ -2776,7 +2791,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var update = ScanTreeUpdater.RemoveEntries(originatingScan, entriesToRemove, selectedEntry);
         if (!update.Changed)
         {
-            return;
+            return false;
         }
 
         if (ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive)
@@ -2785,6 +2800,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         await RefreshScanAfterTreeMutationAsync(originatingScan, destinationFolder);
+        return false;
     }
 
     private void ShowFileSystemOperationResult(
@@ -3006,6 +3022,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         cached = default!;
         return false;
+    }
+
+    private void RemoveSessionScanCache(string rootPath)
+    {
+        if (!TryGetScanCacheKey(rootPath, out var key))
+        {
+            return;
+        }
+
+        for (var node = _sessionScanCacheOrder.First; node is not null; node = node.Next)
+        {
+            if (string.Equals(node.Value, key, StringComparison.OrdinalIgnoreCase))
+            {
+                _sessionScanCacheOrder.Remove(node);
+                break;
+            }
+        }
+
+        if (_sessionScanCache.Remove(key, out var removed))
+        {
+            ClearGlobalDetailRowsCacheFor(removed.Result);
+            RefreshTargetStatus(removed.Result.RootPath);
+        }
+
+        if (string.Equals(_visibleScanKey, key, StringComparison.OrdinalIgnoreCase))
+        {
+            _visibleCachedScan = null;
+        }
     }
 
     private void MarkSessionScanCacheKeyUsed(string key, bool enforceLimit)

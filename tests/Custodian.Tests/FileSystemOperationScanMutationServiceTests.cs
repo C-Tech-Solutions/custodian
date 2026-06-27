@@ -15,7 +15,22 @@ public sealed class FileSystemOperationScanMutationServiceTests
         => AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind.PermanentDelete);
 
     [Fact]
-    public void CleanRecycleDeleteFromVolumeRootRemovesSourceEntries()
+    public void CleanRecycleDeleteFromFolderRootDoesNotRequireFullScanRefresh()
+    {
+        var scan = Scan();
+        var entry = scan.Root.Children.Single();
+
+        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
+            FileSystemOperationKind.Recycle,
+            CleanBatch(),
+            [entry],
+            scan);
+
+        Assert.False(requiresRefresh);
+    }
+
+    [Fact]
+    public void CleanRecycleDeleteFromVolumeRootRequiresFullScanRefresh()
     {
         var scan = Scan(rootPath: @"C:\");
         var entry = scan.Root.Children.Single();
@@ -26,8 +41,14 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null);
+        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
+            FileSystemOperationKind.Recycle,
+            CleanBatch(),
+            [entry],
+            scan);
 
-        Assert.Equal([entry], removed);
+        Assert.Empty(removed);
+        Assert.True(requiresRefresh);
     }
 
     [Fact]
@@ -46,6 +67,31 @@ public sealed class FileSystemOperationScanMutationServiceTests
             pathProbe: _ => SourcePathProbeResult.Missing);
 
         Assert.Equal([entry], removed);
+    }
+
+    [Fact]
+    public void RecycleIndeterminateWithMissingSourceFromVolumeRootRequiresFullScanRefresh()
+    {
+        var scan = Scan(rootPath: @"C:\");
+        var entry = scan.Root.Children.Single();
+        var batch = new FileSystemOperationBatchResult(1, 0, 0, 1, []);
+
+        var removed = FileSystemOperationScanMutationService.RemovedEntriesFor(
+            FileSystemOperationKind.Recycle,
+            batch,
+            [entry],
+            scan,
+            destinationFolder: null,
+            pathProbe: _ => SourcePathProbeResult.Missing);
+        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
+            FileSystemOperationKind.Recycle,
+            batch,
+            [entry],
+            scan,
+            pathProbe: _ => SourcePathProbeResult.Missing);
+
+        Assert.Empty(removed);
+        Assert.True(requiresRefresh);
     }
 
     [Fact]
@@ -119,8 +165,14 @@ public sealed class FileSystemOperationScanMutationServiceTests
             [entry],
             scan,
             destinationFolder: null);
+        var requiresRefresh = FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
+            FileSystemOperationKind.PermanentDelete,
+            CleanBatch(),
+            [entry],
+            scan);
 
         Assert.Equal([entry], removed);
+        Assert.False(requiresRefresh);
     }
 
     private static void AssertCleanDeleteRemovesSourceEntries(FileSystemOperationKind operationKind)
