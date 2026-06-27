@@ -1527,9 +1527,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             !ChartSelectionKeyboardService.ShouldRouteDeleteShortcut(
                 Keyboard.FocusedElement,
                 ChartSurfaceHost,
-                DetailsGrid,
-                _chartSelection.Count > 0,
-                Keyboard.Modifiers))
+                _chartSelection.Count > 0))
         {
             return;
         }
@@ -1583,8 +1581,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task DeleteChartSelectionAsync(DetailSelectionDeleteMode deleteMode)
     {
+        var selectedRows = ChartDetailSelectionService.BuildDeleteRows(_chartSelection.SelectedSlices(ChartSlices));
         await SelectDetailRowsForChartSelectionAsync();
-        await DeleteSelectedFileSystemItemsAsync(deleteMode);
+        await DeleteFileSystemItemsAsync(deleteMode, selectedRows);
     }
 
     private void ActivateRow(DetailRow row)
@@ -2652,7 +2651,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task DeleteSelectedFileSystemItemsAsync(DetailSelectionDeleteMode mode)
     {
-        var selectedRows = SelectedDetailRows().ToList();
+        await DeleteFileSystemItemsAsync(mode, SelectedDetailRows().ToList());
+    }
+
+    private async Task DeleteFileSystemItemsAsync(
+        DetailSelectionDeleteMode mode,
+        IReadOnlyCollection<DetailRow> selectedRows)
+    {
         var command = DetailSelectionDeleteCommandService.Build(
             mode,
             selectedRows,
@@ -3884,13 +3889,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await RefreshDetailsAsync(refreshContext: false);
         }
 
-        SelectDetailRows(selectionPlan.Matches);
+        SelectDetailRows(selectionPlan.Matches, focusGrid: false);
     }
 
     private void SelectDetailRow(Func<DetailRow, bool> predicate)
         => SelectDetailRows(predicate);
 
-    private void SelectDetailRows(Func<DetailRow, bool> predicate)
+    private void SelectDetailRows(Func<DetailRow, bool> predicate, bool focusGrid = true)
     {
         DetailsGrid.SelectedItems.Clear();
         DetailRow? firstRow = null;
@@ -3907,7 +3912,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         DetailsGrid.ScrollIntoView(firstRow);
-        DetailsGrid.Focus();
+        if (focusGrid)
+        {
+            DetailsGrid.Focus();
+        }
     }
 
     private void NavigateToFolder(FileSystemEntry entry, bool addHistory = true, bool clearForward = true)

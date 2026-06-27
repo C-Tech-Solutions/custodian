@@ -16,22 +16,14 @@ internal static class ChartSelectionKeyboardService
     internal static bool ShouldRouteDeleteShortcut(
         IInputElement? focusedElement,
         DependencyObject chartSurfaceHost,
-        DependencyObject detailsGrid,
-        bool hasChartSelection,
-        ModifierKeys modifiers)
+        bool hasChartSelection)
     {
         if (!hasChartSelection || focusedElement is not DependencyObject focusedObject)
         {
             return false;
         }
 
-        if (IsDescendantOf(focusedObject, chartSurfaceHost))
-        {
-            return true;
-        }
-
-        return (modifiers & ModifierKeys.Control) == ModifierKeys.Control &&
-            IsDescendantOf(focusedObject, detailsGrid);
+        return IsDescendantOf(focusedObject, chartSurfaceHost);
     }
 
     private static bool IsDescendantOf(DependencyObject element, DependencyObject ancestor)

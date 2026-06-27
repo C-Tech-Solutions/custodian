@@ -52,6 +52,34 @@ public sealed class ChartDetailSelectionServiceTests
         Assert.False(plan.HasActionableSelection);
     }
 
+    [Fact]
+    public void DeleteRowsUseEntrySlicesDirectly()
+    {
+        var slice = EntrySlice(@"C:\Root\alpha.bin");
+
+        var rows = ChartDetailSelectionService.BuildDeleteRows([slice]);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(@"C:\Root\alpha.bin", row.FullPath);
+        Assert.Same(slice.Entry, row.Entry);
+    }
+
+    [Fact]
+    public void DeleteRowsKeepExtensionSlicesSynthetic()
+    {
+        var rows = ChartDetailSelectionService.BuildDeleteRows([ExtensionSlice(".zip")]);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(".zip", row.FullPath);
+        Assert.Equal("Extension", row.Kind);
+    }
+
+    [Fact]
+    public void DeleteRowsIgnoreOtherSlices()
+    {
+        Assert.Empty(ChartDetailSelectionService.BuildDeleteRows([OtherSlice()]));
+    }
+
     private static ChartSlice EntrySlice(string path)
     {
         var entry = new FileSystemEntry
