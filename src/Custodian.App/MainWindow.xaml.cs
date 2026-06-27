@@ -800,7 +800,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         System.Windows.Application.Current.Shutdown();
     }
 
-    private async Task StartScanAsync()
+    private async Task StartScanAsync(PendingScan? explicitRequest = null)
     {
         if (_activeScan is not null || _activePortableCopy is not null) return;
         if (_activeFileOperation)
@@ -809,11 +809,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var request = CreatePendingScan();
+        var request = explicitRequest ?? CreatePendingScan();
         if (request is null)
         {
             UpdateFooterStatus("Choose a path to scan.", string.Empty);
             return;
+        }
+
+        if (explicitRequest is not null &&
+            !string.Equals(PathBox.Text?.Trim(), request.DisplayPath, StringComparison.OrdinalIgnoreCase))
+        {
+            UpdatePathDisplay(request.DisplayPath);
         }
 
         if (request.PortableTarget is { IsAvailable: false } unavailableTarget)
@@ -1002,6 +1008,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? normalizedKey
             : text;
         return new PendingScan(scanKey, text, text, null, TryMatchCloudProviderPath(text));
+    }
+
+    private static PendingScan CreatePendingScanFromScan(ScanResult scan)
+    {
+        var rootKey = TryGetScanCacheKey(scan.RootPath, out var key)
+            ? key
+            : scan.RootPath;
+        return new PendingScan(
+            rootKey,
+            DisplayRootPath(scan),
+            scan.RootPath,
+            null,
+            scan.CloudProvider);
     }
 
     private PendingScan? CreatePendingScanFromCurrentPortableScan(string text)
@@ -2673,7 +2692,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _activeFileOperationCts = cts;
         _activeFileOperation = true;
         UpdateDetailSelectionActionState();
-        var refreshScanAfterOperation = false;
+        PendingScan? refreshScanAfterOperation = null;
         var operationText = operationKind switch
         {
             FileSystemOperationKind.Copy => "Copying selected items",
@@ -2740,9 +2759,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!_isClosing)
             {
                 UpdateDetailSelectionActionState();
-                if (refreshScanAfterOperation)
+                if (refreshScanAfterOperation is not null)
                 {
-                    await StartScanAsync();
+                    await StartScanAsync(refreshScanAfterOperation);
                 }
                 else if (_currentScan is not null && !_isRecycleBinViewActive)
                 {
@@ -2752,7 +2771,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task<bool> ApplyFileSystemOperationScanMutationAsync(
+    private async Task<PendingScan?> ApplyFileSystemOperationScanMutationAsync(
         FileSystemOperationKind operationKind,
         FileSystemOperationBatchResult result,
         IReadOnlyCollection<FileSystemEntry> sourceEntries,
@@ -2761,7 +2780,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (originatingScan is null)
         {
-            return false;
+            return null;
         }
 
         if (FileSystemOperationScanMutationService.RequiresFullScanRefreshFor(
@@ -2770,8 +2789,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 sourceEntries,
                 originatingScan))
         {
+            var refreshRequest = CreatePendingScanFromScan(originatingScan);
             RemoveSessionScanCache(originatingScan.RootPath);
-            return ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive;
+            return ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive
+                ? refreshRequest
+                : null;
         }
 
         var entriesToRemove = FileSystemOperationScanMutationService.RemovedEntriesFor(
@@ -2782,7 +2804,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             destinationFolder);
         if (entriesToRemove.Count == 0)
         {
-            return false;
+            return null;
         }
 
         var selectedEntry = ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive
@@ -2791,7 +2813,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var update = ScanTreeUpdater.RemoveEntries(originatingScan, entriesToRemove, selectedEntry);
         if (!update.Changed)
         {
-            return false;
+            return null;
         }
 
         if (ReferenceEquals(_currentScan, originatingScan) && !_isRecycleBinViewActive)
@@ -2800,7 +2822,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         await RefreshScanAfterTreeMutationAsync(originatingScan, destinationFolder);
-        return false;
+        return null;
     }
 
     private void ShowFileSystemOperationResult(
