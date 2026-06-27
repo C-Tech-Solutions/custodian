@@ -21,8 +21,9 @@ and a CLI for repeatable server or workstation workflows.
   scope while Custodian stays open.
 - **Choose the right scanner** with Auto mode, recursive scanning for folders
   and network shares, and optional NTFS MFT scanning for local NTFS volumes.
-- **Scan OneDrive safely** through provider-aware targets that use local Windows
-  metadata only and avoid intentional Files On-Demand hydration.
+- **Scan cloud sync roots safely** through provider-aware OneDrive, Nextcloud,
+  and Dropbox targets that use local desktop-client metadata only and avoid
+  intentional placeholder hydration.
 - **Inspect Android phone storage** when Windows exposes an unlocked phone
   through USB File Transfer / MTP, with read-only metadata scans of each
   readable storage root plus safe copy-to-PC actions.
@@ -53,28 +54,32 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
-## What's New In 1.4.0
+## What's New In 1.5.0
 
-- New application logo and icon set.
-- Read-only Android / MTP storage scanning with safe copy-to-PC actions.
-- Session scan cache, scan navigation, chart zoom, and What's New prompts from
-  recent releases are now part of the stable release line.
-- Security hardening for exported CSV, saved-scan launch behavior, update-source
-  logging, and SQLite connection strings.
-- GitHub Actions build/test and vulnerable-package scanning for release PRs.
-- MIT license and expanded release documentation.
+- Full-screen TUI packaging now ships alongside the desktop app and CLI.
+- Permanent delete is available as a separate local-filesystem action with
+  stronger confirmation text than Recycle Bin deletes.
+- Nextcloud and Dropbox sync roots appear as provider-aware scan targets next
+  to OneDrive when local desktop-client metadata is available.
+- Clean delete, permanent delete, and move-outside-root operations update the
+  active scan views without forcing a full rescan.
+- Pie, treemap, and bar charts support Ctrl multi-select, and matching detail
+  rows can use the normal file actions.
+- Detail-grid `Delete` and `Shift+Delete` shortcuts route through the existing
+  Recycle Bin and permanent delete confirmations.
 
 ## Privacy And Safety
 
 Custodian is built for local and locked-down environments. Scans run on the
 machine where the app is launched; Custodian does not upload file metadata to a
-cloud service. OneDrive support discovers local sync roots from Windows metadata
-and scans them as local folders; it does not authenticate to OneDrive, call cloud
-APIs, upload data, or intentionally download online-only placeholders. Android /
-MTP support is read-only for phone storage, and copy operations write only to the
-PC destination you choose. Opening entries from a saved scan prompts before
-touching network or remote paths, because saved scan files can come from
-untrusted sources.
+cloud service. Cloud-provider support discovers local OneDrive, Nextcloud, and
+Dropbox sync roots from desktop-client metadata and scans them as local folders;
+it does not authenticate to those services, call cloud APIs, upload data, or
+intentionally download online-only placeholders. Android / MTP support is
+read-only for phone storage, and copy operations write only to the PC
+destination you choose. Opening entries from a saved scan prompts before touching
+network or remote paths, because saved scan files can come from untrusted
+sources.
 
 ## Download
 
@@ -121,11 +126,12 @@ Drive targets show whether a scan is currently running or already cached for
 the session. Uncached drives show a Start Scan prompt instead of clearing the
 workspace without direction.
 
-OneDrive roots appear under Targets when Windows exposes a local sync folder,
-including common personal/business account roots and Known Folder Move folders
-under that root. The desktop Targets pane includes a Cloud toggle for hiding or
-showing cloud-provider rows and mounted cloud drives without changing manual
-path scans. OneDrive targets use the recursive scanner even when Auto or MFT is
+OneDrive, Nextcloud, and Dropbox roots appear under Targets when local desktop
+client metadata exposes a sync folder. OneDrive includes common
+personal/business account roots and Known Folder Move folders under that root.
+The desktop Targets pane includes a Cloud toggle for hiding or showing
+cloud-provider rows and mounted cloud drives without changing manual path scans.
+Cloud-provider targets use the recursive scanner even when Auto or MFT is
 selected, and saved scans/exports carry provider metadata so the source remains
 clear later.
 
@@ -173,7 +179,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.4.0
+.\scripts\publish-velopack.ps1 -Version 1.5.0
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -219,7 +225,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.4.0 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.0 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's
