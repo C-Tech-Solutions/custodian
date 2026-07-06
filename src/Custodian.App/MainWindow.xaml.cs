@@ -1123,7 +1123,7 @@ public partial class MainWindow : Window
                 RememberCurrentScanState();
                 var navigationVersion = BeginNavigation();
                 var loaded = await _store.LoadAsync(dialog.FileName);
-                var cached = await CacheScanResultAsync(loaded);
+                var cached = await CacheScanResultAsync(loaded, loadedFromScanFile: true);
                 if (!IsCurrentNavigation(navigationVersion))
                 {
                     return;
@@ -2362,15 +2362,17 @@ public partial class MainWindow : Window
 
         var path = SelectedPath();
         if (path is null) return;
-        var isRemotePath = PathClassificationService.IsRemotePath(path);
-        if (!ConfirmLaunchIfRemote(path, isRemotePath))
+        if (!ConfirmFileLaunch(
+            path,
+            FileLaunchSafety.OpenConfirmationReason(path, CurrentScanLoadedFromScanFile()),
+            "open"))
         {
             return;
         }
 
         if (Directory.Exists(path))
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            Process.Start(WindowsShellLauncher.CreateOpenDirectoryStartInfo(path));
             return;
         }
         if (File.Exists(path))
@@ -2380,24 +2382,40 @@ public partial class MainWindow : Window
     }
 
     // A loaded .custodian-scan is untrusted input: its entries' paths are attacker-
-    // controllable, and a crafted file can point an entry at a remote/UNC executable.
-    // Shell-executing such a file would run an attacker-hosted binary, so require explicit
-    // confirmation before opening anything that is not on a local fixed/removable drive.
-    private bool ConfirmLaunchIfRemote(string path, bool isRemotePath)
+    // controllable, and a crafted file can point an entry at a remote executable or a
+    // local dropped payload. Require explicit confirmation before shelling into those paths.
+    private bool ConfirmFileLaunch(string path, FileLaunchConfirmationReason reason, string actionName)
     {
-        if (!isRemotePath)
+        if (reason == FileLaunchConfirmationReason.None)
         {
             return true;
         }
 
+        var (title, message) = reason switch
+        {
+            FileLaunchConfirmationReason.RemotePath => (
+                $"Confirm {actionName}ing remote item",
+                $"This item is on a network or remote location:\n\n{path}\n\n{ActionVerb(actionName)} it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. {ActionPrompt(actionName)} it anyway?"),
+            FileLaunchConfirmationReason.LoadedScanExecutableOrScript => (
+                $"Confirm {actionName}ing executable item",
+                $"This item came from a loaded .custodian-scan file and points to an executable or script path:\n\n{path}\n\nOnly {actionName} it if you trust both the scan file and the local file. {ActionPrompt(actionName)} it anyway?"),
+            _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unknown launch confirmation reason.")
+        };
+
         var answer = WpfMessageBox.Show(
             this,
-            $"This item is on a network or remote location:\n\n{path}\n\nOpening it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. Open it anyway?",
-            "Confirm opening remote item",
+            message,
+            title,
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
         return answer == MessageBoxResult.Yes;
     }
+
+    private static string ActionVerb(string actionName)
+        => string.Equals(actionName, "open", StringComparison.OrdinalIgnoreCase) ? "Opening" : "Revealing";
+
+    private static string ActionPrompt(string actionName)
+        => string.Equals(actionName, "open", StringComparison.OrdinalIgnoreCase) ? "Open" : "Reveal";
 
     private void RevealSelected_Click(object sender, RoutedEventArgs e)
     {
@@ -2415,7 +2433,14 @@ public partial class MainWindow : Window
 
         var path = SelectedPath();
         if (path is null) return;
-        if (IsExistingFileSystemPath(path)) RevealPath(path);
+        if (IsExistingFileSystemPath(path) &&
+            ConfirmFileLaunch(
+                path,
+                FileLaunchSafety.RevealConfirmationReason(path, CurrentScanLoadedFromScanFile()),
+                "reveal"))
+        {
+            RevealPath(path);
+        }
     }
 
     private async void CopySelection_Click(object sender, RoutedEventArgs e)
@@ -2895,7 +2920,10 @@ public partial class MainWindow : Window
             _chartScope);
     }
 
-    private async Task<CachedScan> CacheScanResultAsync(ScanResult result, string? preferredKey = null)
+    private async Task<CachedScan> CacheScanResultAsync(
+        ScanResult result,
+        string? preferredKey = null,
+        bool loadedFromScanFile = false)
     {
         var key = preferredKey
             ?? (TryGetScanCacheKey(result.RootPath, out var resultKey) ? resultKey : result.RootPath);
@@ -2905,7 +2933,7 @@ public partial class MainWindow : Window
             ? CaptureCurrentScanState(_currentScan)
             : previous?.State ?? new CachedScanState(result.Root.FullPath, DetailViewMode.Contents, ChartScope.SelectedFolder);
         var preparation = await PrepareScanUiAsync(result);
-        var cached = new CachedScan(key, result, state, preparation);
+        var cached = new CachedScan(key, result, state, preparation, loadedFromScanFile);
         _sessionScanCache[key] = cached;
         MarkSessionScanCacheKeyUsed(key, enforceLimit: true);
         RefreshTargetStatus(result.RootPath);
@@ -3120,6 +3148,10 @@ public partial class MainWindow : Window
 
     private bool CurrentScanIsPortable()
         => _currentScan?.SourceKind == ScanSourceKind.PortableDevice;
+
+    private bool CurrentScanLoadedFromScanFile()
+        => _visibleCachedScan is { LoadedFromScanFile: true } cached &&
+           ReferenceEquals(cached.Result, _currentScan);
 
     private void OpenPortableSelectionInExplorer(PortableExplorerOpenMode mode)
     {
@@ -4911,8 +4943,9 @@ public partial class MainWindow : Window
     private static void RevealPath(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
-        var args = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
-        Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true });
+        Process.Start(File.Exists(path)
+            ? WindowsShellLauncher.CreateRevealStartInfo(path)
+            : WindowsShellLauncher.CreateOpenDirectoryStartInfo(path));
     }
 
     private static bool IsExistingFileSystemPath(string path)
@@ -4968,12 +5001,14 @@ public partial class MainWindow : Window
         string rootKey,
         ScanResult result,
         CachedScanState state,
-        ScanUiPreparation preparation)
+        ScanUiPreparation preparation,
+        bool loadedFromScanFile)
     {
         public string RootKey { get; } = rootKey;
         public ScanResult Result { get; } = result;
         public CachedScanState State { get; set; } = state;
         public ScanUiPreparation Preparation { get; set; } = preparation;
+        public bool LoadedFromScanFile { get; } = loadedFromScanFile;
         public Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> GlobalDetailRowsCache { get; } = [];
     }
 

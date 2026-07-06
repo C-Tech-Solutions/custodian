@@ -68,6 +68,7 @@ internal static class TuiApplication
         private CancellationTokenSource? _activeOperation;
         private CancellationTokenSource? _recycleLoadCts;
         private ScanResult? _currentScan;
+        private bool _currentScanLoadedFromScanFile;
         private FileSystemEntry? _selectedEntry;
         private DetailMode _detailMode = DetailMode.Contents;
         private ChartScope _chartScope = ChartScope.SelectedFolder;
@@ -422,10 +423,10 @@ internal static class TuiApplication
                     return;
                 }
 
-                RememberScan(result, result.Root, _detailMode, _chartScope);
+                RememberScan(result, result.Root, _detailMode, _chartScope, loadedFromScanFile: false);
                 if (!await QueryUiAsync(() => _recycleView))
                 {
-                    ApplyScan(result, result.Root);
+                    ApplyScan(result, result.Root, loadedFromScanFile: false);
                 }
 
                 SetStatus($"Scan complete: {SizeFormatter.Format(result.Root.LogicalSizeBytes)}, {result.Root.FileCount:n0} files.");
@@ -467,10 +468,10 @@ internal static class TuiApplication
                     return;
                 }
 
-                RememberScan(result, result.Root, _detailMode, _chartScope);
+                RememberScan(result, result.Root, _detailMode, _chartScope, loadedFromScanFile: false);
                 if (!await QueryUiAsync(() => _recycleView))
                 {
-                    ApplyScan(result, result.Root);
+                    ApplyScan(result, result.Root, loadedFromScanFile: false);
                 }
 
                 SetStatus($"Phone scan complete: {SizeFormatter.Format(result.Root.LogicalSizeBytes)}, {result.Root.FileCount:n0} files.");
@@ -509,8 +510,8 @@ internal static class TuiApplication
                     return;
                 }
 
-                ApplyScan(result, result.Root);
-                RememberScan(result, result.Root, _detailMode, _chartScope);
+                ApplyScan(result, result.Root, loadedFromScanFile: true);
+                RememberScan(result, result.Root, _detailMode, _chartScope, loadedFromScanFile: true);
                 UpdateUi(() => _pathField.Text = result.DisplayRootPathOrRoot());
                 SetStatus($"Opened scan: {result.DisplayRootPathOrRoot()}.");
             }
@@ -580,12 +581,13 @@ internal static class TuiApplication
             }
         }
 
-        private void ApplyScan(ScanResult result, FileSystemEntry selected)
+        private void ApplyScan(ScanResult result, FileSystemEntry selected, bool loadedFromScanFile)
         {
             UpdateUi(() =>
             {
                 ShowDetailView();
                 _currentScan = result;
+                _currentScanLoadedFromScanFile = loadedFromScanFile;
                 _selectedEntry = selected;
                 _backStack.Clear();
                 _forwardStack.Clear();
@@ -745,17 +747,17 @@ internal static class TuiApplication
                 }
 
                 var path = entry.FullPath;
-                if (!ConfirmLaunchIfRemote(path))
+                var reason = mode == PortableExplorerOpenMode.Reveal
+                    ? FileLaunchSafety.RevealConfirmationReason(path, _currentScanLoadedFromScanFile)
+                    : FileLaunchSafety.OpenConfirmationReason(path, _currentScanLoadedFromScanFile);
+                if (!ConfirmFileLaunch(path, reason, mode))
                 {
                     return;
                 }
 
                 if (mode == PortableExplorerOpenMode.Reveal)
                 {
-                    Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
-                    {
-                        UseShellExecute = true
-                    });
+                    Process.Start(WindowsShellLauncher.CreateRevealStartInfo(path));
                 }
                 else
                 {
@@ -773,49 +775,29 @@ internal static class TuiApplication
             await Task.CompletedTask;
         }
 
-        private bool ConfirmLaunchIfRemote(string path)
+        private bool ConfirmFileLaunch(string path, FileLaunchConfirmationReason reason, PortableExplorerOpenMode mode)
         {
-            if (!IsRemotePath(path))
+            if (reason == FileLaunchConfirmationReason.None)
             {
                 return true;
             }
+
+            var action = mode == PortableExplorerOpenMode.Reveal ? "Reveal" : "Open";
+            var message = reason switch
+            {
+                FileLaunchConfirmationReason.RemotePath =>
+                    $"This item is on a network or remote location:{Environment.NewLine}{Environment.NewLine}{path}{Environment.NewLine}{Environment.NewLine}Opening it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. Open it anyway?",
+                FileLaunchConfirmationReason.LoadedScanExecutableOrScript =>
+                    $"This item came from a loaded .custodian-scan file and points to an executable or script path:{Environment.NewLine}{Environment.NewLine}{path}{Environment.NewLine}{Environment.NewLine}Only {action.ToLowerInvariant()} it if you trust both the scan file and the local file. {action} it anyway?",
+                _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unknown launch confirmation reason.")
+            };
 
             return MessageBox.Query(
                 _app,
-                "Confirm Open",
-                $"This item is on a network or remote location:{Environment.NewLine}{Environment.NewLine}{path}{Environment.NewLine}{Environment.NewLine}Opening it runs or opens the file from that remote location, which may be unsafe if the scan came from an untrusted source. Open it anyway?",
-                "Open",
+                $"Confirm {action}",
+                message,
+                action,
                 "Cancel") == 0;
-        }
-
-        private static bool IsRemotePath(string? path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
-
-            if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
-                (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsUnc))
-            {
-                return true;
-            }
-
-            try
-            {
-                var root = Path.GetPathRoot(path);
-                if (string.IsNullOrWhiteSpace(root))
-                {
-                    return false;
-                }
-
-                return new DriveInfo(root).DriveType == DriveType.Network;
-            }
-            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
-            {
-                Logger.LogWarning(ex, "Unable to classify launch path {Path}; treating it as remote.", path);
-                return true;
-            }
         }
 
         private async Task MoveSelectedToRecycleBinAsync()
@@ -881,7 +863,7 @@ internal static class TuiApplication
                     return false;
                 }
 
-                if (IsRemotePath(row.FullPath))
+                if (FileLaunchSafety.IsRemotePath(row.FullPath))
                 {
                     return allowRemote;
                 }
@@ -1139,6 +1121,7 @@ internal static class TuiApplication
             {
                 ShowDetailView();
                 _currentScan = cached.Result;
+                _currentScanLoadedFromScanFile = cached.LoadedFromScanFile;
                 _selectedEntry = cached.Selected;
                 _detailMode = cached.DetailMode;
                 _chartScope = cached.ChartScope;
@@ -1398,11 +1381,16 @@ internal static class TuiApplication
         {
             if (_currentScan is not null && _selectedEntry is not null)
             {
-                RememberScan(_currentScan, _selectedEntry, _detailMode, _chartScope);
+                RememberScan(_currentScan, _selectedEntry, _detailMode, _chartScope, _currentScanLoadedFromScanFile);
             }
         }
 
-        private void RememberScan(ScanResult result, FileSystemEntry selected, DetailMode detailMode, ChartScope chartScope)
+        private void RememberScan(
+            ScanResult result,
+            FileSystemEntry selected,
+            DetailMode detailMode,
+            ChartScope chartScope,
+            bool loadedFromScanFile)
         {
             UpdateUi(() =>
             {
@@ -1412,7 +1400,7 @@ internal static class TuiApplication
                     _sessionScanCacheOrder.Remove(key);
                 }
 
-                _sessionScanCache[key] = new CachedScan(result, selected, detailMode, chartScope);
+                _sessionScanCache[key] = new CachedScan(result, selected, detailMode, chartScope, loadedFromScanFile);
                 _sessionScanCacheOrder.AddFirst(key);
                 while (_sessionScanCacheOrder.Count > MaxSessionScanCacheEntries)
                 {
@@ -1438,6 +1426,7 @@ internal static class TuiApplication
             if (ReferenceEquals(_currentScan.Root, entry))
             {
                 _currentScan = null;
+                _currentScanLoadedFromScanFile = false;
                 _selectedEntry = null;
                 RefreshAll();
                 return;
@@ -1590,7 +1579,12 @@ internal static class TuiApplication
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetConsoleWindow();
 
-        private sealed record CachedScan(ScanResult Result, FileSystemEntry Selected, DetailMode DetailMode, ChartScope ChartScope);
+        private sealed record CachedScan(
+            ScanResult Result,
+            FileSystemEntry Selected,
+            DetailMode DetailMode,
+            ChartScope ChartScope,
+            bool LoadedFromScanFile);
     }
 }
 

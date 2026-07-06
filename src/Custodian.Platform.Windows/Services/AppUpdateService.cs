@@ -16,15 +16,26 @@ internal sealed class AppUpdateService
     private const string GitHubAccessTokenVariable = "CUSTODIAN_GITHUB_TOKEN";
     private const string GitHubPrereleaseVariable = "CUSTODIAN_UPDATE_PRERELEASES";
     private readonly UpdateManager _manager;
+    private readonly IUpdatePackageVerifier _packageVerifier;
 
     public AppUpdateService()
         : this(CreateUpdateManager())
     {
     }
 
-    private AppUpdateService(UpdateManager manager)
+    private AppUpdateService(UpdateManagerContext context)
+        : this(
+            context.Manager,
+            new VelopackUpdatePackageVerifier(
+                context.Locator,
+                new WindowsAuthenticodeSignatureVerifier()))
+    {
+    }
+
+    private AppUpdateService(UpdateManager manager, IUpdatePackageVerifier packageVerifier)
     {
         _manager = manager;
+        _packageVerifier = packageVerifier;
     }
 
     public async Task<AppUpdateCheckResult> CheckForUpdatesAsync()
@@ -84,6 +95,7 @@ internal sealed class AppUpdateService
             throw new InvalidOperationException("No downloaded update is ready to install.");
         }
 
+        _packageVerifier.Verify(asset);
         _manager.WaitExitThenApplyUpdates(
             asset,
             silent: true,
@@ -91,7 +103,7 @@ internal sealed class AppUpdateService
             Environment.GetCommandLineArgs().Skip(1).ToArray());
     }
 
-    private static UpdateManager CreateUpdateManager()
+    private static UpdateManagerContext CreateUpdateManager()
     {
         var logger = AppLogging.CreateLogger("Custodian.App.Velopack");
         var locator = VelopackLocator.GetDefault(logger);
@@ -105,13 +117,14 @@ internal sealed class AppUpdateService
         var sourceOverride = ReadEnvironmentValue(UpdateSourceOverrideVariable);
         if (sourceOverride is not null)
         {
-            // This override exists for local unsigned-update validation. It redirects the
-            // updater to an arbitrary feed, so record a loud warning: in a normal install it
-            // should never be set, and an unexpected value here is a supply-chain red flag.
+            var localSourceOverride = UpdateSourceOverridePolicy.NormalizeLocalSource(sourceOverride);
+            // This override exists for local update validation only. Refuse remote sources
+            // here so production installs cannot be redirected to arbitrary update feeds.
             logger.LogWarning(
-                "Update source overridden via {Variable}. Updates will be fetched from an override source instead of the official GitHub releases. This should only be set for local testing.",
-                UpdateSourceOverrideVariable);
-            return new UpdateManager(sourceOverride, options, logger, locator);
+                "Update source overridden via {Variable}. Updates will be fetched from local source {Source} instead of the official GitHub releases. This should only be set for local testing.",
+                UpdateSourceOverrideVariable,
+                localSourceOverride);
+            return new UpdateManagerContext(new UpdateManager(localSourceOverride, options, logger, locator), locator);
         }
 
         var channel = channelOverride ?? locator?.Channel;
@@ -119,7 +132,7 @@ internal sealed class AppUpdateService
         var includePrereleases = ReadEnvironmentFlag(GitHubPrereleaseVariable) ?? IsPrereleaseChannel(channel);
         var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases);
 
-        return new UpdateManager(source, options, logger, locator);
+        return new UpdateManagerContext(new UpdateManager(source, options, logger, locator), locator);
     }
 
     private static string? ReadEnvironmentValue(string name)
@@ -171,6 +184,8 @@ internal sealed class AppUpdateService
             ?? assembly.GetName().Version?.ToString();
     }
 }
+
+internal sealed record UpdateManagerContext(UpdateManager Manager, IVelopackLocator? Locator);
 
 internal sealed record AppUpdateCheckResult(
     AppUpdateStatus Status,

@@ -114,6 +114,45 @@ internal sealed class FileLoggerProvider : ILoggerProvider
         _queue.Dispose();
     }
 
+    internal static string SanitizeLogSegment(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            switch (ch)
+            {
+                case '\r':
+                    builder.Append(@"\r");
+                    break;
+                case '\n':
+                    builder.Append(@"\n");
+                    break;
+                case '\t':
+                    builder.Append(@"\t");
+                    break;
+                default:
+                    if (char.IsControl(ch))
+                    {
+                        builder.Append(@"\u");
+                        builder.Append(((int)ch).ToString("X4"));
+                    }
+                    else
+                    {
+                        builder.Append(ch);
+                    }
+
+                    break;
+            }
+        }
+
+        return builder.ToString();
+    }
+
     private sealed class FileLogger(string category, FileLoggerProvider provider) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -132,7 +171,7 @@ internal sealed class FileLoggerProvider : ILoggerProvider
                 return;
             }
 
-            var message = formatter(state, exception);
+            var message = SanitizeLogSegment(formatter(state, exception));
             var sb = new StringBuilder();
             sb.Append(DateTimeOffset.UtcNow.ToString("O"))
                 .Append(" [").Append(LevelLabel(logLevel)).Append("] ")
@@ -140,7 +179,7 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 
             if (exception is not null)
             {
-                sb.AppendLine().Append(exception);
+                sb.Append(" Exception: ").Append(SanitizeLogSegment(exception.ToString()));
             }
 
             sb.AppendLine();
@@ -157,5 +196,6 @@ internal sealed class FileLoggerProvider : ILoggerProvider
             LogLevel.Critical => "CRT",
             _ => "???",
         };
+
     }
 }
