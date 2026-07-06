@@ -1,5 +1,6 @@
 using Custodian.Core.Model;
 using Custodian.Core.Storage;
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace Custodian.Tests;
@@ -52,6 +53,76 @@ public sealed class ScanStoreTests
         Assert.Equal(original.Extension, roundTripped.Extension);
         Assert.Equal(original.Attributes, roundTripped.Attributes);
         Assert.Equal(original.LastWriteTime, roundTripped.LastWriteTime);
+    }
+
+    [Fact]
+    public async Task SaveThenLoadParsesRoundTripDatesWithInvariantCulture()
+    {
+        var result = SampleResult();
+        var file = result.Root.Children[0].Children[0];
+        file.LastWriteTime = new DateTimeOffset(2026, 7, 6, 19, 30, 15, TimeSpan.Zero);
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ar-SA");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ar-SA");
+
+            await store.SaveAsync(result, temp.Path);
+            var loaded = await store.LoadAsync(temp.Path);
+            var loadedFile = loaded.Root.Flatten().Single(e => e.FullPath == file.FullPath);
+
+            Assert.Equal(result.StartedAt, loaded.StartedAt);
+            Assert.Equal(result.CompletedAt, loaded.CompletedAt);
+            Assert.Equal(file.LastWriteTime, loadedFile.LastWriteTime);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
+    }
+
+    [Fact]
+    public async Task SaveWritesClientSideEntryIdsThatLoadAsParentTree()
+    {
+        var result = SampleResult();
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+
+        await store.SaveAsync(result, temp.Path);
+
+        var entries = new List<(long Id, long? ParentId, string FullPath)>();
+        await using (var connection = new SqliteConnection($"Data Source={temp.Path};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id, parent_id, full_path FROM entries ORDER BY id";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                entries.Add((
+                    reader.GetInt64(0),
+                    reader.IsDBNull(1) ? null : reader.GetInt64(1),
+                    reader.GetString(2)));
+            }
+        }
+
+        Assert.Equal(Enumerable.Range(1, entries.Count).Select(id => (long)id), entries.Select(entry => entry.Id));
+        var byPath = entries.ToDictionary(entry => entry.FullPath, StringComparer.OrdinalIgnoreCase);
+        Assert.Null(byPath[@"C:\"].ParentId);
+        Assert.Equal(1L, byPath[@"C:\Alpha"].ParentId);
+        Assert.Equal(byPath[@"C:\Alpha"].Id, byPath[@"C:\Alpha\a.bin"].ParentId);
+        Assert.Equal(byPath[@"C:\Alpha"].Id, byPath[@"C:\Alpha\b.bin"].ParentId);
+        Assert.Equal(1L, byPath[@"C:\Beta"].ParentId);
+        Assert.Equal(byPath[@"C:\Beta"].Id, byPath[@"C:\Beta\a.log"].ParentId);
+        Assert.Equal(byPath[@"C:\Beta"].Id, byPath[@"C:\Beta\b.txt"].ParentId);
+
+        var loaded = await store.LoadAsync(temp.Path);
+        Assert.Equal(result.Root.Flatten().Count(), loaded.Root.Flatten().Count());
     }
 
     [Fact]

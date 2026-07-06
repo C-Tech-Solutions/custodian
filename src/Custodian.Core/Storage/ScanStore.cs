@@ -1,6 +1,7 @@
 using Custodian.Core.Model;
 using Custodian.Core.Analysis;
 using System.Data.Common;
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace Custodian.Core.Storage;
@@ -19,6 +20,7 @@ public sealed class ScanStore
         // (or an external rename/overwrite) to fail with a sharing violation.
         await using var connection = CreateConnection(path, SqliteOpenMode.ReadWriteCreate);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await ApplySavePragmasAsync(connection, cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(connection, """
             CREATE TABLE metadata (
@@ -64,11 +66,13 @@ public sealed class ScanStore
         await InsertMetadataAsync(connection, "cloud_provider_account_label", result.CloudProvider?.AccountLabel ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "cloud_provider_root_path", result.CloudProvider?.RootPath ?? string.Empty, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "engine", result.Engine, cancellationToken).ConfigureAwait(false);
-        await InsertMetadataAsync(connection, "started_at", result.StartedAt.ToString("O"), cancellationToken).ConfigureAwait(false);
-        await InsertMetadataAsync(connection, "completed_at", result.CompletedAt.ToString("O"), cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "started_at", result.StartedAt.ToString("O", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "completed_at", result.CompletedAt.ToString("O", CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false);
 
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        await InsertEntryAsync(connection, transaction, result.Root, null, cancellationToken).ConfigureAwait(false);
+        await using var entryCommand = CreateInsertEntryCommand(connection, transaction);
+        entryCommand.Prepare();
+        await InsertEntryAsync(entryCommand, result.Root, null, nextId: 1, cancellationToken).ConfigureAwait(false);
 
         foreach (var skipped in result.SkippedEntries)
         {
@@ -114,7 +118,7 @@ public sealed class ScanStore
                     DirectoryCount = reader.GetInt64(8),
                     Extension = reader.GetString(9),
                     Attributes = reader.GetString(10),
-                    LastWriteTime = reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),
+                    LastWriteTime = reader.IsDBNull(11) ? null : ParseRoundTripDateTimeOffset(reader.GetString(11)),
                     PortableObjectId = reader.GetString(12),
                     PortablePersistentId = reader.GetString(13)
                 };
@@ -158,8 +162,8 @@ public sealed class ScanStore
             PortableStorageName = metadata.GetValueOrDefault("portable_storage_name") ?? string.Empty,
             CloudProvider = LoadCloudProviderMetadata(metadata),
             Engine = metadata["engine"],
-            StartedAt = DateTimeOffset.Parse(metadata["started_at"]),
-            CompletedAt = DateTimeOffset.Parse(metadata["completed_at"]),
+            StartedAt = ParseRoundTripDateTimeOffset(metadata["started_at"]),
+            CompletedAt = ParseRoundTripDateTimeOffset(metadata["completed_at"]),
             Root = root,
             GlobalIndex = indexBuilder.Build(root)
         };
@@ -176,6 +180,9 @@ public sealed class ScanStore
 
         return result;
     }
+
+    private static DateTimeOffset ParseRoundTripDateTimeOffset(string value)
+        => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
     private static ScanSourceKind ParseSourceKind(string? value)
     {
@@ -226,6 +233,13 @@ public sealed class ScanStore
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private static Task ApplySavePragmasAsync(SqliteConnection connection, CancellationToken cancellationToken)
+        => ExecuteAsync(connection, """
+            PRAGMA journal_mode=MEMORY;
+            PRAGMA synchronous=OFF;
+            PRAGMA temp_store=MEMORY;
+            """, cancellationToken);
+
     private static async Task InsertMetadataAsync(SqliteConnection connection, string key, string value, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -235,42 +249,73 @@ public sealed class ScanStore
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<long> InsertEntryAsync(
+    private static SqliteCommand CreateInsertEntryCommand(
         SqliteConnection connection,
-        DbTransaction transaction,
-        FileSystemEntry entry,
-        long? parentId,
-        CancellationToken cancellationToken)
+        DbTransaction transaction)
     {
-        await using var command = connection.CreateCommand();
+        var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
         command.CommandText = """
             INSERT INTO entries
-            (parent_id, name, full_path, is_directory, logical_size_bytes, allocated_size_bytes, file_count, directory_count, extension, attributes, last_write_utc, portable_object_id, portable_persistent_id)
-            VALUES ($parent_id, $name, $full_path, $is_directory, $logical_size_bytes, $allocated_size_bytes, $file_count, $directory_count, $extension, $attributes, $last_write_utc, $portable_object_id, $portable_persistent_id);
-            SELECT last_insert_rowid();
+            (id, parent_id, name, full_path, is_directory, logical_size_bytes, allocated_size_bytes, file_count, directory_count, extension, attributes, last_write_utc, portable_object_id, portable_persistent_id)
+            VALUES ($id, $parent_id, $name, $full_path, $is_directory, $logical_size_bytes, $allocated_size_bytes, $file_count, $directory_count, $extension, $attributes, $last_write_utc, $portable_object_id, $portable_persistent_id)
             """;
-        command.Parameters.AddWithValue("$parent_id", parentId is null ? DBNull.Value : parentId.Value);
-        command.Parameters.AddWithValue("$name", entry.Name);
-        command.Parameters.AddWithValue("$full_path", entry.FullPath);
-        command.Parameters.AddWithValue("$is_directory", entry.IsDirectory ? 1 : 0);
-        command.Parameters.AddWithValue("$logical_size_bytes", entry.LogicalSizeBytes);
-        command.Parameters.AddWithValue("$allocated_size_bytes", entry.AllocatedSizeBytes);
-        command.Parameters.AddWithValue("$file_count", entry.FileCount);
-        command.Parameters.AddWithValue("$directory_count", entry.DirectoryCount);
-        command.Parameters.AddWithValue("$extension", entry.Extension);
-        command.Parameters.AddWithValue("$attributes", entry.Attributes);
-        command.Parameters.AddWithValue("$last_write_utc", entry.LastWriteTime?.UtcDateTime.ToString("O") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$portable_object_id", entry.PortableObjectId);
-        command.Parameters.AddWithValue("$portable_persistent_id", entry.PortablePersistentId);
-        var id = (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L);
+        AddParameter(command, "$id", SqliteType.Integer);
+        AddParameter(command, "$parent_id", SqliteType.Integer);
+        AddParameter(command, "$name", SqliteType.Text);
+        AddParameter(command, "$full_path", SqliteType.Text);
+        AddParameter(command, "$is_directory", SqliteType.Integer);
+        AddParameter(command, "$logical_size_bytes", SqliteType.Integer);
+        AddParameter(command, "$allocated_size_bytes", SqliteType.Integer);
+        AddParameter(command, "$file_count", SqliteType.Integer);
+        AddParameter(command, "$directory_count", SqliteType.Integer);
+        AddParameter(command, "$extension", SqliteType.Text);
+        AddParameter(command, "$attributes", SqliteType.Text);
+        AddParameter(command, "$last_write_utc", SqliteType.Text);
+        AddParameter(command, "$portable_object_id", SqliteType.Text);
+        AddParameter(command, "$portable_persistent_id", SqliteType.Text);
+        return command;
+    }
+
+    private static void AddParameter(SqliteCommand command, string name, SqliteType type)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.SqliteType = type;
+        command.Parameters.Add(parameter);
+    }
+
+    private static async Task<long> InsertEntryAsync(
+        SqliteCommand command,
+        FileSystemEntry entry,
+        long? parentId,
+        long nextId,
+        CancellationToken cancellationToken)
+    {
+        var id = nextId;
+        command.Parameters["$id"].Value = id;
+        command.Parameters["$parent_id"].Value = parentId is null ? DBNull.Value : parentId.Value;
+        command.Parameters["$name"].Value = entry.Name;
+        command.Parameters["$full_path"].Value = entry.FullPath;
+        command.Parameters["$is_directory"].Value = entry.IsDirectory ? 1 : 0;
+        command.Parameters["$logical_size_bytes"].Value = entry.LogicalSizeBytes;
+        command.Parameters["$allocated_size_bytes"].Value = entry.AllocatedSizeBytes;
+        command.Parameters["$file_count"].Value = entry.FileCount;
+        command.Parameters["$directory_count"].Value = entry.DirectoryCount;
+        command.Parameters["$extension"].Value = entry.Extension;
+        command.Parameters["$attributes"].Value = entry.Attributes;
+        command.Parameters["$last_write_utc"].Value = entry.LastWriteTime?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? (object)DBNull.Value;
+        command.Parameters["$portable_object_id"].Value = entry.PortableObjectId;
+        command.Parameters["$portable_persistent_id"].Value = entry.PortablePersistentId;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        nextId++;
 
         foreach (var child in entry.Children)
         {
-            await InsertEntryAsync(connection, transaction, child, id, cancellationToken).ConfigureAwait(false);
+            nextId = await InsertEntryAsync(command, child, id, nextId, cancellationToken).ConfigureAwait(false);
         }
 
-        return id;
+        return nextId;
     }
 
     private static async Task InsertSkippedAsync(
