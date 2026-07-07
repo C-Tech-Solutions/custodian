@@ -57,6 +57,16 @@ public sealed class LaunchSecurityTests
     }
 
     [Fact]
+    public void RevealRemotePathRequiresConfirmationEvenWhenScanWasNotLoaded()
+    {
+        var reason = FileLaunchSafety.RevealConfirmationReason(
+            @"\\server\share\payload.txt",
+            loadedFromScanFile: false);
+
+        Assert.Equal(FileLaunchConfirmationReason.RemotePath, reason);
+    }
+
+    [Fact]
     public void ExplorerLaunchesUseFullyQualifiedWindowsExplorer()
     {
         var startInfo = WindowsShellLauncher.CreateRevealStartInfo(@"C:\Temp\file.txt");

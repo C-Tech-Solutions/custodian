@@ -163,7 +163,7 @@ internal static class UpdateSourceOverridePolicy
 internal static class UpdatePackageSignatureVerifier
 {
     internal const string TrustedSignerName = "C-Tech Solutions LLC";
-    private static readonly string[] CustodianOwnedPeExtensions = [".dll", ".exe"];
+    private static readonly string[] PackagePeExtensions = [".dll", ".exe"];
 
     public static UpdatePackageSignatureVerificationResult VerifyPackage(
         string packagePath,
@@ -178,7 +178,7 @@ internal static class UpdatePackageSignatureVerifier
 
         using var archive = ZipFile.OpenRead(packagePath);
         var verifiedFiles = new List<string>();
-        foreach (var entry in archive.Entries.Where(IsCustodianOwnedPeFile))
+        foreach (var entry in archive.Entries.Where(IsPackagePeFile))
         {
             var tempPath = ExtractToTemporaryFile(entry);
             try
@@ -206,7 +206,7 @@ internal static class UpdatePackageSignatureVerifier
 
         if (verifiedFiles.Count == 0)
         {
-            throw new InvalidOperationException("The update package did not contain any Custodian-owned executable files to verify.");
+            throw new InvalidOperationException("The update package did not contain any executable files to verify.");
         }
 
         return new UpdatePackageSignatureVerificationResult(verifiedFiles);
@@ -223,7 +223,7 @@ internal static class UpdatePackageSignatureVerifier
             DistinguishedNameContains(subject, "O", TrustedSignerName);
     }
 
-    private static bool IsCustodianOwnedPeFile(ZipArchiveEntry entry)
+    private static bool IsPackagePeFile(ZipArchiveEntry entry)
     {
         var fileName = Path.GetFileName(entry.FullName);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -232,9 +232,7 @@ internal static class UpdatePackageSignatureVerifier
         }
 
         var extension = Path.GetExtension(fileName);
-        return CustodianOwnedPeExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase) &&
-            (fileName.StartsWith("Custodian.", StringComparison.OrdinalIgnoreCase) ||
-             fileName.Equals("Custodian.exe", StringComparison.OrdinalIgnoreCase));
+        return PackagePeExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string ExtractToTemporaryFile(ZipArchiveEntry entry)

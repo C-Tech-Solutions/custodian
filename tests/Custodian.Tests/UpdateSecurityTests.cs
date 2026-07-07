@@ -48,9 +48,11 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationAcceptsCustodianOwnedPeSignedByTrustedOrganization()
+    public void PackageVerificationAcceptsEveryPeSignedByTrustedOrganization()
     {
-        var packagePath = CreatePackage("lib/net10.0-windows/Custodian.App.exe");
+        var packagePath = CreatePackage(
+            "lib/net10.0-windows/Custodian.App.exe",
+            "lib/net10.0-windows/Velopack.dll");
         try
         {
             var result = UpdatePackageSignatureVerifier.VerifyPackage(
@@ -60,7 +62,9 @@ public sealed class UpdateSecurityTests
                     "CN=Code Signing, O=C-Tech Solutions LLC, C=US",
                     "Code Signing")));
 
-            Assert.Equal(["lib/net10.0-windows/Custodian.App.exe"], result.VerifiedFiles);
+            Assert.Equal(
+                ["lib/net10.0-windows/Custodian.App.exe", "lib/net10.0-windows/Velopack.dll"],
+                result.VerifiedFiles);
         }
         finally
         {
@@ -91,9 +95,31 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationRequiresAtLeastOneCustodianOwnedPe()
+    public void PackageVerificationRejectsUnsignedThirdPartyPe()
     {
         var packagePath = CreatePackage("lib/net10.0-windows/Velopack.dll");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                UpdatePackageSignatureVerifier.VerifyPackage(
+                    packagePath,
+                    new FixedAuthenticodeSignatureVerifier(new AuthenticodeSignatureResult(
+                        false,
+                        FailureReason: "unsigned"))));
+
+            Assert.Contains("Velopack.dll", ex.Message);
+            Assert.Contains("unsigned", ex.Message);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public void PackageVerificationRequiresAtLeastOneExecutablePayload()
+    {
+        var packagePath = CreatePackage("lib/net10.0-windows/readme.txt");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -104,7 +130,7 @@ public sealed class UpdateSecurityTests
                         "CN=C-Tech Solutions LLC",
                         "C-Tech Solutions LLC"))));
 
-            Assert.Contains("did not contain any Custodian-owned executable files", ex.Message);
+            Assert.Contains("did not contain any executable files", ex.Message);
         }
         finally
         {

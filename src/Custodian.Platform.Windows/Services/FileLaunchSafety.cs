@@ -109,7 +109,9 @@ internal static class FileLaunchSafety
     }
 
     public static FileLaunchConfirmationReason RevealConfirmationReason(string path, bool loadedFromScanFile)
-        => loadedFromScanFile && HasExecutableOrScriptExtension(path)
+        => IsRemotePath(path)
+            ? FileLaunchConfirmationReason.RemotePath
+            : loadedFromScanFile && HasExecutableOrScriptExtension(path)
             ? FileLaunchConfirmationReason.LoadedScanExecutableOrScript
             : FileLaunchConfirmationReason.None;
 }

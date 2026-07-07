@@ -1579,7 +1579,7 @@ public partial class MainWindow : Window
     private void ActivateRow(DetailRow row)
     {
         if (row.Entry.IsDirectory) { NavigateToFolder(row.Entry); return; }
-        if (IsExistingFileSystemPath(row.FullPath)) RevealPath(row.FullPath);
+        RevealPathIfConfirmed(row.FullPath);
     }
 
     // ============================================================
@@ -2433,11 +2433,20 @@ public partial class MainWindow : Window
 
         var path = SelectedPath();
         if (path is null) return;
-        if (IsExistingFileSystemPath(path) &&
-            ConfirmFileLaunch(
-                path,
-                FileLaunchSafety.RevealConfirmationReason(path, CurrentScanLoadedFromScanFile()),
-                "reveal"))
+        RevealPathIfConfirmed(path);
+    }
+
+    private void RevealPathIfConfirmed(string path)
+    {
+        if (!ConfirmFileLaunch(
+            path,
+            FileLaunchSafety.RevealConfirmationReason(path, CurrentScanLoadedFromScanFile()),
+            "reveal"))
+        {
+            return;
+        }
+
+        if (IsExistingFileSystemPath(path))
         {
             RevealPath(path);
         }
