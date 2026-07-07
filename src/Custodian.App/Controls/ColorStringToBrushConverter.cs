@@ -1,6 +1,7 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Windows.Data;
+using Custodian.Platform.Windows.Logging;
+using Microsoft.Extensions.Logging;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
@@ -14,6 +15,7 @@ public sealed class ColorStringToBrushConverter : IValueConverter
     public static readonly ColorStringToBrushConverter Instance = new();
 
     private const int MaxCacheEntries = 256;
+    private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(ColorStringToBrushConverter).FullName!);
     private static readonly object CacheGate = new();
     private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly LinkedList<CacheEntry> CacheOrder = [];
@@ -89,7 +91,7 @@ public sealed class ColorStringToBrushConverter : IValueConverter
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            Logger.LogWarning(ex, "Failed to convert color string '{Color}' to a WPF brush.", key);
             return WpfBrushes.Transparent;
         }
     }

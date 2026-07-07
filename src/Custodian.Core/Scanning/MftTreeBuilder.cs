@@ -86,6 +86,7 @@ internal static class MftTreeBuilder
             throw new DirectoryNotFoundException($"MFT records did not include the requested root: {requestedRootPath}");
         }
 
+        var selectedDirectories = isVolumeRootRequest ? null : CollectDirectoryReferences(scanRoot);
         var sizeWatch = Stopwatch.StartNew();
         var filesSeen = 0L;
         var bytesSeen = 0L;
@@ -106,17 +107,12 @@ internal static class MftTreeBuilder
                 continue;
             }
 
-            if (!isVolumeRootRequest && !IsInsideSelectedRoot(parent, scanRoot))
+            if (selectedDirectories is not null && !selectedDirectories.Contains(parent))
             {
                 continue;
             }
 
             var fullPath = Path.Combine(parent.FullPath, record.FileName);
-            if (!isVolumeRootRequest && !IsUnderRoot(ScanPathUtility.TrimForComparison(fullPath), requestedComparisonPath))
-            {
-                continue;
-            }
-
             if (!options.FollowReparsePoints && record.IsReparsePoint)
             {
                 skipped.Add(new SkippedEntry(fullPath, "Skipped reparse point"));
@@ -199,9 +195,12 @@ internal static class MftTreeBuilder
     {
         directory.FullPath = fullPath;
 
-        foreach (var child in directory.Children.Where(c => c.IsDirectory))
+        foreach (var child in directory.Children)
         {
-            AssignPaths(child, Path.Combine(directory.FullPath, child.Name));
+            if (child.IsDirectory)
+            {
+                AssignPaths(child, Path.Combine(directory.FullPath, child.Name));
+            }
         }
     }
 
@@ -212,8 +211,13 @@ internal static class MftTreeBuilder
             return directory;
         }
 
-        foreach (var child in directory.Children.Where(c => c.IsDirectory))
+        foreach (var child in directory.Children)
         {
+            if (!child.IsDirectory)
+            {
+                continue;
+            }
+
             var found = FindDirectory(child, comparisonPath);
             if (found is not null)
             {
@@ -224,17 +228,25 @@ internal static class MftTreeBuilder
         return null;
     }
 
-    private static bool IsInsideSelectedRoot(FileSystemEntry candidateParent, FileSystemEntry scanRoot)
+    private static HashSet<FileSystemEntry> CollectDirectoryReferences(FileSystemEntry root)
     {
-        var rootPath = ScanPathUtility.TrimForComparison(scanRoot.FullPath);
-        var candidatePath = ScanPathUtility.TrimForComparison(candidateParent.FullPath);
-        return IsUnderRoot(candidatePath, rootPath);
-    }
+        var directories = new HashSet<FileSystemEntry> { root };
+        var pending = new Stack<FileSystemEntry>();
+        pending.Push(root);
 
-    private static bool IsUnderRoot(string candidatePath, string rootPath)
-    {
-        return string.Equals(candidatePath, rootPath, StringComparison.OrdinalIgnoreCase) ||
-               candidatePath.StartsWith(rootPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            foreach (var child in directory.Children)
+            {
+                if (child.IsDirectory && directories.Add(child))
+                {
+                    pending.Push(child);
+                }
+            }
+        }
+
+        return directories;
     }
 
     private static (long LogicalSize, long AllocatedSize) ResolveSize(string fullPath, NtfsFileRecord record, ScanOptions options)

@@ -49,6 +49,33 @@ public sealed class MftTreeBuilderTests
         Assert.Single(result.Root.Children, c => c.IsDirectory);
     }
 
+    [Fact]
+    public void BuildSubtreeResolvesOnlyFilesInsideRequestedTree()
+    {
+        var records = SampleRecords();
+        records[20] = new(20, 5, FileAttributes.Directory, "Windows");
+        records[21] = new(21, 20, FileAttributes.Archive, "outside.bin");
+        var resolvedPaths = new List<string>();
+
+        var result = MftTreeBuilder.Build(
+            records,
+            @"C:\Users",
+            new ScanOptions(@"C:\Users", ScanMode.Mft),
+            new ProgressThrottle(null),
+            [],
+            CancellationToken.None,
+            (path, record) =>
+            {
+                resolvedPaths.Add(path);
+                return FakeSizeResolver(path, record);
+            });
+
+        Assert.Equal(2, result.FilesSeen);
+        Assert.Contains(@"C:\Users\Strife\big.bin", resolvedPaths);
+        Assert.Contains(@"C:\Users\small.txt", resolvedPaths);
+        Assert.DoesNotContain(@"C:\Windows\outside.bin", resolvedPaths);
+    }
+
     private static Dictionary<ulong, NtfsFileRecord> SampleRecords()
     {
         return new Dictionary<ulong, NtfsFileRecord>

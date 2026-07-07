@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Collections.Specialized;
 using System.Runtime.InteropServices;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -44,7 +43,7 @@ using WpfTextBox = System.Windows.Controls.TextBox;
 
 namespace Custodian.App;
 
-public partial class MainWindow : Window, INotifyPropertyChanged
+public partial class MainWindow : Window
 {
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaCaptionColor = 35;
@@ -210,8 +209,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshThemeMenuChecks();
         Loaded += MainWindow_Loaded;
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
@@ -4966,9 +4963,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         return null;
     }
-
-    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     private sealed class CachedScan(
         string rootKey,
