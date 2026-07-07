@@ -34,7 +34,7 @@ internal static class ElevationService
             FileName = CurrentExecutablePath(),
             UseShellExecute = true,
             Verb = "runas",
-            WorkingDirectory = Environment.CurrentDirectory,
+            WorkingDirectory = TrustedRelaunchWorkingDirectory(),
             Arguments = string.Join(" ", BuildRelaunchArguments(arguments, currentPath).Select(EscapeCommandLineArgument))
         };
 
@@ -147,6 +147,8 @@ internal static class ElevationService
 
         return executablePath;
     }
+
+    internal static string TrustedRelaunchWorkingDirectory() => WindowsShellLauncher.TrustedWorkingDirectory();
 
     private static bool HasRunAsAdministratorLayer(string? layers)
         => LayerTokens(layers).Any(token => string.Equals(token, RunAsAdministratorLayer, StringComparison.OrdinalIgnoreCase));

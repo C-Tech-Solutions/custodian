@@ -61,7 +61,7 @@ internal static class PortableDeviceExplorerService
 
     public static void OpenThisPc()
     {
-        Process.Start(new ProcessStartInfo("explorer.exe", "shell:MyComputerFolder") { UseShellExecute = true });
+        Process.Start(WindowsShellLauncher.CreateExplorerStartInfo("shell:MyComputerFolder"));
     }
 
     private static bool TryOpenThisPc()
@@ -289,11 +289,7 @@ internal static class PortableDeviceExplorerService
 
             try
             {
-                var startInfo = new ProcessStartInfo("explorer.exe")
-                {
-                    UseShellExecute = true
-                };
-                startInfo.ArgumentList.Add($"/select,{path}");
+                var startInfo = WindowsShellLauncher.CreateRevealStartInfo(path);
                 Process.Start(startInfo);
                 return true;
             }
