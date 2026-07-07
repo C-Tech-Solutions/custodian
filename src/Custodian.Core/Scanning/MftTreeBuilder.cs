@@ -195,9 +195,12 @@ internal static class MftTreeBuilder
     {
         directory.FullPath = fullPath;
 
-        foreach (var child in directory.Children.Where(c => c.IsDirectory))
+        foreach (var child in directory.Children)
         {
-            AssignPaths(child, Path.Combine(directory.FullPath, child.Name));
+            if (child.IsDirectory)
+            {
+                AssignPaths(child, Path.Combine(directory.FullPath, child.Name));
+            }
         }
     }
 
@@ -208,8 +211,13 @@ internal static class MftTreeBuilder
             return directory;
         }
 
-        foreach (var child in directory.Children.Where(c => c.IsDirectory))
+        foreach (var child in directory.Children)
         {
+            if (!child.IsDirectory)
+            {
+                continue;
+            }
+
             var found = FindDirectory(child, comparisonPath);
             if (found is not null)
             {
@@ -229,9 +237,9 @@ internal static class MftTreeBuilder
         while (pending.Count > 0)
         {
             var directory = pending.Pop();
-            foreach (var child in directory.Children.Where(c => c.IsDirectory))
+            foreach (var child in directory.Children)
             {
-                if (directories.Add(child))
+                if (child.IsDirectory && directories.Add(child))
                 {
                     pending.Push(child);
                 }

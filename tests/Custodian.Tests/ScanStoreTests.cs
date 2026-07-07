@@ -315,6 +315,23 @@ public sealed class ScanStoreTests
     }
 
     [Fact]
+    public async Task FailedSaveKeepsExistingScanFile()
+    {
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+        await store.SaveAsync(SampleResult(), temp.Path);
+
+        var invalid = SampleResult();
+        invalid.Engine = "Invalid";
+        invalid.Root = null!;
+
+        await Assert.ThrowsAnyAsync<Exception>(() => store.SaveAsync(invalid, temp.Path));
+
+        var loaded = await store.LoadAsync(temp.Path);
+        Assert.Equal("Test", loaded.Engine);
+    }
+
+    [Fact]
     public async Task LoadRebuildsGlobalIndex()
     {
         var result = SampleResult();

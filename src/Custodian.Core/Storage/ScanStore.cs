@@ -10,14 +10,23 @@ public sealed class ScanStore
 {
     public async Task SaveAsync(ScanResult result, string path, CancellationToken cancellationToken = default)
     {
-        if (File.Exists(path))
+        var tempPath = CreateTemporarySavePath(path);
+        try
         {
-            File.Delete(path);
+            await SaveCoreAsync(result, tempPath, cancellationToken).ConfigureAwait(false);
+            ReplaceSavedScanFile(tempPath, path);
         }
+        finally
+        {
+            TryDeleteFile(tempPath);
+        }
+    }
 
+    private static async Task SaveCoreAsync(ScanResult result, string path, CancellationToken cancellationToken)
+    {
         // Pooling is disabled so the file handle is released as soon as the connection is
-        // disposed. With the default pool the handle lingers, causing the File.Delete above
-        // (or an external rename/overwrite) to fail with a sharing violation.
+        // disposed. With the default pool the handle lingers, causing an external
+        // rename/overwrite after save to fail with a sharing violation.
         await using var connection = CreateConnection(path, SqliteOpenMode.ReadWriteCreate);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await ApplySavePragmasAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -184,6 +193,44 @@ public sealed class ScanStore
     private static DateTimeOffset ParseRoundTripDateTimeOffset(string value)
         => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
+    private static string CreateTemporarySavePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            directory = Directory.GetCurrentDirectory();
+        }
+
+        return Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+    }
+
+    private static void ReplaceSavedScanFile(string tempPath, string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Replace(tempPath, path, destinationBackupFileName: null);
+            return;
+        }
+
+        File.Move(tempPath, path);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup; a leftover temp file is safer than masking the save failure.
+        }
+    }
+
     private static ScanSourceKind ParseSourceKind(string? value)
     {
         return Enum.TryParse<ScanSourceKind>(value, ignoreCase: true, out var sourceKind)
@@ -235,8 +282,6 @@ public sealed class ScanStore
 
     private static Task ApplySavePragmasAsync(SqliteConnection connection, CancellationToken cancellationToken)
         => ExecuteAsync(connection, """
-            PRAGMA journal_mode=MEMORY;
-            PRAGMA synchronous=OFF;
             PRAGMA temp_store=MEMORY;
             """, cancellationToken);
 
@@ -293,20 +338,20 @@ public sealed class ScanStore
         CancellationToken cancellationToken)
     {
         var id = nextId;
-        command.Parameters["$id"].Value = id;
-        command.Parameters["$parent_id"].Value = parentId is null ? DBNull.Value : parentId.Value;
-        command.Parameters["$name"].Value = entry.Name;
-        command.Parameters["$full_path"].Value = entry.FullPath;
-        command.Parameters["$is_directory"].Value = entry.IsDirectory ? 1 : 0;
-        command.Parameters["$logical_size_bytes"].Value = entry.LogicalSizeBytes;
-        command.Parameters["$allocated_size_bytes"].Value = entry.AllocatedSizeBytes;
-        command.Parameters["$file_count"].Value = entry.FileCount;
-        command.Parameters["$directory_count"].Value = entry.DirectoryCount;
-        command.Parameters["$extension"].Value = entry.Extension;
-        command.Parameters["$attributes"].Value = entry.Attributes;
-        command.Parameters["$last_write_utc"].Value = entry.LastWriteTime?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? (object)DBNull.Value;
-        command.Parameters["$portable_object_id"].Value = entry.PortableObjectId;
-        command.Parameters["$portable_persistent_id"].Value = entry.PortablePersistentId;
+        command.Parameters[0].Value = id;
+        command.Parameters[1].Value = parentId is null ? DBNull.Value : parentId.Value;
+        command.Parameters[2].Value = entry.Name;
+        command.Parameters[3].Value = entry.FullPath;
+        command.Parameters[4].Value = entry.IsDirectory ? 1 : 0;
+        command.Parameters[5].Value = entry.LogicalSizeBytes;
+        command.Parameters[6].Value = entry.AllocatedSizeBytes;
+        command.Parameters[7].Value = entry.FileCount;
+        command.Parameters[8].Value = entry.DirectoryCount;
+        command.Parameters[9].Value = entry.Extension;
+        command.Parameters[10].Value = entry.Attributes;
+        command.Parameters[11].Value = entry.LastWriteTime?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? (object)DBNull.Value;
+        command.Parameters[12].Value = entry.PortableObjectId;
+        command.Parameters[13].Value = entry.PortablePersistentId;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         nextId++;
 
