@@ -41,6 +41,8 @@ internal sealed class VelopackUpdatePackageVerifier : IUpdatePackageVerifier
 
     public void Verify(VelopackAsset asset)
     {
+        ArgumentNullException.ThrowIfNull(asset);
+
         var packagePath = _packagePathResolver.GetPackagePath(asset);
         if (!File.Exists(packagePath))
         {
@@ -84,6 +86,9 @@ internal sealed class VelopackUpdatePackageChecksumVerifier : IUpdatePackageChec
 {
     public void Verify(VelopackAsset asset, string packagePath)
     {
+        ArgumentNullException.ThrowIfNull(asset);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
+
         if (!string.IsNullOrWhiteSpace(asset.SHA256))
         {
             VerifyHash(packagePath, asset.SHA256, SHA256.HashData, "SHA256");
@@ -164,6 +169,8 @@ internal static class UpdatePackageSignatureVerifier
         string packagePath,
         IAuthenticodeSignatureVerifier signatureVerifier)
     {
+        ArgumentNullException.ThrowIfNull(signatureVerifier);
+
         if (string.IsNullOrWhiteSpace(packagePath))
         {
             throw new ArgumentException("Package path is required.", nameof(packagePath));
@@ -345,6 +352,7 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
     private static extern int WinVerifyTrust(
         IntPtr hwnd,
         [MarshalAs(UnmanagedType.LPStruct)] ref Guid actionId,
+        [In, Out]
         WintrustData data);
 
     private enum WintrustUnionChoice : uint

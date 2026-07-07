@@ -37,6 +37,15 @@ public sealed class LaunchSecurityTests
         Assert.Equal(FileLaunchConfirmationReason.RemotePath, reason);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void MissingPathIsNotClassifiedAsRemote(string? path)
+    {
+        Assert.False(FileLaunchSafety.IsRemotePath(path!));
+    }
+
     [Fact]
     public void RevealFromLoadedScanRequiresConfirmationForExecutableOrScriptPath()
     {

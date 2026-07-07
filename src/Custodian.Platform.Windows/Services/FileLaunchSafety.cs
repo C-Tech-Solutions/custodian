@@ -57,6 +57,11 @@ internal static class FileLaunchSafety
 
     public static bool IsRemotePath(string path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
         if (path.StartsWith(@"\\", StringComparison.Ordinal) ||
             (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsUnc))
         {

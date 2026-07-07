@@ -126,7 +126,7 @@ public sealed class UpdateSecurityTests
                     calls,
                     new AuthenticodeSignatureResult(true, "CN=C-Tech Solutions LLC", "C-Tech Solutions LLC")));
 
-            verifier.Verify(null!);
+            verifier.Verify(CreateAsset());
 
             Assert.Equal(["checksum", "authenticode"], calls);
         }
@@ -135,6 +135,50 @@ public sealed class UpdateSecurityTests
             File.Delete(packagePath);
         }
     }
+
+    [Fact]
+    public void PackageVerifierRejectsNullAssetBeforeResolvingPackagePath()
+    {
+        var verifier = new VelopackUpdatePackageVerifier(
+            new FixedPackagePathResolver("unused.nupkg"),
+            new RecordingChecksumVerifier([]),
+            new FixedAuthenticodeSignatureVerifier(
+                new AuthenticodeSignatureResult(true, "CN=C-Tech Solutions LLC", "C-Tech Solutions LLC")));
+
+        Assert.Throws<ArgumentNullException>(() => verifier.Verify(null!));
+    }
+
+    [Fact]
+    public void ChecksumVerifierRejectsNullAsset()
+    {
+        var verifier = new VelopackUpdatePackageChecksumVerifier();
+
+        Assert.Throws<ArgumentNullException>(() => verifier.Verify(null!, "package.nupkg"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ChecksumVerifierRejectsMissingPackagePath(string? packagePath)
+    {
+        var verifier = new VelopackUpdatePackageChecksumVerifier();
+
+        Assert.ThrowsAny<ArgumentException>(() => verifier.Verify(CreateAsset(), packagePath!));
+    }
+
+    [Fact]
+    public void PackageSignatureVerifierRejectsNullSignatureVerifier()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            UpdatePackageSignatureVerifier.VerifyPackage("package.nupkg", null!));
+    }
+
+    private static VelopackAsset CreateAsset() => new()
+    {
+        FileName = "Custodian.nupkg",
+        SHA256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    };
 
     private static string CreatePackage(params string[] entries)
     {
