@@ -312,7 +312,8 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         try
         {
 #pragma warning disable SYSLIB0057
-            var certificate = new X509Certificate2(X509Certificate.CreateFromSignedFile(filePath));
+            using var signedCertificate = X509Certificate.CreateFromSignedFile(filePath);
+            using var certificate = new X509Certificate2(signedCertificate);
 #pragma warning restore SYSLIB0057
             return new AuthenticodeSignatureResult(
                 true,
