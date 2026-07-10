@@ -308,6 +308,111 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void PortableTargetCanUseCachedScanMatchesRefreshedIPhoneStorageIdentity()
+    {
+        var target = new PortableDeviceTarget(
+            "wpd:current-iphone-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "current-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var scan = new ScanResult
+        {
+            RootPath = "wpd:stale-iphone-storage",
+            SourceId = "wpd:stale-iphone-storage",
+            SourceKind = ScanSourceKind.PortableDevice,
+            DisplayRootPath = "Cam's iPhone/Internal Storage",
+            PortableDeviceId = "iphone-device-id",
+            PortableStorageObjectId = "stale-storage-object-id",
+            PortableStorageName = "Internal Storage"
+        };
+
+        Assert.True(MainWindow.PortableTargetCanUseCachedScan(target, scan));
+    }
+
+    [Fact]
+    public void PortableTargetCanUseCachedScanRejectsNonPortableScan()
+    {
+        var target = new PortableDeviceTarget(
+            "wpd:current-iphone-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "current-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var scan = new ScanResult
+        {
+            RootPath = @"C:\",
+            SourceKind = ScanSourceKind.FileSystem,
+            DisplayRootPath = @"C:\",
+            PortableDeviceId = "iphone-device-id",
+            PortableStorageName = "Internal Storage"
+        };
+
+        Assert.False(MainWindow.PortableTargetCanUseCachedScan(target, scan));
+    }
+
+    [Fact]
+    public void PortableTargetMatchesActiveScanAfterWpdTargetIdChanges()
+    {
+        var activeTarget = new PortableDeviceTarget(
+            "wpd:stale-iphone-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "stale-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var refreshedTarget = activeTarget with
+        {
+            TargetId = "wpd:current-iphone-storage",
+            StorageObjectId = "current-storage-object-id"
+        };
+
+        Assert.True(MainWindow.PortableTargetMatchesActiveScan(
+            refreshedTarget,
+            activeTarget,
+            [refreshedTarget]));
+    }
+
+    [Fact]
+    public void PortableTargetFallbackIdentityRejectsAmbiguousStorageNames()
+    {
+        var target = new PortableDeviceTarget(
+            "wpd:first-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "first-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var duplicate = target with
+        {
+            TargetId = "wpd:second-storage",
+            StorageObjectId = "second-storage-object-id"
+        };
+
+        Assert.False(MainWindow.PortableTargetFallbackIdentityIsUnambiguous(
+            [target, duplicate],
+            target));
+    }
+
+    [Fact]
     public void FindPortableTargetRowForScanPrefersExactIdentityBeforeNameFallback()
     {
         var nameFallbackTarget = new PortableDeviceTarget(
@@ -376,6 +481,32 @@ public sealed class MainWindowTargetRepairTests
         var current = TargetRow.FromPortable(availableTarget);
 
         var match = TargetMatchingService.FindEquivalentTargetRow([current], previous);
+
+        Assert.Same(current, match);
+    }
+
+    [Fact]
+    public void FindEquivalentTargetRowMatchesAvailablePhoneWhenWpdStorageIdentityChanges()
+    {
+        var previousTarget = new PortableDeviceTarget(
+            "wpd:stale-iphone-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "stale-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var currentTarget = previousTarget with
+        {
+            TargetId = "wpd:current-iphone-storage",
+            StorageObjectId = "current-storage-object-id"
+        };
+        var current = TargetRow.FromPortable(currentTarget);
+
+        var match = TargetMatchingService.FindEquivalentTargetRow([current], TargetRow.FromPortable(previousTarget));
 
         Assert.Same(current, match);
     }
