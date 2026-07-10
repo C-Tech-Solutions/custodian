@@ -832,7 +832,7 @@ public partial class MainWindow : Window
         var scanKey = request.RootKey;
         var displayPath = request.DisplayPath;
         var cts = new CancellationTokenSource();
-        var scan = new ActiveScanJob(scanKey, displayPath, cts);
+        var scan = new ActiveScanJob(scanKey, displayPath, request.PortableTarget, cts);
         _activeScan = scan;
         _scanStarted = DateTime.UtcNow;
         _scanFilesSeen = 0;
@@ -1225,17 +1225,19 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (_activeScan is { } activePortableScan && IsScanActive(row.RootPath))
+            if (row.PortableTarget is { } selectedPortableTarget)
             {
-                ShowActiveScanPage(activePortableScan);
-                return;
-            }
+                if (_activeScan is { } activePortableScan && IsPortableScanActive(selectedPortableTarget))
+                {
+                    ShowActiveScanPage(activePortableScan);
+                    return;
+                }
 
-            if (row.PortableTarget is { } selectedPortableTarget &&
-                TryGetCachedPortableScan(selectedPortableTarget, out var portableCached))
-            {
-                await RestoreCachedScanAsync(portableCached, targetSelectionVersion, showToast: false);
-                return;
+                if (TryGetCachedPortableScan(selectedPortableTarget, out var portableCached))
+                {
+                    await RestoreCachedScanAsync(portableCached, targetSelectionVersion, showToast: false);
+                    return;
+                }
             }
 
             ShowStartScanPrompt(row.DisplayPath);
@@ -3074,27 +3076,52 @@ public partial class MainWindow : Window
 
     private bool TryGetCachedPortableScan(PortableDeviceTarget target, out CachedScan cached)
     {
-        if (TryGetCachedScan(target.TargetId, out cached))
+        if (!TryFindCachedPortableScan(target, VisiblePortableTargets(), out cached))
+        {
+            return false;
+        }
+
+        MarkSessionScanCacheKeyUsed(cached.RootKey, enforceLimit: false);
+        return true;
+    }
+
+    private bool TryFindCachedPortableScan(
+        PortableDeviceTarget target,
+        IEnumerable<PortableDeviceTarget> currentTargets,
+        out CachedScan cached)
+    {
+        if (_sessionScanCache.TryGetValue(target.TargetId, out cached!))
         {
             return true;
         }
 
-        var exactMatch = _sessionScanCache.Values.FirstOrDefault(item =>
-            PortableTargetMatchesCachedScanExactly(target, item.Result));
-        if (exactMatch is not null)
+        if (TryFindMostRecentPortableCachedScan(target, PortableTargetMatchesCachedScanExactly, out cached))
         {
-            cached = exactMatch;
-            MarkSessionScanCacheKeyUsed(cached.RootKey, enforceLimit: false);
             return true;
         }
 
-        var fallbackMatch = _sessionScanCache.Values.FirstOrDefault(item =>
-            PortableTargetCanUseCachedScan(target, item.Result));
-        if (fallbackMatch is not null)
+        if (PortableTargetFallbackIdentityIsUnambiguous(currentTargets, target) &&
+            TryFindMostRecentPortableCachedScan(target, PortableTargetCanUseCachedScan, out cached))
         {
-            cached = fallbackMatch;
-            MarkSessionScanCacheKeyUsed(cached.RootKey, enforceLimit: false);
             return true;
+        }
+
+        cached = default!;
+        return false;
+    }
+
+    private bool TryFindMostRecentPortableCachedScan(
+        PortableDeviceTarget target,
+        Func<PortableDeviceTarget, ScanResult, bool> matches,
+        out CachedScan cached)
+    {
+        for (var node = _sessionScanCacheOrder.Last; node is not null; node = node.Previous)
+        {
+            if (_sessionScanCache.TryGetValue(node.Value, out var candidate) && matches(target, candidate.Result))
+            {
+                cached = candidate;
+                return true;
+            }
         }
 
         cached = default!;
@@ -3165,12 +3192,18 @@ public partial class MainWindow : Window
         => TryGetScanCacheKey(rootPath, out var key) &&
             string.Equals(_activeScan?.RootKey, key, StringComparison.OrdinalIgnoreCase);
 
-    private bool IsPortableScanCached(PortableDeviceTarget target)
-        => _sessionScanCache.ContainsKey(target.TargetId) ||
-           _sessionScanCache.Values.Any(item => PortableTargetCanUseCachedScan(target, item.Result));
+    private bool IsPortableScanCached(PortableDeviceTarget target, IEnumerable<PortableDeviceTarget>? currentTargets = null)
+        => TryFindCachedPortableScan(target, currentTargets ?? VisiblePortableTargets(), out _);
 
-    private bool IsPortableScanActive(PortableDeviceTarget target)
-        => IsScanActive(target.TargetId);
+    private bool IsPortableScanActive(PortableDeviceTarget target, IEnumerable<PortableDeviceTarget>? currentTargets = null)
+        => IsScanActive(target.TargetId) ||
+           _activeScan?.PortableTarget is { } activeTarget &&
+           PortableTargetMatchesActiveScan(target, activeTarget, currentTargets ?? VisiblePortableTargets());
+
+    private IEnumerable<PortableDeviceTarget> VisiblePortableTargets()
+        => TargetRows
+            .Where(row => row.Kind == TargetKind.PortableDevice && row.PortableTarget is not null)
+            .Select(row => row.PortableTarget!);
 
     private static bool TryGetScanCacheKey(string rootPath, out string key)
     {
@@ -4242,8 +4275,8 @@ public partial class MainWindow : Window
             {
                 TargetRows.Add(TargetRow.FromPortable(
                     target,
-                    scanCached: IsPortableScanCached(target),
-                    scanActive: IsPortableScanActive(target)));
+                    scanCached: IsPortableScanCached(target, portableTargets),
+                    scanActive: IsPortableScanActive(target, portableTargets)));
             }
 
             RefreshEmptyStateTargets();
@@ -4546,6 +4579,20 @@ public partial class MainWindow : Window
     internal static bool PortableTargetCanUseCachedScan(PortableDeviceTarget target, ScanResult scan)
         => scan.SourceKind == ScanSourceKind.PortableDevice &&
            PortableTargetMatchesScan(target, scan);
+
+    internal static bool PortableTargetMatchesActiveScan(
+        PortableDeviceTarget target,
+        PortableDeviceTarget activeTarget,
+        IEnumerable<PortableDeviceTarget> currentTargets)
+        => TargetMatchingService.PortableTargetsMatchExactly(target, activeTarget) ||
+           (PortableTargetFallbackIdentityIsUnambiguous(currentTargets, target) &&
+            TargetMatchingService.PortableTargetsMatchByName(target, activeTarget));
+
+    internal static bool PortableTargetFallbackIdentityIsUnambiguous(
+        IEnumerable<PortableDeviceTarget> currentTargets,
+        PortableDeviceTarget target)
+        => currentTargets.Count(candidate =>
+            TargetMatchingService.PortableTargetsMatchByName(candidate, target)) == 1;
 
     private static bool PortableTargetMatchesCachedScanExactly(PortableDeviceTarget target, ScanResult scan)
         => scan.SourceKind == ScanSourceKind.PortableDevice &&
@@ -5093,7 +5140,11 @@ public partial class MainWindow : Window
         PortableDeviceTarget? PortableTarget,
         CloudProviderMetadata? CloudProvider);
 
-    private sealed record ActiveScanJob(string RootKey, string DisplayPath, CancellationTokenSource Cancellation);
+    private sealed record ActiveScanJob(
+        string RootKey,
+        string DisplayPath,
+        PortableDeviceTarget? PortableTarget,
+        CancellationTokenSource Cancellation);
 
     private sealed class DetailRowComparer(DetailSortColumn column, ListSortDirection direction) : IComparer
     {

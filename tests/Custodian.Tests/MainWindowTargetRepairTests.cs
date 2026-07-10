@@ -362,6 +362,57 @@ public sealed class MainWindowTargetRepairTests
     }
 
     [Fact]
+    public void PortableTargetMatchesActiveScanAfterWpdTargetIdChanges()
+    {
+        var activeTarget = new PortableDeviceTarget(
+            "wpd:stale-iphone-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "stale-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var refreshedTarget = activeTarget with
+        {
+            TargetId = "wpd:current-iphone-storage",
+            StorageObjectId = "current-storage-object-id"
+        };
+
+        Assert.True(MainWindow.PortableTargetMatchesActiveScan(
+            refreshedTarget,
+            activeTarget,
+            [refreshedTarget]));
+    }
+
+    [Fact]
+    public void PortableTargetFallbackIdentityRejectsAmbiguousStorageNames()
+    {
+        var target = new PortableDeviceTarget(
+            "wpd:first-storage",
+            "iphone-device-id",
+            "Cam's iPhone",
+            "first-storage-object-id",
+            "Internal Storage",
+            "Cam's iPhone/Internal Storage",
+            null,
+            null,
+            IsAvailable: true,
+            "Portable device storage");
+        var duplicate = target with
+        {
+            TargetId = "wpd:second-storage",
+            StorageObjectId = "second-storage-object-id"
+        };
+
+        Assert.False(MainWindow.PortableTargetFallbackIdentityIsUnambiguous(
+            [target, duplicate],
+            target));
+    }
+
+    [Fact]
     public void FindPortableTargetRowForScanPrefersExactIdentityBeforeNameFallback()
     {
         var nameFallbackTarget = new PortableDeviceTarget(

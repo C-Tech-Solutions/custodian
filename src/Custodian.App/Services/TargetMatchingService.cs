@@ -30,13 +30,13 @@ internal static class TargetMatchingService
             .Where(row => row.Kind == TargetKind.PortableDevice && row.PortableTarget is not null)
             .ToList();
 
-        var exactMatch = candidates.FirstOrDefault(row => PortableTargetMatchesTargetExactly(row.PortableTarget!, previousTarget));
+        var exactMatch = candidates.FirstOrDefault(row => PortableTargetsMatchExactly(row.PortableTarget!, previousTarget));
         if (exactMatch is not null)
         {
             return exactMatch;
         }
 
-        var nameMatch = candidates.FirstOrDefault(row => PortableTargetMatchesTargetByName(row.PortableTarget!, previousTarget));
+        var nameMatch = candidates.FirstOrDefault(row => PortableTargetsMatchByName(row.PortableTarget!, previousTarget));
         if (nameMatch is not null)
         {
             return nameMatch;
@@ -59,7 +59,7 @@ internal static class TargetMatchingService
             string.Equals(current.RootPath, previous.RootPath, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool PortableTargetMatchesTargetExactly(PortableDeviceTarget current, PortableDeviceTarget previous)
+    internal static bool PortableTargetsMatchExactly(PortableDeviceTarget current, PortableDeviceTarget previous)
     {
         if (!string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal))
         {
@@ -71,7 +71,7 @@ internal static class TargetMatchingService
              string.Equals(current.StorageObjectId, previous.StorageObjectId, StringComparison.Ordinal));
     }
 
-    private static bool PortableTargetMatchesTargetByName(PortableDeviceTarget current, PortableDeviceTarget previous)
+    internal static bool PortableTargetsMatchByName(PortableDeviceTarget current, PortableDeviceTarget previous)
     {
         if (!string.Equals(current.DeviceId, previous.DeviceId, StringComparison.Ordinal))
         {
