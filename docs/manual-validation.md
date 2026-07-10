@@ -7,6 +7,11 @@
 - Toggle the Targets Cloud checkbox off and on and confirm OneDrive and mounted cloud-drive target rows, such as Google Drive, hide and return while normal drives and phone targets remain listed.
 - Scan a small OneDrive folder from the GUI and confirm the engine reports `Recursive`, cancellation remains responsive, save/open works, and CSV/JSON exports include OneDrive provider metadata.
 - In the TUI, refresh targets and confirm the OneDrive target appears, scans with the recursive engine, and exports CSV/JSON with provider metadata.
+- With configured Nextcloud and Dropbox desktop sync roots, refresh Targets and confirm each root appears as a provider-aware target with the correct provider and account details, without requiring sign-in inside Custodian.
+- Scan a small Nextcloud folder from the GUI and confirm the engine reports `Recursive`, cancellation remains responsive, save/open works, and CSV/JSON exports identify the provider as Nextcloud.
+- Scan a small Dropbox folder from the GUI and confirm the engine reports `Recursive`, cancellation remains responsive, save/open works, and CSV/JSON exports identify the provider as Dropbox.
+- In the TUI, refresh targets and confirm the Nextcloud target appears, scans with the recursive engine, saves and reopens as a `.custodian-scan`, and exports CSV/JSON with Nextcloud provider metadata.
+- In the TUI, refresh targets and confirm the Dropbox target appears, scans with the recursive engine, saves and reopens as a `.custodian-scan`, and exports CSV/JSON with Dropbox provider metadata.
 - Scan one drive, scan another drive, switch back to the first drive, and confirm the cached scan restores without rescanning.
 - Start scanning one drive, switch to another cached drive, and confirm the running drive keeps a `Scanning` badge until it completes.
 - Click an uncached drive and confirm the empty state shows a Start Scan prompt without starting automatically.
