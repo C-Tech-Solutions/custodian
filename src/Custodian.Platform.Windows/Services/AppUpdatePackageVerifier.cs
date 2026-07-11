@@ -178,6 +178,7 @@ internal static class UpdatePackageSignatureVerifier
 
         using var archive = ZipFile.OpenRead(packagePath);
         var verifiedFiles = new List<string>();
+        var verifiedCustodianFiles = 0;
         foreach (var entry in archive.Entries.Where(IsPackagePeFile))
         {
             var tempPath = ExtractToTemporaryFile(entry);
@@ -190,13 +191,18 @@ internal static class UpdatePackageSignatureVerifier
                         $"Update package file '{entry.FullName}' is not trusted: {result.FailureReason ?? "signature verification failed"}.");
                 }
 
-                if (!IsTrustedSigner(result.SignerSubject, result.SignerSimpleName))
+                if (IsCustodianOwnedPeFile(entry) &&
+                    !IsTrustedSigner(result.SignerSubject, result.SignerSimpleName))
                 {
                     throw new InvalidOperationException(
                         $"Update package file '{entry.FullName}' was signed by '{result.SignerSubject ?? result.SignerSimpleName ?? "unknown"}', not '{TrustedSignerName}'.");
                 }
 
                 verifiedFiles.Add(entry.FullName);
+                if (IsCustodianOwnedPeFile(entry))
+                {
+                    verifiedCustodianFiles++;
+                }
             }
             finally
             {
@@ -204,9 +210,9 @@ internal static class UpdatePackageSignatureVerifier
             }
         }
 
-        if (verifiedFiles.Count == 0)
+        if (verifiedCustodianFiles == 0)
         {
-            throw new InvalidOperationException("The update package did not contain any executable files to verify.");
+            throw new InvalidOperationException("The update package did not contain any Custodian-owned executable files to verify.");
         }
 
         return new UpdatePackageSignatureVerificationResult(verifiedFiles);
@@ -234,6 +240,9 @@ internal static class UpdatePackageSignatureVerifier
         var extension = Path.GetExtension(fileName);
         return PackagePeExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
+
+    private static bool IsCustodianOwnedPeFile(ZipArchiveEntry entry)
+        => Path.GetFileName(entry.FullName).StartsWith("Custodian.", StringComparison.OrdinalIgnoreCase);
 
     private static string ExtractToTemporaryFile(ZipArchiveEntry entry)
     {
@@ -334,14 +343,20 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         var action = WintrustActionGenericVerifyV2;
         try
         {
-            return WinVerifyTrust(IntPtr.Zero, ref action, data);
+            return WinVerifyTrust(IntPtr.Zero, action, data);
         }
         finally
         {
             data.StateAction = WintrustStateAction.Close;
-            _ = WinVerifyTrust(IntPtr.Zero, ref action, data);
-            fileInfo.Dispose();
-            data.Dispose();
+            try
+            {
+                _ = WinVerifyTrust(IntPtr.Zero, action, data);
+            }
+            finally
+            {
+                fileInfo.Dispose();
+                data.Dispose();
+            }
         }
     }
 
@@ -350,7 +365,7 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
     [DllImport("wintrust.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int WinVerifyTrust(
         IntPtr hwnd,
-        [MarshalAs(UnmanagedType.LPStruct)] ref Guid actionId,
+        [MarshalAs(UnmanagedType.LPStruct)] Guid actionId,
         [In, Out]
         WintrustData data);
 
