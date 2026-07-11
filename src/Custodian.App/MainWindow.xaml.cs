@@ -783,6 +783,7 @@ public partial class MainWindow : Window
 
     private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
+        IsEnabled = false;
         PreparedAppUpdate preparedUpdate;
         try
         {
@@ -791,6 +792,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            IsEnabled = true;
             ShowUpdateInstallFailure(ex);
             return;
         }
@@ -801,6 +803,7 @@ public partial class MainWindow : Window
             _activeScan?.Cancellation.Cancel();
             _activeFileOperationCts?.Cancel();
             _updateCts?.Cancel();
+            _recycleBinCts?.Cancel();
             _settingsSaveTimer.Stop();
             await CancelActivePortableCopyAsync();
             await CancelActiveFileOperationAsync();
@@ -814,6 +817,7 @@ public partial class MainWindow : Window
         {
             _isClosing = false;
             _settingsPersistedForClose = false;
+            IsEnabled = true;
             ScheduleSettingsSave();
             ShowUpdateInstallFailure(ex);
         }
