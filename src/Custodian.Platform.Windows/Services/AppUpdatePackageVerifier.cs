@@ -348,9 +348,15 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         finally
         {
             data.StateAction = WintrustStateAction.Close;
-            _ = WinVerifyTrust(IntPtr.Zero, action, data);
-            fileInfo.Dispose();
-            data.Dispose();
+            try
+            {
+                _ = WinVerifyTrust(IntPtr.Zero, action, data);
+            }
+            finally
+            {
+                fileInfo.Dispose();
+                data.Dispose();
+            }
         }
     }
 
