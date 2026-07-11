@@ -48,7 +48,7 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationAcceptsTrustedCustodianPeAndIgnoresFrameworkPe()
+    public void PackageVerificationAcceptsTrustedCustodianAndFrameworkPeFiles()
     {
         var packagePath = CreatePackage(
             "lib/net10.0-windows/Custodian.App.exe",
@@ -58,13 +58,28 @@ public sealed class UpdateSecurityTests
         {
             var result = UpdatePackageSignatureVerifier.VerifyPackage(
                 packagePath,
-                new FixedAuthenticodeSignatureVerifier(new AuthenticodeSignatureResult(
-                    true,
-                    "CN=Code Signing, O=C-Tech Solutions LLC, C=US",
-                    "Code Signing")));
+                new MappingAuthenticodeSignatureVerifier(new Dictionary<string, AuthenticodeSignatureResult>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Custodian.App.exe"] = new(
+                        true,
+                        "CN=Code Signing, O=C-Tech Solutions LLC, C=US",
+                        "Code Signing"),
+                    ["Accessibility.dll"] = new(
+                        true,
+                        "CN=.NET, O=Microsoft Corporation, C=US",
+                        ".NET"),
+                    ["Velopack.dll"] = new(
+                        true,
+                        "CN=Velopack Publisher, O=Velopack Publisher",
+                        "Velopack Publisher")
+                }));
 
             Assert.Equal(
-                ["lib/net10.0-windows/Custodian.App.exe"],
+                [
+                    "lib/net10.0-windows/Custodian.App.exe",
+                    "lib/net10.0-windows/Accessibility.dll",
+                    "lib/net10.0-windows/Velopack.dll"
+                ],
                 result.VerifiedFiles);
         }
         finally
@@ -205,12 +220,41 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
+    public void PackageVerificationRejectsUnsignedThirdPartyPe()
+    {
+        var packagePath = CreatePackage(
+            "lib/net10.0-windows/Custodian.App.exe",
+            "lib/net10.0-windows/Accessibility.dll");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                UpdatePackageSignatureVerifier.VerifyPackage(
+                    packagePath,
+                    new MappingAuthenticodeSignatureVerifier(new Dictionary<string, AuthenticodeSignatureResult>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["Custodian.App.exe"] = new(
+                            true,
+                            "CN=C-Tech Solutions LLC",
+                            "C-Tech Solutions LLC"),
+                        ["Accessibility.dll"] = new(false, FailureReason: "unsigned")
+                    })));
+
+            Assert.Contains("Accessibility.dll", ex.Message);
+            Assert.Contains("unsigned", ex.Message);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
     public void WindowsAuthenticodeVerifierAcceptsSignedDotnetHost()
     {
-        var dotnetHost = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "dotnet",
-            "dotnet.exe");
+        var runtimeDirectory = new DirectoryInfo(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        var dotnetRoot = runtimeDirectory.Parent?.Parent?.Parent;
+        Assert.NotNull(dotnetRoot);
+        var dotnetHost = Path.Combine(dotnetRoot.FullName, "dotnet.exe");
         Assert.True(File.Exists(dotnetHost), $"The .NET host was not found at '{dotnetHost}'.");
 
         var result = new WindowsAuthenticodeSignatureVerifier().Verify(dotnetHost);
@@ -252,6 +296,13 @@ public sealed class UpdateSecurityTests
     private sealed class FixedAuthenticodeSignatureVerifier(AuthenticodeSignatureResult result) : IAuthenticodeSignatureVerifier
     {
         public AuthenticodeSignatureResult Verify(string filePath) => result;
+    }
+
+    private sealed class MappingAuthenticodeSignatureVerifier(
+        IReadOnlyDictionary<string, AuthenticodeSignatureResult> results) : IAuthenticodeSignatureVerifier
+    {
+        public AuthenticodeSignatureResult Verify(string filePath)
+            => results[Path.GetFileName(filePath)];
     }
 
     private sealed class RecordingAuthenticodeSignatureVerifier(

@@ -786,7 +786,8 @@ public partial class MainWindow : Window
         PreparedAppUpdate preparedUpdate;
         try
         {
-            preparedUpdate = _updates.PrepareUpdate(result);
+            UpdateFooterStatus("Updates", "Verifying downloaded update...");
+            preparedUpdate = await Task.Run(() => _updates.PrepareUpdate(result));
         }
         catch (Exception ex)
         {
@@ -806,13 +807,14 @@ public partial class MainWindow : Window
             await PersistSettingsAsync();
             _settingsPersistedForClose = true;
             UpdateFooterStatus("Updates", "Installing update...");
-            _updates.ApplyPreparedUpdateAndRestart(preparedUpdate);
+            await Task.Run(() => _updates.ApplyPreparedUpdateAndRestart(preparedUpdate));
             System.Windows.Application.Current.Shutdown();
         }
         catch (Exception ex)
         {
             _isClosing = false;
             _settingsPersistedForClose = false;
+            ScheduleSettingsSave();
             ShowUpdateInstallFailure(ex);
         }
     }

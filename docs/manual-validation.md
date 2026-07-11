@@ -32,7 +32,7 @@
 - In each desktop theme, hover an ordinary control, the summary-panel collapse button, and the pie-zoom reset button; confirm tooltip text remains readable against its background.
 - Build an update package with `scripts\publish-velopack.ps1 -Version 1.5.3` and confirm Velopack emits release assets under `artifacts\velopack`.
 - Build a signed update package with `scripts\publish-velopack.ps1 -Version 1.5.3 -Sign` after setting Azure Artifact Signing metadata, then confirm the script verifies the generated signatures.
-- Validate a signed update package containing unsigned framework dependencies such as `Accessibility.dll`; confirm whole-package checksum validation succeeds and Authenticode checks cover only `Custodian.*.exe` and `Custodian.*.dll` entries.
+- Validate a signed update package containing framework dependencies such as `Accessibility.dll`; confirm whole-package checksum validation succeeds, every PE passes Windows trust verification, and Custodian-owned binaries are signed specifically by C-Tech Solutions LLC.
 - Offer a package with an unsigned or incorrectly signed `Custodian.*` binary, choose Restart now, and confirm Custodian displays an update error and remains usable instead of closing or entering a stuck shutdown state.
 - On a machine running Custodian 1.5.1 or 1.5.2, run the signed 1.5.3 Setup executable once, confirm the installed version is 1.5.3, and then validate a later local-feed update applies and relaunches without another prompt.
 - For unsigned local update validation, run `scripts\prepare-local-update-test.ps1`, install the preserved baseline setup, set `CUSTODIAN_UPDATE_SOURCE` to the local release folder, and confirm Help > Check for Updates prompts for the update.

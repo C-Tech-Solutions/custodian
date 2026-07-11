@@ -10,7 +10,7 @@ _No unreleased changes._
 
 ### Security
 
-- Kept whole-package Velopack checksum validation while limiting Authenticode publisher checks to Custodian-owned executables and libraries, allowing signed releases to include normal Microsoft and third-party framework dependencies.
+- Kept whole-package Velopack checksum validation, required every packaged PE to pass Windows trust verification, and enforced the C-Tech Solutions LLC publisher specifically for Custodian-owned executables and libraries.
 
 ### Fixed
 

@@ -105,6 +105,7 @@ internal sealed class AppUpdateService
     {
         ArgumentNullException.ThrowIfNull(update);
 
+        _packageVerifier.Verify(update.Asset);
         _manager.WaitExitThenApplyUpdates(
             update.Asset,
             silent: true,

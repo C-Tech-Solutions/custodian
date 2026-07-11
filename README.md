@@ -56,8 +56,8 @@ require jumping between windows.
 
 ## What's New In 1.5.3
 
-- Installed updates work again after package validation was narrowed to
-  Custodian-owned signed binaries while retaining whole-package checksum checks.
+- Installed updates work again after WinVerifyTrust verification was corrected,
+  while retaining whole-package checksum and packaged-PE signature checks.
 - Update verification and launch failures now leave Custodian open and show a
   clear error instead of silently dismissing the restart prompt.
 
