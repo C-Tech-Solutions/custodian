@@ -8,6 +8,12 @@ namespace Custodian.Tests;
 
 public sealed class UpdateInteractionShieldControllerTests
 {
+    private static readonly RoutedEvent TestRoutedEvent = EventManager.RegisterRoutedEvent(
+        "UpdateShieldTest",
+        RoutingStrategy.Direct,
+        typeof(RoutedEventHandler),
+        typeof(UpdateInteractionShieldControllerTests));
+
     [Fact]
     public void BeginUpdateAndEnd_ManageShieldWithoutDisablingContent()
     {
@@ -29,6 +35,10 @@ public sealed class UpdateInteractionShieldControllerTests
             Assert.True(unrelatedList.IsEnabled);
             Assert.True(unrelatedTree.IsEnabled);
 
+            var blockedEvent = new RoutedEventArgs(TestRoutedEvent);
+            Assert.True(controller.TryBlock(blockedEvent));
+            Assert.True(blockedEvent.Handled);
+
             controller.UpdateMessage("Installing update...", "Handing off to the updater.");
 
             Assert.Equal("Installing update...", title.Text);
@@ -40,6 +50,10 @@ public sealed class UpdateInteractionShieldControllerTests
             Assert.Equal(Visibility.Collapsed, shield.Visibility);
             Assert.True(unrelatedList.IsEnabled);
             Assert.True(unrelatedTree.IsEnabled);
+
+            var allowedEvent = new RoutedEventArgs(TestRoutedEvent);
+            Assert.False(controller.TryBlock(allowedEvent));
+            Assert.False(allowedEvent.Handled);
         });
     }
 

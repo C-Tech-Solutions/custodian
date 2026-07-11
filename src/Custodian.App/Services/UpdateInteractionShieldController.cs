@@ -33,6 +33,17 @@ internal sealed class UpdateInteractionShieldController(
         detailText.Text = detail;
     }
 
+    public bool TryBlock(RoutedEventArgs eventArgs)
+    {
+        if (!IsActive)
+        {
+            return false;
+        }
+
+        eventArgs.Handled = true;
+        return true;
+    }
+
     public void End()
     {
         shield.Visibility = Visibility.Collapsed;

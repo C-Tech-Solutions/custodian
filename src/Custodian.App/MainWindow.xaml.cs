@@ -1555,9 +1555,8 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
-        if (_updateInteractionShield.IsActive)
+        if (_updateInteractionShield.TryBlock(e))
         {
-            e.Handled = true;
             return;
         }
 
@@ -1874,10 +1873,9 @@ public partial class MainWindow : Window
     // ============================================================
     private void Window_DragOver(object sender, WpfDragEventArgs e)
     {
-        if (_updateInteractionShield.IsActive)
+        if (_updateInteractionShield.TryBlock(e))
         {
             e.Effects = WpfDragDropEffects.None;
-            e.Handled = true;
             return;
         }
 
@@ -1887,9 +1885,8 @@ public partial class MainWindow : Window
 
     private async void Window_Drop(object sender, WpfDragEventArgs e)
     {
-        if (_updateInteractionShield.IsActive)
+        if (_updateInteractionShield.TryBlock(e))
         {
-            e.Handled = true;
             return;
         }
 
@@ -1903,9 +1900,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (_updateInteractionShield.IsActive)
+        if (_updateInteractionShield.TryBlock(e))
         {
-            e.Handled = true;
             return;
         }
 
