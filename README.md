@@ -54,19 +54,10 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
-## What's New In 1.5.1
+## What's New In 1.5.2
 
-- Saved scan files write faster while retaining durable, atomic replacement
-  behavior and culture-independent timestamp loading.
-- Update packages now require valid Velopack checksum metadata and the expected
-  Authenticode signer before installation.
-- Explorer, elevation, and loaded-scan launch paths use stricter trusted-path
-  and confirmation rules.
-- File logs sanitize control characters to prevent forged log entries.
-- Completed iPhone and other portable-device scans restore immediately and
-  remain associated when Windows rotates WPD target identifiers.
-- Nextcloud and Dropbox now have explicit GUI and TUI manual-validation coverage
-  for discovery, recursive scans, save/open, and provider metadata exports.
+- Tooltips now keep readable foreground/background contrast across every desktop
+  theme, including the summary-panel and pie-zoom controls.
 
 ## Privacy And Safety
 
@@ -179,7 +170,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.1
+.\scripts\publish-velopack.ps1 -Version 1.5.2
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -225,7 +216,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.1 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.2 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's
