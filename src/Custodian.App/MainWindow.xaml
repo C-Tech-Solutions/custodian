@@ -49,6 +49,7 @@
         </Style>
     </Window.Resources>
 
+    <Grid>
     <DockPanel LastChildFill="True">
 
         <!-- =============== TOP COMMAND BAR =============== -->
@@ -140,6 +141,8 @@
                                   Click="AutoUpdateOnStartup_Click"/>
                         <Separator/>
                         <MenuItem x:Name="CheckUpdatesMenuItem" Header="Check for Updates" Click="CheckUpdates_Click"/>
+                        <Separator/>
+                        <MenuItem Header="About Custodian..." Click="AboutCustodian_Click"/>
                     </MenuItem>
                 </Menu>
 
@@ -1398,4 +1401,60 @@
             </Border>
         </Grid>
     </DockPanel>
+
+        <Border x:Name="UpdateInteractionShield"
+                Panel.ZIndex="1000"
+                Background="{DynamicResource OverlayScrim}"
+                Cursor="Wait"
+                Focusable="True"
+                AutomationProperties.Name="Update in progress"
+                Visibility="Collapsed">
+            <Border Width="430"
+                    MaxWidth="430"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="{DynamicResource SurfaceRaised}"
+                    BorderBrush="{DynamicResource BorderStrong}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource PanelCorner}"
+                    Padding="22">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="36"
+                                Height="36"
+                                CornerRadius="18"
+                                Background="{DynamicResource AccentSubtle}"
+                                BorderBrush="{DynamicResource AccentRing}"
+                                BorderThickness="1">
+                            <Viewbox Width="17" Height="17"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center">
+                                <Path Data="{StaticResource IconInfoGeometry}"
+                                      Stroke="{DynamicResource AccentBrush}"
+                                      Style="{StaticResource VectorIconPath}"/>
+                            </Viewbox>
+                        </Border>
+                        <StackPanel Margin="13,0,0,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="UpdateInteractionTitleText"
+                                       Text="Verifying update..."
+                                       Style="{StaticResource DisplayHeader}"
+                                       FontSize="17"/>
+                            <TextBlock Text="Custodian updater"
+                                       Style="{StaticResource MutedText}"
+                                       FontSize="11"
+                                       Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock x:Name="UpdateInteractionDetailText"
+                               Text="Checking the downloaded package and its signatures. This can take a moment."
+                               Style="{StaticResource MutedText}"
+                               FontSize="12.5"
+                               LineHeight="19"
+                               TextWrapping="Wrap"
+                               Margin="0,17,0,13"/>
+                    <ProgressBar Height="6" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
 </Window>

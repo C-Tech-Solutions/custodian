@@ -6,6 +6,17 @@ All notable changes to Custodian are tracked here.
 
 _No unreleased changes._
 
+## 1.5.4 - 2026-07-11
+
+### Added
+
+- Added Help > About Custodian with the installed version and a direct link to the GitHub repository.
+
+### Fixed
+
+- Replaced the window-wide disabled updater state with a themed interaction shield so target and folder-map controls keep their correct colors while update verification runs.
+- Blocked mouse, keyboard, drag/drop, and close interactions during update handoff, while restoring focus, settings persistence, and normal input if verification or updater scheduling fails.
+
 ## 1.5.3 - 2026-07-11
 
 ### Security

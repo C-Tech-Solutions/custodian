@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     private readonly CloudProviderDiscoveryService _cloudProviders = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
+    private readonly UpdateInteractionShieldController _updateInteractionShield;
     private readonly MouseHistoryNavigationService _mouseHistoryNavigation;
     private readonly TargetRefreshCoordinator _targetRefreshCoordinator;
     private readonly DeviceChangeTargetRefreshService _deviceChangeTargetRefresh;
@@ -139,6 +140,10 @@ public partial class MainWindow : Window
     public MainWindow(string? launchPath = null)
     {
         InitializeComponent();
+        _updateInteractionShield = new UpdateInteractionShieldController(
+            UpdateInteractionShield,
+            UpdateInteractionTitleText,
+            UpdateInteractionDetailText);
         DataContext = this;
         _launchPath = launchPath;
         _mouseHistoryNavigation = new MouseHistoryNavigationService(
@@ -185,7 +190,7 @@ public partial class MainWindow : Window
 
         SeedPathFromSettings();
         InstallKeyBindings();
-        PreviewMouseUp += _mouseHistoryNavigation.HandlePreviewMouseUp;
+        PreviewMouseUp += MainWindow_PreviewMouseUp;
         ApplySettingsLate();
 
         UpdateChartModeVisibility();
@@ -251,6 +256,11 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
+        if (_updateInteractionShield.IsActive && !_isClosing)
+        {
+            return;
+        }
+
         if (_isClosing)
         {
             return;
@@ -783,7 +793,9 @@ public partial class MainWindow : Window
 
     private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
-        IsEnabled = false;
+        _updateInteractionShield.Begin(
+            "Verifying update...",
+            "Checking the downloaded package and its signatures. This can take a moment.");
         PreparedAppUpdate preparedUpdate;
         try
         {
@@ -792,13 +804,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            IsEnabled = true;
+            _updateInteractionShield.End();
             ShowUpdateInstallFailure(ex);
             return;
         }
 
         try
         {
+            _updateInteractionShield.UpdateMessage(
+                "Installing update...",
+                "Closing active work and handing the verified package to the updater.");
             _isClosing = true;
             _activeScan?.Cancellation.Cancel();
             _activeFileOperationCts?.Cancel();
@@ -817,7 +832,7 @@ public partial class MainWindow : Window
         {
             _isClosing = false;
             _settingsPersistedForClose = false;
-            IsEnabled = true;
+            _updateInteractionShield.End();
             ScheduleSettingsSave();
             ShowUpdateInstallFailure(ex);
         }
@@ -1540,6 +1555,12 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (_updateInteractionShield.IsActive)
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Handled || ChartSelectionKeyboardService.IsTextInputFocus(Keyboard.FocusedElement))
         {
             return;
@@ -1853,18 +1874,42 @@ public partial class MainWindow : Window
     // ============================================================
     private void Window_DragOver(object sender, WpfDragEventArgs e)
     {
+        if (_updateInteractionShield.IsActive)
+        {
+            e.Effects = WpfDragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
         e.Effects = e.Data.GetDataPresent(WpfDataFormats.FileDrop) ? WpfDragDropEffects.Copy : WpfDragDropEffects.None;
         e.Handled = true;
     }
 
     private async void Window_Drop(object sender, WpfDragEventArgs e)
     {
+        if (_updateInteractionShield.IsActive)
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (!e.Data.GetDataPresent(WpfDataFormats.FileDrop)) return;
         if (e.Data.GetData(WpfDataFormats.FileDrop) is not string[] paths || paths.Length == 0) return;
         var path = paths.FirstOrDefault(p => Directory.Exists(p)) ?? paths[0];
         if (string.IsNullOrWhiteSpace(path)) return;
         PathBox.Text = Directory.Exists(path) ? path : Path.GetDirectoryName(path) ?? path;
         await StartScanAsync();
+    }
+
+    private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_updateInteractionShield.IsActive)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        _mouseHistoryNavigation.HandlePreviewMouseUp(sender, e);
     }
 
     // ============================================================
