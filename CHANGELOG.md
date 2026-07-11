@@ -6,6 +6,21 @@ All notable changes to Custodian are tracked here.
 
 _No unreleased changes._
 
+## 1.5.3 - 2026-07-11
+
+### Security
+
+- Kept whole-package Velopack checksum validation while limiting Authenticode publisher checks to Custodian-owned executables and libraries, allowing signed releases to include normal Microsoft and third-party framework dependencies.
+
+### Fixed
+
+- Corrected WinVerifyTrust action-identifier marshaling and limited publisher verification to Custodian-owned binaries so installed updates work normally after the one-time 1.5.3 Setup recovery.
+- Kept Custodian open and displayed an update error when package verification or updater startup fails instead of silently dismissing the restart prompt and leaving shutdown state active.
+
+### Upgrade note
+
+- Custodian 1.5.1 and 1.5.2 users must run the signed 1.5.3 Setup executable once because the broken verifier in those installed versions cannot install its own replacement. Automatic updates work normally again after 1.5.3 is installed.
+
 ## 1.5.2 - 2026-07-11
 
 ### Fixed

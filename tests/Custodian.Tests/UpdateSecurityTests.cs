@@ -48,10 +48,11 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationAcceptsEveryPeSignedByTrustedOrganization()
+    public void PackageVerificationAcceptsTrustedCustodianPeAndIgnoresFrameworkPe()
     {
         var packagePath = CreatePackage(
             "lib/net10.0-windows/Custodian.App.exe",
+            "lib/net10.0-windows/Accessibility.dll",
             "lib/net10.0-windows/Velopack.dll");
         try
         {
@@ -63,7 +64,7 @@ public sealed class UpdateSecurityTests
                     "Code Signing")));
 
             Assert.Equal(
-                ["lib/net10.0-windows/Custodian.App.exe", "lib/net10.0-windows/Velopack.dll"],
+                ["lib/net10.0-windows/Custodian.App.exe"],
                 result.VerifiedFiles);
         }
         finally
@@ -95,9 +96,9 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationRejectsUnsignedThirdPartyPe()
+    public void PackageVerificationRejectsUnsignedCustodianOwnedPe()
     {
-        var packagePath = CreatePackage("lib/net10.0-windows/Velopack.dll");
+        var packagePath = CreatePackage("lib/net10.0-windows/Custodian.Core.dll");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -107,7 +108,7 @@ public sealed class UpdateSecurityTests
                         false,
                         FailureReason: "unsigned"))));
 
-            Assert.Contains("Velopack.dll", ex.Message);
+            Assert.Contains("Custodian.Core.dll", ex.Message);
             Assert.Contains("unsigned", ex.Message);
         }
         finally
@@ -117,9 +118,12 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationRequiresAtLeastOneExecutablePayload()
+    public void PackageVerificationRequiresAtLeastOneCustodianOwnedExecutablePayload()
     {
-        var packagePath = CreatePackage("lib/net10.0-windows/readme.txt");
+        var packagePath = CreatePackage(
+            "lib/net10.0-windows/Accessibility.dll",
+            "lib/net10.0-windows/Velopack.dll",
+            "lib/net10.0-windows/readme.txt");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -130,7 +134,7 @@ public sealed class UpdateSecurityTests
                         "CN=C-Tech Solutions LLC",
                         "C-Tech Solutions LLC"))));
 
-            Assert.Contains("did not contain any executable files", ex.Message);
+            Assert.Contains("did not contain any Custodian-owned executable files", ex.Message);
         }
         finally
         {
@@ -198,6 +202,21 @@ public sealed class UpdateSecurityTests
     {
         Assert.Throws<ArgumentNullException>(() =>
             UpdatePackageSignatureVerifier.VerifyPackage("package.nupkg", null!));
+    }
+
+    [Fact]
+    public void WindowsAuthenticodeVerifierAcceptsSignedDotnetHost()
+    {
+        var dotnetHost = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "dotnet",
+            "dotnet.exe");
+        Assert.True(File.Exists(dotnetHost), $"The .NET host was not found at '{dotnetHost}'.");
+
+        var result = new WindowsAuthenticodeSignatureVerifier().Verify(dotnetHost);
+
+        Assert.True(result.IsTrusted, result.FailureReason);
+        Assert.Contains("Microsoft Corporation", result.SignerSubject, StringComparison.OrdinalIgnoreCase);
     }
 
     private static VelopackAsset CreateAsset() => new()

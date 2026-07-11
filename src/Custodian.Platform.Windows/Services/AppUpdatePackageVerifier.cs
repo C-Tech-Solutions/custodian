@@ -178,7 +178,7 @@ internal static class UpdatePackageSignatureVerifier
 
         using var archive = ZipFile.OpenRead(packagePath);
         var verifiedFiles = new List<string>();
-        foreach (var entry in archive.Entries.Where(IsPackagePeFile))
+        foreach (var entry in archive.Entries.Where(IsCustodianOwnedPeFile))
         {
             var tempPath = ExtractToTemporaryFile(entry);
             try
@@ -206,7 +206,7 @@ internal static class UpdatePackageSignatureVerifier
 
         if (verifiedFiles.Count == 0)
         {
-            throw new InvalidOperationException("The update package did not contain any executable files to verify.");
+            throw new InvalidOperationException("The update package did not contain any Custodian-owned executable files to verify.");
         }
 
         return new UpdatePackageSignatureVerificationResult(verifiedFiles);
@@ -223,10 +223,11 @@ internal static class UpdatePackageSignatureVerifier
             DistinguishedNameContains(subject, "O", TrustedSignerName);
     }
 
-    private static bool IsPackagePeFile(ZipArchiveEntry entry)
+    private static bool IsCustodianOwnedPeFile(ZipArchiveEntry entry)
     {
         var fileName = Path.GetFileName(entry.FullName);
-        if (string.IsNullOrWhiteSpace(fileName))
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !fileName.StartsWith("Custodian.", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -334,12 +335,12 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         var action = WintrustActionGenericVerifyV2;
         try
         {
-            return WinVerifyTrust(IntPtr.Zero, ref action, data);
+            return WinVerifyTrust(IntPtr.Zero, action, data);
         }
         finally
         {
             data.StateAction = WintrustStateAction.Close;
-            _ = WinVerifyTrust(IntPtr.Zero, ref action, data);
+            _ = WinVerifyTrust(IntPtr.Zero, action, data);
             fileInfo.Dispose();
             data.Dispose();
         }
@@ -350,7 +351,7 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
     [DllImport("wintrust.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int WinVerifyTrust(
         IntPtr hwnd,
-        [MarshalAs(UnmanagedType.LPStruct)] ref Guid actionId,
+        [MarshalAs(UnmanagedType.LPStruct)] Guid actionId,
         [In, Out]
         WintrustData data);
 

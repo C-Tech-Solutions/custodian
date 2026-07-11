@@ -54,10 +54,16 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
-## What's New In 1.5.2
+## What's New In 1.5.3
 
-- Tooltips now keep readable foreground/background contrast across every desktop
-  theme, including the summary-panel and pie-zoom controls.
+- Installed updates work again after package validation was narrowed to
+  Custodian-owned signed binaries while retaining whole-package checksum checks.
+- Update verification and launch failures now leave Custodian open and show a
+  clear error instead of silently dismissing the restart prompt.
+
+> **One-time recovery:** Custodian 1.5.1 and 1.5.2 cannot automatically install
+> the updater repair. Download and run the signed 1.5.3 Setup executable once;
+> automatic updates work normally after that installation.
 
 ## Privacy And Safety
 
@@ -170,7 +176,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.2
+.\scripts\publish-velopack.ps1 -Version 1.5.3
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -216,7 +222,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.2 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.3 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's

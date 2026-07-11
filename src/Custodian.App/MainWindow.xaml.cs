@@ -783,18 +783,46 @@ public partial class MainWindow : Window
 
     private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
-        _isClosing = true;
-        _activeScan?.Cancellation.Cancel();
-        _activeFileOperationCts?.Cancel();
-        _updateCts?.Cancel();
-        _settingsSaveTimer.Stop();
-        await CancelActivePortableCopyAsync();
-        await CancelActiveFileOperationAsync();
-        await PersistSettingsAsync();
-        _settingsPersistedForClose = true;
-        UpdateFooterStatus("Updates", "Installing update...");
-        _updates.ApplyUpdatesAndRestart(result);
-        System.Windows.Application.Current.Shutdown();
+        PreparedAppUpdate preparedUpdate;
+        try
+        {
+            preparedUpdate = _updates.PrepareUpdate(result);
+        }
+        catch (Exception ex)
+        {
+            ShowUpdateInstallFailure(ex);
+            return;
+        }
+
+        try
+        {
+            _isClosing = true;
+            _activeScan?.Cancellation.Cancel();
+            _activeFileOperationCts?.Cancel();
+            _updateCts?.Cancel();
+            _settingsSaveTimer.Stop();
+            await CancelActivePortableCopyAsync();
+            await CancelActiveFileOperationAsync();
+            await PersistSettingsAsync();
+            _settingsPersistedForClose = true;
+            UpdateFooterStatus("Updates", "Installing update...");
+            _updates.ApplyPreparedUpdateAndRestart(preparedUpdate);
+            System.Windows.Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            _isClosing = false;
+            _settingsPersistedForClose = false;
+            ShowUpdateInstallFailure(ex);
+        }
+    }
+
+    private void ShowUpdateInstallFailure(Exception exception)
+    {
+        Logger.LogError(exception, "Update installation could not be started.");
+        var status = AppUpdateStatusFactory.Failed(exception.Message);
+        ApplyUpdateStatus(status);
+        UpdateDialog.ShowInformation(this, "Update failed", status.Message, UpdateDialogTone.Error);
     }
 
     private async Task StartScanAsync(PendingScan? explicitRequest = null)

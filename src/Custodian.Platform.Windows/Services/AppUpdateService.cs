@@ -81,14 +81,10 @@ internal sealed class AppUpdateService
             cancellationToken);
     }
 
-    public void ApplyUpdatesAndRestart(AppUpdateCheckResult update)
-        => ApplyUpdates(update, restart: true);
-
-    public void ApplyUpdatesWithoutRestart(AppUpdateCheckResult update)
-        => ApplyUpdates(update, restart: false);
-
-    private void ApplyUpdates(AppUpdateCheckResult update, bool restart)
+    public PreparedAppUpdate PrepareUpdate(AppUpdateCheckResult update)
     {
+        ArgumentNullException.ThrowIfNull(update);
+
         var asset = update.PendingRestartAsset ?? update.UpdateInfo?.TargetFullRelease;
         if (asset is null)
         {
@@ -96,8 +92,21 @@ internal sealed class AppUpdateService
         }
 
         _packageVerifier.Verify(asset);
+        return new PreparedAppUpdate(asset);
+    }
+
+    public void ApplyPreparedUpdateAndRestart(PreparedAppUpdate update)
+        => ApplyPreparedUpdate(update, restart: true);
+
+    public void ApplyUpdatesWithoutRestart(AppUpdateCheckResult update)
+        => ApplyPreparedUpdate(PrepareUpdate(update), restart: false);
+
+    private void ApplyPreparedUpdate(PreparedAppUpdate update, bool restart)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
         _manager.WaitExitThenApplyUpdates(
-            asset,
+            update.Asset,
             silent: true,
             restart: restart,
             Environment.GetCommandLineArgs().Skip(1).ToArray());
@@ -186,6 +195,8 @@ internal sealed class AppUpdateService
 }
 
 internal sealed record UpdateManagerContext(UpdateManager Manager, IVelopackLocator? Locator);
+
+internal sealed record PreparedAppUpdate(VelopackAsset Asset);
 
 internal sealed record AppUpdateCheckResult(
     AppUpdateStatus Status,
