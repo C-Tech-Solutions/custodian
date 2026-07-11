@@ -6,6 +6,26 @@ All notable changes to Custodian are tracked here.
 
 _No unreleased changes._
 
+## 1.5.1 - 2026-07-10
+
+### Changed
+
+- Improved saved-scan persistence with invariant timestamp parsing, prepared SQLite inserts, and durable temporary-file replacement so large saves are faster without weakening crash safety.
+- Reduced avoidable path normalization and traversal allocations during MFT scans.
+- Enabled warnings-as-errors across the solution and removed dead or ad-hoc diagnostic code.
+- Expanded the manual validation checklist for Nextcloud and Dropbox discovery, recursive scans, save/open, and provider metadata exports in the GUI and TUI.
+
+### Security
+
+- Hardened updates by restricting source overrides to local folders, validating Velopack checksum metadata, and verifying the expected Authenticode signer on Custodian-owned binaries before installation.
+- Fully qualified Windows shell launches, used a trusted elevation working directory, and added confirmation before launching executable or script paths from loaded scan files.
+- Sanitized control characters in file logs and added a security reporting and release-integrity policy.
+
+### Fixed
+
+- Restored completed iPhone and other portable-device scans immediately after completion and preserved active/cached scan identity when Windows rotates WPD target identifiers.
+- Rejected ambiguous portable-device cache fallback matches so scans cannot be restored to the wrong storage target.
+
 ## 1.5.0 - 2026-06-27
 
 ### Added
