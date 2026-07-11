@@ -6,6 +6,12 @@ All notable changes to Custodian are tracked here.
 
 _No unreleased changes._
 
+## 1.5.2 - 2026-07-11
+
+### Fixed
+
+- Restored readable tooltip contrast across all desktop themes by ensuring tooltip text uses the tooltip foreground instead of the global text color.
+
 ## 1.5.1 - 2026-07-10
 
 ### Changed
