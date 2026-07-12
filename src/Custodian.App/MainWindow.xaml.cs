@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     private readonly CloudProviderDiscoveryService _cloudProviders = new();
     private readonly ScanStore _store = new();
     private readonly AppUpdateService _updates = new();
+    private readonly UpdateInteractionShieldController _updateInteractionShield;
     private readonly MouseHistoryNavigationService _mouseHistoryNavigation;
     private readonly TargetRefreshCoordinator _targetRefreshCoordinator;
     private readonly DeviceChangeTargetRefreshService _deviceChangeTargetRefresh;
@@ -139,6 +140,10 @@ public partial class MainWindow : Window
     public MainWindow(string? launchPath = null)
     {
         InitializeComponent();
+        _updateInteractionShield = new UpdateInteractionShieldController(
+            UpdateInteractionShield,
+            UpdateInteractionTitleText,
+            UpdateInteractionDetailText);
         DataContext = this;
         _launchPath = launchPath;
         _mouseHistoryNavigation = new MouseHistoryNavigationService(
@@ -185,7 +190,7 @@ public partial class MainWindow : Window
 
         SeedPathFromSettings();
         InstallKeyBindings();
-        PreviewMouseUp += _mouseHistoryNavigation.HandlePreviewMouseUp;
+        PreviewMouseUp += MainWindow_PreviewMouseUp;
         ApplySettingsLate();
 
         UpdateChartModeVisibility();
@@ -251,6 +256,11 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
+        if (_updateInteractionShield.IsActive && !_isClosing)
+        {
+            return;
+        }
+
         if (_isClosing)
         {
             return;
@@ -501,24 +511,27 @@ public partial class MainWindow : Window
     // ============================================================
     private void InstallKeyBindings()
     {
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => _ = StartScanAsync()), new KeyGesture(Key.F5)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => StopScan()), new KeyGesture(Key.Escape)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => OpenScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.O, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => SaveScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.S, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => ExportCsv_Click(this, new RoutedEventArgs())), new KeyGesture(Key.E, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { PathBox.Focus(); (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) as WpfTextBox)?.SelectAll(); }), new KeyGesture(Key.L, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { FilterBox.Focus(); FilterBox.SelectAll(); }), new KeyGesture(Key.F, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { JumpBox.Focus(); JumpBox.IsDropDownOpen = true; }), new KeyGesture(Key.K, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { ThemeManager.Toggle(); ScheduleSettingsSave(); }), new KeyGesture(Key.T, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => ShowShortcuts()), new KeyGesture(Key.OemQuestion, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoBack()), new KeyGesture(Key.Left, ModifierKeys.Alt)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoForward()), new KeyGesture(Key.Right, ModifierKeys.Alt)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoUp()), new KeyGesture(Key.Up, ModifierKeys.Alt)));
+        RelayCommand Shortcut(Action<object?> execute)
+            => new(execute, () => !_updateInteractionShield.IsActive);
+
+        InputBindings.Add(new KeyBinding(Shortcut(_ => _ = StartScanAsync()), new KeyGesture(Key.F5)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => StopScan()), new KeyGesture(Key.Escape)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => OpenScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.O, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => SaveScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.S, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => ExportCsv_Click(this, new RoutedEventArgs())), new KeyGesture(Key.E, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { PathBox.Focus(); (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) as WpfTextBox)?.SelectAll(); }), new KeyGesture(Key.L, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { FilterBox.Focus(); FilterBox.SelectAll(); }), new KeyGesture(Key.F, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { JumpBox.Focus(); JumpBox.IsDropDownOpen = true; }), new KeyGesture(Key.K, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { ThemeManager.Toggle(); ScheduleSettingsSave(); }), new KeyGesture(Key.T, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => ShowShortcuts()), new KeyGesture(Key.OemQuestion, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => GoBack()), new KeyGesture(Key.Left, ModifierKeys.Alt)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => GoForward()), new KeyGesture(Key.Right, ModifierKeys.Alt)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => GoUp()), new KeyGesture(Key.Up, ModifierKeys.Alt)));
     }
 
-    private sealed class RelayCommand(Action<object?> execute) : ICommand
+    private sealed class RelayCommand(Action<object?> execute, Func<bool> canExecute) : ICommand
     {
-        public bool CanExecute(object? parameter) => true;
+        public bool CanExecute(object? parameter) => canExecute();
         public void Execute(object? parameter) => execute(parameter);
 #pragma warning disable CS0067
         public event EventHandler? CanExecuteChanged;
@@ -783,7 +796,9 @@ public partial class MainWindow : Window
 
     private async Task ApplyUpdateAndShutdownAsync(AppUpdateCheckResult result)
     {
-        IsEnabled = false;
+        _updateInteractionShield.Begin(
+            "Verifying update...",
+            "Checking the downloaded package and its signatures. This can take a moment.");
         PreparedAppUpdate preparedUpdate;
         try
         {
@@ -792,13 +807,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            IsEnabled = true;
+            _updateInteractionShield.End();
             ShowUpdateInstallFailure(ex);
             return;
         }
 
         try
         {
+            _updateInteractionShield.UpdateMessage(
+                "Installing update...",
+                "Closing active work and handing the verified package to the updater.");
             _isClosing = true;
             _activeScan?.Cancellation.Cancel();
             _activeFileOperationCts?.Cancel();
@@ -817,7 +835,7 @@ public partial class MainWindow : Window
         {
             _isClosing = false;
             _settingsPersistedForClose = false;
-            IsEnabled = true;
+            _updateInteractionShield.End();
             ScheduleSettingsSave();
             ShowUpdateInstallFailure(ex);
         }
@@ -1540,6 +1558,11 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (_updateInteractionShield.TryBlock(e))
+        {
+            return;
+        }
+
         if (e.Handled || ChartSelectionKeyboardService.IsTextInputFocus(Keyboard.FocusedElement))
         {
             return;
@@ -1853,18 +1876,39 @@ public partial class MainWindow : Window
     // ============================================================
     private void Window_DragOver(object sender, WpfDragEventArgs e)
     {
+        if (_updateInteractionShield.TryBlock(e))
+        {
+            e.Effects = WpfDragDropEffects.None;
+            return;
+        }
+
         e.Effects = e.Data.GetDataPresent(WpfDataFormats.FileDrop) ? WpfDragDropEffects.Copy : WpfDragDropEffects.None;
         e.Handled = true;
     }
 
     private async void Window_Drop(object sender, WpfDragEventArgs e)
     {
+        if (_updateInteractionShield.TryBlock(e))
+        {
+            return;
+        }
+
         if (!e.Data.GetDataPresent(WpfDataFormats.FileDrop)) return;
         if (e.Data.GetData(WpfDataFormats.FileDrop) is not string[] paths || paths.Length == 0) return;
         var path = paths.FirstOrDefault(p => Directory.Exists(p)) ?? paths[0];
         if (string.IsNullOrWhiteSpace(path)) return;
         PathBox.Text = Directory.Exists(path) ? path : Path.GetDirectoryName(path) ?? path;
         await StartScanAsync();
+    }
+
+    private void MainWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_updateInteractionShield.TryBlock(e))
+        {
+            return;
+        }
+
+        _mouseHistoryNavigation.HandlePreviewMouseUp(sender, e);
     }
 
     // ============================================================

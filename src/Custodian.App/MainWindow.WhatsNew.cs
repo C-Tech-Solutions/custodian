@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Windows;
 using Custodian.App.Services;
 using Microsoft.Extensions.Logging;
 
@@ -24,5 +26,34 @@ public partial class MainWindow
 
         _whatsNewMenuService.InstallMenuItem();
         _whatsNewMenuService.QueueInitialPrompt();
+    }
+
+    private void AboutCustodian_Click(object sender, RoutedEventArgs e)
+    {
+        var about = AboutInfoProvider.GetCurrent();
+        var openRepository = UpdateDialog.ShowConfirmation(
+            this,
+            "About Custodian",
+            $"Version {about.Version}\n\nCustodian is a local-first disk usage analyzer for Windows.\n\n{about.RepositoryUrl}",
+            "Open GitHub",
+            "Close",
+            subtitle: "Custodian Disk Analyzer");
+        if (!openRepository)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(about.RepositoryUrl)
+            {
+                UseShellExecute = true
+            });
+            UpdateFooterStatus("About", "Opened the Custodian GitHub repository in your browser.");
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError("Open GitHub failed", ex);
+        }
     }
 }
