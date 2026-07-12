@@ -511,24 +511,27 @@ public partial class MainWindow : Window
     // ============================================================
     private void InstallKeyBindings()
     {
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => _ = StartScanAsync()), new KeyGesture(Key.F5)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => StopScan()), new KeyGesture(Key.Escape)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => OpenScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.O, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => SaveScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.S, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => ExportCsv_Click(this, new RoutedEventArgs())), new KeyGesture(Key.E, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { PathBox.Focus(); (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) as WpfTextBox)?.SelectAll(); }), new KeyGesture(Key.L, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { FilterBox.Focus(); FilterBox.SelectAll(); }), new KeyGesture(Key.F, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { JumpBox.Focus(); JumpBox.IsDropDownOpen = true; }), new KeyGesture(Key.K, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => { ThemeManager.Toggle(); ScheduleSettingsSave(); }), new KeyGesture(Key.T, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => ShowShortcuts()), new KeyGesture(Key.OemQuestion, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoBack()), new KeyGesture(Key.Left, ModifierKeys.Alt)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoForward()), new KeyGesture(Key.Right, ModifierKeys.Alt)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(_ => GoUp()), new KeyGesture(Key.Up, ModifierKeys.Alt)));
+        RelayCommand Shortcut(Action<object?> execute)
+            => new(execute, () => !_updateInteractionShield.IsActive);
+
+        InputBindings.Add(new KeyBinding(Shortcut(_ => _ = StartScanAsync()), new KeyGesture(Key.F5)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => StopScan()), new KeyGesture(Key.Escape)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => OpenScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.O, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => SaveScan_Click(this, new RoutedEventArgs())), new KeyGesture(Key.S, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => ExportCsv_Click(this, new RoutedEventArgs())), new KeyGesture(Key.E, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { PathBox.Focus(); (PathBox.Template?.FindName("PART_EditableTextBox", PathBox) as WpfTextBox)?.SelectAll(); }), new KeyGesture(Key.L, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { FilterBox.Focus(); FilterBox.SelectAll(); }), new KeyGesture(Key.F, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { JumpBox.Focus(); JumpBox.IsDropDownOpen = true; }), new KeyGesture(Key.K, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => { ThemeManager.Toggle(); ScheduleSettingsSave(); }), new KeyGesture(Key.T, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => ShowShortcuts()), new KeyGesture(Key.OemQuestion, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => GoBack()), new KeyGesture(Key.Left, ModifierKeys.Alt)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => GoForward()), new KeyGesture(Key.Right, ModifierKeys.Alt)));
+        InputBindings.Add(new KeyBinding(Shortcut(_ => GoUp()), new KeyGesture(Key.Up, ModifierKeys.Alt)));
     }
 
-    private sealed class RelayCommand(Action<object?> execute) : ICommand
+    private sealed class RelayCommand(Action<object?> execute, Func<bool> canExecute) : ICommand
     {
-        public bool CanExecute(object? parameter) => true;
+        public bool CanExecute(object? parameter) => canExecute();
         public void Execute(object? parameter) => execute(parameter);
 #pragma warning disable CS0067
         public event EventHandler? CanExecuteChanged;
