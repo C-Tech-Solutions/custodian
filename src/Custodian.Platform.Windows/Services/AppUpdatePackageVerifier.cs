@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
@@ -163,7 +164,31 @@ internal static class UpdateSourceOverridePolicy
 internal static class UpdatePackageSignatureVerifier
 {
     internal const string TrustedSignerName = "C-Tech Solutions LLC";
+    internal const string MicrosoftSignerOrganization = "Microsoft Corporation";
+    internal const string JetBrainsSignerOrganization = "JetBrains s.r.o.";
+    internal const int MaximumArchiveEntries = 4_096;
+    internal const int MaximumPeEntries = 2_048;
+    internal const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
+    internal const long MaximumArchiveUncompressedBytes = 768L * 1024 * 1024;
+    internal const string JetBrainsAnnotationsPath = "lib/app/tui/JetBrains.Annotations.dll";
     private static readonly string[] PackagePeExtensions = [".dll", ".exe"];
+    private static readonly IReadOnlyDictionary<string, MicrosoftFileIdentityException> MicrosoftFileIdentityExceptions =
+        new Dictionary<string, MicrosoftFileIdentityException>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Accessibility.dll"] = new("Accessibility-version.dll"),
+            ["clrgcexp.dll"] = new("clrgc.dll"),
+            ["D3DCompiler_47_cor3.dll"] = new("d3dcompiler_47.dll"),
+            ["DirectWriteForwarder.dll"] = new("DirectWriteForwarder", RequireMicrosoftCompanyName: false),
+            ["hostfxr.dll"] = new(".NET Host Resolver -"),
+            ["hostpolicy.dll"] = new(".NET Host Policy -"),
+            ["PenImc_cor3.dll"] = new("PenImc", RequireMicrosoftCompanyName: false),
+            ["PresentationNative_cor3.dll"] = new("PresentationNative", RequireMicrosoftCompanyName: false),
+            ["System.Diagnostics.EventLog.Messages.dll"] = new(null, RequireMicrosoftCompanyName: false),
+            ["System.IO.Compression.Native.dll"] = new("System.IO.Compression.Native"),
+            ["System.Printing.dll"] = new("System.Printing", RequireMicrosoftCompanyName: false),
+            ["vcruntime140_cor3.dll"] = new("vcruntime140.dll"),
+            ["wpfgfx_cor3.dll"] = new("wpfgfx", RequireMicrosoftCompanyName: false)
+        };
 
     public static UpdatePackageSignatureVerificationResult VerifyPackage(
         string packagePath,
@@ -177,10 +202,16 @@ internal static class UpdatePackageSignatureVerifier
         }
 
         using var archive = ZipFile.OpenRead(packagePath);
+        var archiveValidation = ValidateArchiveMetadata(
+            archive.Entries.Select(entry => new UpdatePackageArchiveEntryMetadata(
+                entry.FullName,
+                entry.Length,
+                entry.CompressedLength)));
         var verifiedFiles = new List<string>();
         var verifiedCustodianFiles = 0;
-        foreach (var entry in archive.Entries.Where(IsPackagePeFile))
+        foreach (var validatedEntry in archiveValidation.Entries.Where(entry => entry.IsPeFile))
         {
+            var entry = archive.Entries[validatedEntry.Index];
             var tempPath = ExtractToTemporaryFile(entry);
             try
             {
@@ -191,15 +222,15 @@ internal static class UpdatePackageSignatureVerifier
                         $"Update package file '{entry.FullName}' is not trusted: {result.FailureReason ?? "signature verification failed"}.");
                 }
 
-                if (IsCustodianOwnedPeFile(entry) &&
-                    !IsTrustedSigner(result.SignerSubject, result.SignerSimpleName))
+                var publisher = AuthorizePublisher(validatedEntry.NormalizedPath, result);
+                if (publisher == AuthorizedPackagePublisher.None)
                 {
                     throw new InvalidOperationException(
-                        $"Update package file '{entry.FullName}' was signed by '{result.SignerSubject ?? result.SignerSimpleName ?? "unknown"}', not '{TrustedSignerName}'.");
+                        $"Update package file '{entry.FullName}' was signed by '{result.SignerSubject ?? result.SignerSimpleName ?? "unknown"}' but is not authorized by Custodian's update publisher policy.");
                 }
 
                 verifiedFiles.Add(entry.FullName);
-                if (IsCustodianOwnedPeFile(entry))
+                if (publisher == AuthorizedPackagePublisher.Custodian)
                 {
                     verifiedCustodianFiles++;
                 }
@@ -218,39 +249,209 @@ internal static class UpdatePackageSignatureVerifier
         return new UpdatePackageSignatureVerificationResult(verifiedFiles);
     }
 
-    internal static bool IsTrustedSigner(string? subject, string? simpleName)
+    internal static bool IsTrustedSigner(string? subject)
+        => DistinguishedNameContains(subject, "O", TrustedSignerName);
+
+    internal static UpdatePackageArchiveValidationResult ValidateArchiveMetadata(
+        IEnumerable<UpdatePackageArchiveEntryMetadata> metadata)
     {
-        if (string.Equals(simpleName, TrustedSignerName, StringComparison.OrdinalIgnoreCase))
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        var entries = new List<ValidatedPackageArchiveEntry>();
+        var normalizedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var totalUncompressedBytes = 0L;
+        var peCount = 0;
+        var index = 0;
+
+        foreach (var entry in metadata)
+        {
+            if (index >= MaximumArchiveEntries)
+            {
+                throw new InvalidOperationException($"The update package contains more than {MaximumArchiveEntries:n0} archive entries.");
+            }
+
+            if (entry.UncompressedLength < 0 || entry.CompressedLength < 0)
+            {
+                throw new InvalidOperationException($"Update package entry '{entry.FullName}' has invalid size metadata.");
+            }
+
+            var (normalizedPath, isDirectory) = NormalizeArchivePath(entry.FullName);
+            if (!normalizedPaths.Add(normalizedPath))
+            {
+                throw new InvalidOperationException($"The update package contains a duplicate normalized path: '{entry.FullName}'.");
+            }
+
+            if (isDirectory && entry.UncompressedLength != 0)
+            {
+                throw new InvalidOperationException($"Update package directory entry '{entry.FullName}' contains file data.");
+            }
+
+            if (entry.UncompressedLength > MaximumSingleEntryBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Update package entry '{entry.FullName}' exceeds the {MaximumSingleEntryBytes / 1024 / 1024:n0} MiB per-entry limit.");
+            }
+
+            try
+            {
+                totalUncompressedBytes = checked(totalUncompressedBytes + entry.UncompressedLength);
+            }
+            catch (OverflowException ex)
+            {
+                throw new InvalidOperationException("The update package has invalid aggregate size metadata.", ex);
+            }
+
+            if (totalUncompressedBytes > MaximumArchiveUncompressedBytes)
+            {
+                throw new InvalidOperationException(
+                    $"The update package exceeds the {MaximumArchiveUncompressedBytes / 1024 / 1024:n0} MiB total uncompressed-size limit.");
+            }
+
+            var isPeFile = !isDirectory && IsPackagePeFile(normalizedPath);
+            if (isPeFile && ++peCount > MaximumPeEntries)
+            {
+                throw new InvalidOperationException($"The update package contains more than {MaximumPeEntries:n0} executable files.");
+            }
+
+            entries.Add(new ValidatedPackageArchiveEntry(index, normalizedPath, isPeFile));
+            index++;
+        }
+
+        return new UpdatePackageArchiveValidationResult(entries, totalUncompressedBytes, peCount);
+    }
+
+    private static AuthorizedPackagePublisher AuthorizePublisher(
+        string normalizedPath,
+        AuthenticodeSignatureResult signature)
+    {
+        if (IsTrustedSigner(signature.SignerSubject))
+        {
+            return AuthorizedPackagePublisher.Custodian;
+        }
+
+        var fileName = GetArchiveFileName(normalizedPath);
+        if (IsApprovedMicrosoftPath(normalizedPath) &&
+            SignerOrganizationMatches(signature, MicrosoftSignerOrganization) &&
+            MicrosoftFileIdentityMatches(fileName, signature))
+        {
+            return AuthorizedPackagePublisher.Microsoft;
+        }
+
+        if (string.Equals(normalizedPath, JetBrainsAnnotationsPath, StringComparison.OrdinalIgnoreCase) &&
+            SignerOrganizationMatches(signature, JetBrainsSignerOrganization) &&
+            string.Equals(signature.OriginalFileName, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return AuthorizedPackagePublisher.JetBrains;
+        }
+
+        return AuthorizedPackagePublisher.None;
+    }
+
+    private static bool IsApprovedMicrosoftPath(string normalizedPath)
+        => normalizedPath.StartsWith("lib/app/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool MicrosoftFileIdentityMatches(string fileName, AuthenticodeSignatureResult signature)
+    {
+        if (string.Equals(signature.CompanyName, MicrosoftSignerOrganization, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(signature.OriginalFileName, fileName, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        return DistinguishedNameContains(subject, "CN", TrustedSignerName) ||
-            DistinguishedNameContains(subject, "O", TrustedSignerName);
-    }
-
-    private static bool IsPackagePeFile(ZipArchiveEntry entry)
-    {
-        var fileName = Path.GetFileName(entry.FullName);
-        if (string.IsNullOrWhiteSpace(fileName))
+        var identityException = MicrosoftFileIdentityExceptions.GetValueOrDefault(fileName);
+        if (identityException is null &&
+            fileName.StartsWith("mscordaccore_amd64_amd64_", StringComparison.OrdinalIgnoreCase) &&
+            fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            identityException = new MicrosoftFileIdentityException("mscordaccore.dll");
         }
 
-        var extension = Path.GetExtension(fileName);
+        return identityException is not null &&
+            string.Equals(signature.OriginalFileName, identityException.OriginalFileName, StringComparison.OrdinalIgnoreCase) &&
+            (!identityException.RequireMicrosoftCompanyName ||
+             string.Equals(signature.CompanyName, MicrosoftSignerOrganization, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool SignerOrganizationMatches(AuthenticodeSignatureResult signature, string expected)
+        => string.Equals(signature.SignerOrganization, expected, StringComparison.OrdinalIgnoreCase) ||
+           DistinguishedNameContains(signature.SignerSubject, "O", expected);
+
+    private static bool IsPackagePeFile(string normalizedPath)
+    {
+        var extension = Path.GetExtension(GetArchiveFileName(normalizedPath));
         return PackagePeExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool IsCustodianOwnedPeFile(ZipArchiveEntry entry)
-        => Path.GetFileName(entry.FullName).StartsWith("Custodian.", StringComparison.OrdinalIgnoreCase);
+    private static (string NormalizedPath, bool IsDirectory) NormalizeArchivePath(string fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName) || fullName.Contains('\0'))
+        {
+            throw new InvalidOperationException("The update package contains an invalid empty archive path.");
+        }
+
+        var path = fullName.Replace('\\', '/');
+        var isDirectory = path.EndsWith("/", StringComparison.Ordinal);
+        path = path.TrimEnd('/');
+        if (path.Length == 0 || path.StartsWith("/", StringComparison.Ordinal) || path.Contains(':'))
+        {
+            throw new InvalidOperationException($"The update package contains an unsafe archive path: '{fullName}'.");
+        }
+
+        var segments = path.Split('/');
+        if (segments.Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."))
+        {
+            throw new InvalidOperationException($"The update package contains an unsafe archive path: '{fullName}'.");
+        }
+
+        return (string.Join('/', segments), isDirectory);
+    }
+
+    private static string GetArchiveFileName(string normalizedPath)
+    {
+        var separator = normalizedPath.LastIndexOf('/');
+        return separator >= 0 ? normalizedPath[(separator + 1)..] : normalizedPath;
+    }
 
     private static string ExtractToTemporaryFile(ZipArchiveEntry entry)
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), "custodian-update-verify-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
         var tempPath = Path.Combine(tempDirectory, Path.GetFileName(entry.FullName));
-        entry.ExtractToFile(tempPath);
-        return tempPath;
+        try
+        {
+            using var input = entry.Open();
+            using var output = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            var buffer = new byte[128 * 1024];
+            var totalBytes = 0L;
+            while (true)
+            {
+                var read = input.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalBytes = checked(totalBytes + read);
+                if (totalBytes > entry.Length || totalBytes > MaximumSingleEntryBytes)
+                {
+                    throw new InvalidOperationException($"Update package entry '{entry.FullName}' expanded beyond its declared size.");
+                }
+
+                output.Write(buffer, 0, read);
+            }
+
+            if (totalBytes != entry.Length)
+            {
+                throw new InvalidOperationException($"Update package entry '{entry.FullName}' did not match its declared size.");
+            }
+
+            return tempPath;
+        }
+        catch
+        {
+            TryDelete(tempPath);
+            throw;
+        }
     }
 
     private static bool DistinguishedNameContains(string? subject, string attributeName, string expectedValue)
@@ -260,17 +461,20 @@ internal static class UpdatePackageSignatureVerifier
             return false;
         }
 
-        var prefix = attributeName + "=";
-        foreach (var part in subject.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        try
         {
-            if (part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(part[prefix.Length..].Trim(), expectedValue, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            var distinguishedName = new X500DistinguishedName(subject);
+            var decoded = distinguishedName.Decode(X500DistinguishedNameFlags.UseNewLines);
+            var prefix = attributeName + "=";
+            return decoded
+                .Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Any(part => part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(part[prefix.Length..].Trim(), expectedValue, StringComparison.OrdinalIgnoreCase));
         }
-
-        return false;
+        catch (CryptographicException)
+        {
+            return false;
+        }
     }
 
     private static void TryDelete(string path)
@@ -297,6 +501,30 @@ internal static class UpdatePackageSignatureVerifier
 
 internal sealed record UpdatePackageSignatureVerificationResult(IReadOnlyList<string> VerifiedFiles);
 
+internal sealed record UpdatePackageArchiveEntryMetadata(
+    string FullName,
+    long UncompressedLength,
+    long CompressedLength);
+
+internal sealed record ValidatedPackageArchiveEntry(int Index, string NormalizedPath, bool IsPeFile);
+
+internal sealed record UpdatePackageArchiveValidationResult(
+    IReadOnlyList<ValidatedPackageArchiveEntry> Entries,
+    long TotalUncompressedBytes,
+    int PeCount);
+
+internal enum AuthorizedPackagePublisher
+{
+    None,
+    Custodian,
+    Microsoft,
+    JetBrains
+}
+
+internal sealed record MicrosoftFileIdentityException(
+    string? OriginalFileName,
+    bool RequireMicrosoftCompanyName = true);
+
 internal interface IAuthenticodeSignatureVerifier
 {
     AuthenticodeSignatureResult Verify(string filePath);
@@ -306,10 +534,19 @@ internal sealed record AuthenticodeSignatureResult(
     bool IsTrusted,
     string? SignerSubject = null,
     string? SignerSimpleName = null,
+    string? SignerOrganization = null,
+    string? CompanyName = null,
+    string? OriginalFileName = null,
     string? FailureReason = null);
+
+internal sealed record WintrustVerificationPolicy(uint RevocationChecks, uint ProviderFlags);
 
 internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignatureVerifier
 {
+    internal static WintrustVerificationPolicy VerificationPolicy { get; } = new(
+        (uint)WintrustRevocationChecks.WholeChain,
+        (uint)WintrustProvFlags.RevocationCheckChainExcludeRoot);
+
     public AuthenticodeSignatureResult Verify(string filePath)
     {
         var trustResult = WinVerifyTrust(filePath);
@@ -324,15 +561,29 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
             using var signedCertificate = X509Certificate.CreateFromSignedFile(filePath);
             using var certificate = new X509Certificate2(signedCertificate);
 #pragma warning restore SYSLIB0057
+            var versionInfo = FileVersionInfo.GetVersionInfo(filePath);
             return new AuthenticodeSignatureResult(
                 true,
                 certificate.Subject,
-                certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false));
+                certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false),
+                GetDistinguishedNameAttribute(certificate.SubjectName, "O"),
+                versionInfo.CompanyName,
+                versionInfo.OriginalFilename);
         }
         catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
         {
             return new AuthenticodeSignatureResult(false, FailureReason: ex.Message);
         }
+    }
+
+    private static string? GetDistinguishedNameAttribute(X500DistinguishedName subject, string attributeName)
+    {
+        var prefix = attributeName + "=";
+        return subject
+            .Decode(X500DistinguishedNameFlags.UseNewLines)
+            .Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(part => part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..]
+            .Trim();
     }
 
     [SuppressMessage("Interoperability", "SYSLIB1054:Use LibraryImportAttribute instead of DllImportAttribute", Justification = "WINTRUST_DATA uses mutable class fields and is simpler with DllImport here.")]
@@ -381,7 +632,7 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
 
     private enum WintrustRevocationChecks : uint
     {
-        None = 0
+        WholeChain = 1
     }
 
     private enum WintrustStateAction : uint
@@ -394,7 +645,7 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
     [Flags]
     private enum WintrustProvFlags : uint
     {
-        Safer = 0x00000100
+        RevocationCheckChainExcludeRoot = 0x00000080
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -437,13 +688,13 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         public IntPtr PolicyCallbackData = IntPtr.Zero;
         public IntPtr SipClientData = IntPtr.Zero;
         public WintrustDataChoice UiChoice = WintrustDataChoice.None;
-        public WintrustRevocationChecks RevocationChecks = WintrustRevocationChecks.None;
+        public WintrustRevocationChecks RevocationChecks = WintrustRevocationChecks.WholeChain;
         public WintrustUnionChoice UnionChoice;
         public IntPtr FileInfo;
         public WintrustStateAction StateAction;
         public IntPtr StateData = IntPtr.Zero;
         public IntPtr UrlReference = IntPtr.Zero;
-        public WintrustProvFlags ProvFlags = WintrustProvFlags.Safer;
+        public WintrustProvFlags ProvFlags = WintrustProvFlags.RevocationCheckChainExcludeRoot;
         public uint UiContext = 0;
 
         public void Dispose()

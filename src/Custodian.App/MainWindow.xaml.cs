@@ -2555,6 +2555,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (CurrentScanLoadedFromScanFile())
+        {
+            ShowToast(DetailSelectionActionService.ImportedScanFileOperationsMessage);
+            return;
+        }
+
         var selectedRows = SelectedDetailRows().ToList();
         var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);
         if (selectedRows.Count == 0 || paths.Count == 0)
@@ -2767,6 +2773,7 @@ public partial class MainWindow : Window
             mode,
             selectedRows,
             CurrentScanIsPortable(),
+            CurrentScanLoadedFromScanFile(),
             _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
 
         if (!command.CanExecute)
@@ -2821,6 +2828,12 @@ public partial class MainWindow : Window
         string? destinationFolder,
         IReadOnlyCollection<FileSystemEntry> sourceEntries)
     {
+        if (!_isRecycleBinViewActive && CurrentScanLoadedFromScanFile())
+        {
+            ShowToast(DetailSelectionActionService.ImportedScanFileOperationsMessage);
+            return;
+        }
+
         var originatingScan = _isRecycleBinViewActive ? null : _currentScan;
         var cts = new CancellationTokenSource();
         _activeFileOperationCts = cts;
@@ -4857,6 +4870,7 @@ public partial class MainWindow : Window
         var state = DetailSelectionActionService.Build(
             rows,
             CurrentScanIsPortable(),
+            CurrentScanLoadedFromScanFile(),
             allRowsUseFileSystemPaths,
             _activeScan is not null || _activePortableCopy is not null || _activeFileOperation);
 

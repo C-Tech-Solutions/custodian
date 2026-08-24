@@ -12,6 +12,7 @@ public sealed class DetailSelectionActionServiceTests
         var state = DetailSelectionActionService.Build(
             [],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: false,
             isBusy: false);
 
@@ -33,6 +34,7 @@ public sealed class DetailSelectionActionServiceTests
         var state = DetailSelectionActionService.Build(
             [Row(@"C:\Temp\file.txt")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: true,
             isBusy: false);
 
@@ -57,6 +59,7 @@ public sealed class DetailSelectionActionServiceTests
         var state = DetailSelectionActionService.Build(
             [Row(@"C:\Temp\a.txt"), Row(@"C:\Temp\b.txt")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: true,
             isBusy: false);
 
@@ -78,6 +81,7 @@ public sealed class DetailSelectionActionServiceTests
                 Row("Pixel/Internal shared storage/Download/file.pdf", portableObjectId: "file-id")
             ],
             isPortableScan: true,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: false,
             isBusy: false);
 
@@ -98,6 +102,7 @@ public sealed class DetailSelectionActionServiceTests
         var state = DetailSelectionActionService.Build(
             [Row(".jpg")],
             isPortableScan: true,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: false,
             isBusy: false);
 
@@ -118,6 +123,7 @@ public sealed class DetailSelectionActionServiceTests
         var state = DetailSelectionActionService.Build(
             [Row(".zip")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: false,
             isBusy: false);
 
@@ -157,6 +163,7 @@ public sealed class DetailSelectionActionServiceTests
         var state = DetailSelectionActionService.Build(
             [Row(@"C:\Temp\file.txt")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             allSelectedRowsUseFileSystemPaths: true,
             isBusy: true);
 
@@ -169,6 +176,31 @@ public sealed class DetailSelectionActionServiceTests
         Assert.True(state.CanCopyPath);
         Assert.True(state.CanCopyRows);
         Assert.True(state.CanExport);
+    }
+
+    [Fact]
+    public void ImportedScanKeepsReadOnlyActionsAndBlocksEveryFileOperation()
+    {
+        var state = DetailSelectionActionService.Build(
+            [Row(@"C:\Temp\file.txt")],
+            isPortableScan: false,
+            isLoadedFromScanFile: true,
+            allSelectedRowsUseFileSystemPaths: true,
+            isBusy: false);
+
+        Assert.True(state.CanOpen);
+        Assert.True(state.CanReveal);
+        Assert.False(state.CanCopy);
+        Assert.False(state.CanMove);
+        Assert.False(state.CanDelete);
+        Assert.False(state.CanPermanentDelete);
+        Assert.True(state.CanCopyPath);
+        Assert.True(state.CanCopyRows);
+        Assert.True(state.CanExport);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, state.CopyToolTip);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, state.MoveToolTip);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, state.DeleteToolTip);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, state.PermanentDeleteToolTip);
     }
 
     private static DetailRow Row(
