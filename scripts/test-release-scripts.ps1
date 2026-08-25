@@ -301,7 +301,8 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         $_ -notmatch '^\s*#' -and (
             $_ -match '^\s*\?(?:\s|$)' -or
             $_ -match '^\s*-\s+\?(?:\s|$)' -or
-            $_ -match '^\s*(?:-\s*)?!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
+            $_ -match '^\s*(?:-\s*)?!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)' -or
+            $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
         )
     }).Count -ne 0) {
         throw "Release workflow must not use explicit or tagged YAML mapping keys."
@@ -646,6 +647,17 @@ foreach ($multilineQuotedScalarFixture in @(
             -RecoveryJobLines $multilineQuotedScalarFixture
     } "must not use quoted YAML mapping keys or values"
 }
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            '    name: !!str "',
+            "      - name: Fake trusted action",
+            "        uses: actions/checkout@trusted",
+            '    "'
+        )
+} "must not use explicit or tagged YAML mapping keys"
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
         -WorkflowLines @(
