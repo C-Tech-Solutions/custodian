@@ -488,6 +488,7 @@ foreach ($recoveryContract in @(
     "recovery_source_sha",
     "recovery_draft_id",
     "validate-recovery:",
+    "validate-recovery-source:",
     "recover-draft:",
     "publish-recovered:",
     "assert-release-draft-recovery.ps1",
@@ -580,6 +581,7 @@ $checkoutContracts = @(
     @{ Lines = $releaseWorkflowLines; Job = "sign-and-draft"; Expected = "true" },
     @{ Lines = $releaseWorkflowLines; Job = "publish"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "validate-recovery"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "validate-recovery-source"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "recover-draft"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "publish-recovered"; Expected = "false" }
 )
@@ -651,6 +653,35 @@ $recoveryTokenAssignments = @($recoveryValidationJobLines | Where-Object { $_ -m
 if ($recoveryTokenAssignments.Count -ne 1 -or
     !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
     throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
+}
+if ($recoveryValidationJobLines -contains "      - name: Checkout exact release source") {
+    throw "The write-capable recovery job must not check out or execute the historical release source."
+}
+$recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
+$recoverySourcePermissionsStart = [Array]::IndexOf($recoverySourceValidationJobLines, "    permissions:")
+$recoverySourcePermissions = [Collections.Generic.List[string]]::new()
+for ($index = $recoverySourcePermissionsStart + 1; $index -lt $recoverySourceValidationJobLines.Count; $index++) {
+    $line = $recoverySourceValidationJobLines[$index]
+    if ($line -match '^    \S') {
+        break
+    }
+    if ($line -match '^      (?<entry>[^#].*\S)\s*$') {
+        $recoverySourcePermissions.Add($Matches.entry.Trim())
+    }
+}
+if ($recoverySourcePermissionsStart -lt 0 -or
+    $recoverySourcePermissions.Count -ne 1 -or
+    $recoverySourcePermissions[0] -cne "contents: read" -or
+    !($recoverySourceValidationJobLines -contains "      - name: Checkout exact release source") -or
+    @($recoverySourceValidationJobLines | Where-Object { $_ -match '^\s+GH_TOKEN:' }).Count -ne 0) {
+    throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
+}
+$recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
+$publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
+if (!($recoverySourceValidationJobLines -contains "    needs: validate-recovery") -or
+    !($recoverDraftJobLines -contains "    needs: validate-recovery-source") -or
+    !($publishRecoveredJobLines -contains "    needs: [validate-recovery-source, recover-draft]")) {
+    throw "Recovery signing and publication must depend on successful read-only source validation."
 }
 
 foreach ($auditContract in @("--no-restore", "NU1900", "NU1905")) {
