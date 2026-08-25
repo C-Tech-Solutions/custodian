@@ -127,7 +127,19 @@ function Get-GitHubCliTokenAssignments {
     )
 
     return @($WorkflowLines | Where-Object {
-        $_ -match '(?<![A-Za-z0-9_])[''"]?(?:GH_TOKEN|GITHUB_TOKEN)[''"]?\s*:'
+        $_ -match '(?<![A-Za-z0-9_])(?:[''"]?(?:GH_TOKEN|GITHUB_TOKEN)[''"]?\s*:|\$env:(?:GH_TOKEN|GITHUB_TOKEN)\s*=|(?:GH_TOKEN|GITHUB_TOKEN)\s*=)'
+    })
+}
+
+function Get-ExplicitGitHubTokenReferences {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$WorkflowLines
+    )
+
+    return @($WorkflowLines | Where-Object {
+        $_ -match '\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}'
     })
 }
 
@@ -150,12 +162,18 @@ function Assert-SingleTrustedWorkflowCheckout {
     }
 }
 
-foreach ($tokenAlias in @("GH_TOKEN", "GITHUB_TOKEN")) {
-    foreach ($indent in @("    ", "        ")) {
-        $flowStyleTokenFixture = @(("{0}env: {{ {1}: token }}" -f $indent, $tokenAlias))
-        if (@(Get-GitHubCliTokenAssignments -WorkflowLines $flowStyleTokenFixture).Count -ne 1) {
-            throw "Flow-style $tokenAlias assignments must be detected."
-        }
+foreach ($tokenAssignmentFixture in @(
+    '    env: { GH_TOKEN: token }',
+    '        env: { GITHUB_TOKEN: token }',
+    '        run: $env:GH_TOKEN = "${{ github.token }}"',
+    '        run: GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}'
+)) {
+    if (@(Get-GitHubCliTokenAssignments -WorkflowLines @($tokenAssignmentFixture)).Count -ne 1) {
+        throw "GitHub CLI token assignment fixture was not detected: $tokenAssignmentFixture"
+    }
+    if ($tokenAssignmentFixture -match '\$\{\{' -and
+        @(Get-ExplicitGitHubTokenReferences -WorkflowLines @($tokenAssignmentFixture)).Count -ne 1) {
+        throw "Explicit GitHub token reference fixture was not detected: $tokenAssignmentFixture"
     }
 }
 
@@ -748,7 +766,9 @@ $draftInspectionLines = @(Get-WorkflowStepLines `
     -JobLines $recoveryValidationJobLines `
     -StepName "Verify exact empty draft and annotated source tag")
 $recoveryTokenAssignments = @(Get-GitHubCliTokenAssignments -WorkflowLines $recoveryValidationJobLines)
+$recoveryTokenReferences = @(Get-ExplicitGitHubTokenReferences -WorkflowLines $recoveryValidationJobLines)
 if ($recoveryTokenAssignments.Count -ne 1 -or
+    $recoveryTokenReferences.Count -ne 1 -or
     !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
     throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
 }
@@ -757,7 +777,8 @@ $recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recovery
 if ($recoverySourcePermissions.Count -ne 1 -or
     $recoverySourcePermissions[0] -cne "contents: read" -or
     !($recoverySourceValidationJobLines -contains "      - name: Checkout exact release source") -or
-    @(Get-GitHubCliTokenAssignments -WorkflowLines $recoverySourceValidationJobLines).Count -ne 0) {
+    @(Get-GitHubCliTokenAssignments -WorkflowLines $recoverySourceValidationJobLines).Count -ne 0 -or
+    @(Get-ExplicitGitHubTokenReferences -WorkflowLines $recoverySourceValidationJobLines).Count -ne 0) {
     throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
 }
 $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
