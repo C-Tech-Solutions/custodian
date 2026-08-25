@@ -30,6 +30,7 @@ if ($peFiles.Count -eq 0) {
 }
 
 $catalogDirectory = Split-Path -Parent $catalog
+New-Item -ItemType Directory -Force -Path $catalogDirectory | Out-Null
 $unsignedPaths = [Collections.Generic.List[string]]::new()
 $preservedSignedCount = 0
 foreach ($file in $peFiles) {
