@@ -45,7 +45,9 @@ function Get-WorkflowRootEnvironmentLines {
 
     $environmentLines = [Collections.Generic.List[string]]::new()
     for ($index = $rootEnvironmentIndexes[0]; $index -lt $WorkflowLines.Count; $index++) {
-        if ($index -gt $rootEnvironmentIndexes[0] -and $WorkflowLines[$index] -match '^\S') {
+        if ($index -gt $rootEnvironmentIndexes[0] -and
+            $WorkflowLines[$index] -match '^\S' -and
+            $WorkflowLines[$index] -notmatch '^\s*(?:#|$)') {
             break
         }
         $environmentLines.Add($WorkflowLines[$index])
@@ -264,6 +266,7 @@ foreach ($compoundTokenReferenceFixture in @(
 $inheritedTokenWorkflowFixture = @(
     "name: Fixture",
     "env:",
+    "# inherited environment comment",
     '  GH_TOKEN: ${{ github.token }}',
     "jobs:",
     "  validate-recovery:",
