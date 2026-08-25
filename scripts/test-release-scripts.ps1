@@ -134,6 +134,10 @@ $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.g
 $releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
 $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
 $ciWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml"))
+$preflightScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "assert-release-preflight.ps1")
+if ($preflightScript -notmatch [regex]::Escape('\d{4}-\d{2}-\d{2}\r?$')) {
+    throw "Release preflight changelog validation must accept both LF and CRLF line endings."
+}
 $requiredActionPins = @(
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
