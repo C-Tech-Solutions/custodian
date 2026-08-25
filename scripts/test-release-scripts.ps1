@@ -44,7 +44,26 @@ function Get-WorkflowJobLines {
             break
         }
     }
-    return @($WorkflowLines[$start..($end - 1)])
+    $inheritedEnvironmentLines = [Collections.Generic.List[string]]::new()
+    $rootEnvironmentIndexes = [Collections.Generic.List[int]]::new()
+    for ($index = 0; $index -lt $WorkflowLines.Count; $index++) {
+        if ($WorkflowLines[$index] -ceq "env:") {
+            $rootEnvironmentIndexes.Add($index)
+        }
+    }
+    if ($rootEnvironmentIndexes.Count -gt 1) {
+        throw "Workflow must not contain duplicate root environment blocks."
+    }
+    if ($rootEnvironmentIndexes.Count -eq 1) {
+        for ($index = $rootEnvironmentIndexes[0]; $index -lt $WorkflowLines.Count; $index++) {
+            if ($index -gt $rootEnvironmentIndexes[0] -and $WorkflowLines[$index] -match '^\S') {
+                break
+            }
+            $inheritedEnvironmentLines.Add($WorkflowLines[$index])
+        }
+    }
+
+    return @(@($inheritedEnvironmentLines) + @($WorkflowLines[$start..($end - 1)]))
 }
 
 function Get-WorkflowStepLines {
@@ -139,8 +158,27 @@ function Get-ExplicitGitHubTokenReferences {
     )
 
     return @($WorkflowLines | Where-Object {
-        $_ -match '\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}'
+        $_ -match '\$\{\{.*?\b(?:github\.token|secrets\.GITHUB_TOKEN)\b.*?\}\}'
     })
+}
+
+function Assert-RecoveryTokenScope {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$EffectiveJobLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$DraftInspectionLines
+    )
+
+    $tokenAssignments = @(Get-GitHubCliTokenAssignments -WorkflowLines $EffectiveJobLines)
+    $tokenReferences = @(Get-ExplicitGitHubTokenReferences -WorkflowLines $EffectiveJobLines)
+    if ($tokenAssignments.Count -ne 1 -or
+        $tokenReferences.Count -ne 1 -or
+        !($DraftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
+        throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
+    }
 }
 
 function Assert-SingleTrustedWorkflowCheckout {
@@ -176,6 +214,37 @@ foreach ($tokenAssignmentFixture in @(
         throw "Explicit GitHub token reference fixture was not detected: $tokenAssignmentFixture"
     }
 }
+foreach ($compoundTokenReferenceFixture in @(
+    '        run: echo "${{ github.token || inputs.fallback }}"',
+    '        run: echo "${{ format(''{0}'', secrets.GITHUB_TOKEN) }}"'
+)) {
+    if (@(Get-ExplicitGitHubTokenReferences -WorkflowLines @($compoundTokenReferenceFixture)).Count -ne 1) {
+        throw "Compound GitHub token reference fixture was not detected: $compoundTokenReferenceFixture"
+    }
+}
+
+$inheritedTokenWorkflowFixture = @(
+    "name: Fixture",
+    "env:",
+    '  GH_TOKEN: ${{ github.token }}',
+    "jobs:",
+    "  validate-recovery:",
+    "    steps:",
+    "      - name: Verify exact empty draft and annotated source tag",
+    "        env:",
+    '          GH_TOKEN: ${{ github.token }}'
+)
+$inheritedTokenJobFixture = @(Get-WorkflowJobLines `
+    -WorkflowLines $inheritedTokenWorkflowFixture `
+    -JobName "validate-recovery")
+$inheritedTokenStepFixture = @(Get-WorkflowStepLines `
+    -JobLines $inheritedTokenJobFixture `
+    -StepName "Verify exact empty draft and annotated source tag")
+Assert-Throws {
+    Assert-RecoveryTokenScope `
+        -EffectiveJobLines $inheritedTokenJobFixture `
+        -DraftInspectionLines $inheritedTokenStepFixture
+} "only to the draft-inspection step"
 
 $trustedCheckoutFixture = @(
     "      - name: Checkout exact workflow SHA",
@@ -765,13 +834,9 @@ if ($recoveryPermissions.Count -ne 1 -or $recoveryPermissions[0] -cne "contents:
 $draftInspectionLines = @(Get-WorkflowStepLines `
     -JobLines $recoveryValidationJobLines `
     -StepName "Verify exact empty draft and annotated source tag")
-$recoveryTokenAssignments = @(Get-GitHubCliTokenAssignments -WorkflowLines $recoveryValidationJobLines)
-$recoveryTokenReferences = @(Get-ExplicitGitHubTokenReferences -WorkflowLines $recoveryValidationJobLines)
-if ($recoveryTokenAssignments.Count -ne 1 -or
-    $recoveryTokenReferences.Count -ne 1 -or
-    !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
-    throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
-}
+Assert-RecoveryTokenScope `
+    -EffectiveJobLines $recoveryValidationJobLines `
+    -DraftInspectionLines $draftInspectionLines
 $recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
 $recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recoverySourceValidationJobLines)
 if ($recoverySourcePermissions.Count -ne 1 -or
