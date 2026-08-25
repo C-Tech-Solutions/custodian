@@ -308,6 +308,7 @@ function Assert-SupportedRecoveryWorkflowSyntax {
 
     if (@($WorkflowLines | Where-Object {
         $_ -match '^      -\s*\{' -or
+        $_ -match '^        \s*\{' -or
         $_ -match '^\s*steps:\s*\['
     }).Count -ne 0) {
         throw "Release workflow must use canonical block-style steps."
@@ -542,6 +543,19 @@ Assert-Throws {
             "  validate-recovery:",
             "    steps:",
             "      - { uses: actions/checkout@untrusted }"
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  recover-draft:",
+            "    steps:",
+            "      -",
+            "        { uses: attacker/action@ref }"
         ) `
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
