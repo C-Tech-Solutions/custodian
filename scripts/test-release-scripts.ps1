@@ -302,6 +302,12 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }).Count -ne 0) {
         throw "Write-capable recovery scope must not use YAML block or folded scalars."
     }
+    if (@($effectiveRecoveryLines | Where-Object {
+        $_ -match '\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
+    }).Count -ne 0 -or
+        [string]::Join("`n", $effectiveRecoveryLines) -match "\\`n") {
+        throw "Write-capable recovery scope must not use YAML decoded escapes."
+    }
 
     $allowedContextLines = @(
         '          ref: ${{ github.sha }}',
@@ -570,6 +576,20 @@ Assert-Throws {
             '        run: echo "${{ toJSON(github) }}"'
         )
 } "outside the exact allowlist"
+foreach ($writeScopeEscapeFixture in @(
+    @('        env: { LEAK: "${{ git\u0068ub.token }}" }'),
+    @(
+        '        env: { LEAK: "${{ secr\',
+        '          ets.GITHUB_TOKEN }}" }'
+    )
+)) {
+    Assert-Throws {
+        Assert-SupportedRecoveryWorkflowSyntax `
+            -WorkflowLines @("name: Fixture") `
+            -RootEnvironmentLines @() `
+            -RecoveryJobLines $writeScopeEscapeFixture
+    } "must not use YAML decoded escapes"
+}
 
 $trustedCheckoutFixture = @(
     "      - name: Checkout exact workflow SHA",
