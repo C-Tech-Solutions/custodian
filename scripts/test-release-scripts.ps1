@@ -273,6 +273,14 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         [string[]]$RecoveryJobLines
     )
 
+    $allWorkflowLines = @($WorkflowLines + $RootEnvironmentLines + $RecoveryJobLines)
+    if (@($allWorkflowLines | Where-Object {
+        $_ -match '\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
+    }).Count -ne 0 -or
+        [string]::Join("`n", $allWorkflowLines) -match "\\`n") {
+        throw "Release workflow must not use YAML decoded escapes."
+    }
+
     if (@($WorkflowLines | Where-Object {
         $_ -match '^      -\s*\{' -or
         $_ -match '^\s*steps:\s*\['
@@ -289,7 +297,7 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         throw "Release workflow must use canonical bare uses keys without whitespace before the colon."
     }
 
-    if (@(@($WorkflowLines + $RootEnvironmentLines + $RecoveryJobLines) | Where-Object {
+    if (@($allWorkflowLines | Where-Object {
         $_ -notmatch '^\s*#' -and
         $_ -match '(?::\s*|^\s*-\s*)[&*][^\s\[\]{},]+'
     }).Count -ne 0) {
@@ -302,13 +310,6 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }).Count -ne 0) {
         throw "Write-capable recovery scope must not use YAML block or folded scalars."
     }
-    if (@($effectiveRecoveryLines | Where-Object {
-        $_ -match '\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
-    }).Count -ne 0 -or
-        [string]::Join("`n", $effectiveRecoveryLines) -match "\\`n") {
-        throw "Write-capable recovery scope must not use YAML decoded escapes."
-    }
-
     $allowedContextLines = @(
         '          ref: ${{ github.sha }}',
         '          GH_TOKEN: ${{ github.token }}'
@@ -539,6 +540,19 @@ foreach ($nonCanonicalUsesFixture in @(
             -RecoveryJobLines @()
     } "canonical bare uses keys"
 }
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  recover-draft:",
+            "    steps:",
+            "      - name: Encoded action key",
+            '        "u\u0073es": attacker/action@ref'
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "must not use YAML decoded escapes"
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
         -WorkflowLines @("name: Fixture") `
