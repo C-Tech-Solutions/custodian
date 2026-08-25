@@ -301,6 +301,11 @@ foreach ($requiredIndexField in @("PackageId", "FileName", "SHA1", "SHA256", "Si
         throw "Release index verification is missing '$requiredIndexField'."
     }
 }
+foreach ($portablePublisherContract in @("portableRootExecutables", "O=C-Tech Solutions LLC")) {
+    if (!$verifyAssetsScript.Contains($portablePublisherContract, [StringComparison]::Ordinal)) {
+        throw "Release asset verification is missing portable publisher contract '$portablePublisherContract'."
+    }
+}
 
 $checkoutContracts = @(
     @{ Lines = $ciWorkflowLines; Job = "build-test"; Expected = "false" },

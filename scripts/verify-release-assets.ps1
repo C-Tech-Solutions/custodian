@@ -89,6 +89,20 @@ try {
         }
     }
 
+    $portableRootExecutables = @($portablePeFiles | Where-Object {
+        $_.Extension -eq ".exe" -and
+        -not [IO.Path]::GetDirectoryName([IO.Path]::GetRelativePath($temporaryDirectory, $_.FullName))
+    })
+    if ($portableRootExecutables.Count -eq 0) {
+        throw "Portable release contains no Velopack root executables."
+    }
+    foreach ($file in $portableRootExecutables) {
+        $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+        if ($signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O=C-Tech Solutions LLC(?:,|$)') {
+            throw "Portable root executable '$($file.Name)' is not signed by C-Tech Solutions LLC."
+        }
+    }
+
     Write-Host "Verified $($portablePeFiles.Count) portable PE signatures."
 }
 finally {
