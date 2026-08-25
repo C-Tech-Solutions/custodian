@@ -158,7 +158,7 @@ function Get-ExplicitGitHubTokenReferences {
     )
 
     return @($WorkflowLines | Where-Object {
-        $_ -match '\$\{\{.*?\b(?:github\.token|secrets\.GITHUB_TOKEN)\b.*?\}\}'
+        $_ -match '\$\{\{.*?(?<![A-Za-z0-9_])(?:github\s*(?:\.\s*token|\[\s*[''"]token[''"]\s*\])|secrets\s*(?:\.\s*GITHUB_TOKEN|\[\s*[''"]GITHUB_TOKEN[''"]\s*\])).*?\}\}'
     })
 }
 
@@ -216,7 +216,9 @@ foreach ($tokenAssignmentFixture in @(
 }
 foreach ($compoundTokenReferenceFixture in @(
     '        run: echo "${{ github.token || inputs.fallback }}"',
-    '        run: echo "${{ format(''{0}'', secrets.GITHUB_TOKEN) }}"'
+    '        run: echo "${{ format(''{0}'', secrets.GITHUB_TOKEN) }}"',
+    '        run: echo "${{ github[''token''] }}"',
+    '        run: echo "${{ secrets[''GITHUB_TOKEN''] }}"'
 )) {
     if (@(Get-ExplicitGitHubTokenReferences -WorkflowLines @($compoundTokenReferenceFixture)).Count -ne 1) {
         throw "Compound GitHub token reference fixture was not detected: $compoundTokenReferenceFixture"
@@ -293,27 +295,52 @@ function Get-CheckoutPersistCredentials {
         [string[]]$JobLines
     )
 
-    $checkoutIndex = -1
+    $checkoutIndexes = [Collections.Generic.List[int]]::new()
     for ($index = 0; $index -lt $JobLines.Count; $index++) {
-        if ($JobLines[$index] -match '^        uses: actions/checkout@') {
-            $checkoutIndex = $index
-            break
+        if ($JobLines[$index] -match '^\s+(?:-\s+)?uses:\s+[''"]?actions/checkout@') {
+            $checkoutIndexes.Add($index)
         }
     }
-    if ($checkoutIndex -lt 0) {
+    if ($checkoutIndexes.Count -eq 0) {
         throw "Workflow job is missing its checkout step."
     }
 
-    for ($index = $checkoutIndex + 1; $index -lt $JobLines.Count; $index++) {
-        if ($JobLines[$index] -match '^      - name:') {
-            break
+    $persistenceValues = [Collections.Generic.List[string]]::new()
+    foreach ($checkoutIndex in $checkoutIndexes) {
+        $persistenceValue = $null
+        for ($index = $checkoutIndex + 1; $index -lt $JobLines.Count; $index++) {
+            if ($JobLines[$index] -match '^      -\s') {
+                break
+            }
+            if ($JobLines[$index] -match '^          persist-credentials:\s*(?<value>true|false)\s*$') {
+                $persistenceValue = $Matches.value
+                break
+            }
         }
-        if ($JobLines[$index] -match '^          persist-credentials:\s*(?<value>true|false)\s*$') {
-            return $Matches.value
+        if ($null -eq $persistenceValue) {
+            throw "Every workflow checkout must declare persist-credentials explicitly."
         }
+        $persistenceValues.Add($persistenceValue)
     }
-    throw "Workflow checkout does not declare persist-credentials explicitly."
+
+    $uniquePersistenceValues = @($persistenceValues | Select-Object -Unique)
+    if ($uniquePersistenceValues.Count -ne 1) {
+        throw "Workflow checkout persist-credentials values must be consistent."
+    }
+    return $uniquePersistenceValues[0]
 }
+
+Assert-Throws {
+    Get-CheckoutPersistCredentials -JobLines @(
+        "      - name: First checkout",
+        "        uses: actions/checkout@first",
+        "        with:",
+        "          persist-credentials: false",
+        "      - uses: actions/checkout@second",
+        "        with:",
+        "          persist-credentials: true"
+    )
+} "persist-credentials values must be consistent"
 
 Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $false -Sign $false -HasSigningOptions $false
 Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $false -Sign $false -HasSigningOptions $false
