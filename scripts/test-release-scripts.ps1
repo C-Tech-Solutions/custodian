@@ -208,6 +208,132 @@ foreach ($unsafeCleanupContract in @("attemptedAssetNames", "cleanupDraft.assets
     }
 }
 
+$recoveryTestRoot = Join-Path ([IO.Path]::GetTempPath()) "custodian-release-recovery-$([Guid]::NewGuid())"
+$recoveryOutput = Join-Path $recoveryTestRoot "artifacts\velopack"
+$recoveryNotes = Join-Path $recoveryTestRoot "docs\releases\1.5.5.md"
+$previousGhToken = $env:GH_TOKEN
+try {
+    New-Item -ItemType Directory -Force -Path $recoveryOutput, (Split-Path -Parent $recoveryNotes) | Out-Null
+    [IO.File]::WriteAllText($recoveryNotes, "Approved notes`n", [Text.UTF8Encoding]::new($false))
+    foreach ($assetName in $expectedRelease) {
+        [IO.File]::WriteAllText((Join-Path $recoveryOutput $assetName), "fixture-$assetName", [Text.UTF8Encoding]::new($false))
+    }
+
+    $global:recoveryMockUploadCount = 0
+    $global:recoveryMockConcurrentVisible = $false
+    $global:recoveryMockDeletedAssetIds = [Collections.Generic.List[Int64]]::new()
+    $sourceCommit = "54a5b4ce032c852f03db66e9802f92366cd22f1b"
+    $tagObject = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    $concurrentAssetId = [Int64]9001
+    $ownedAssetId = [Int64]1001
+    $concurrentAssetName = $expectedRelease[1]
+
+    function global:git {
+        $invocation = [string]::Join(' ', $args)
+        $global:LASTEXITCODE = 0
+        if ($invocation -like "*-C * ls-remote --tags origin refs/tags/1.5.5 refs/tags/1.5.5^{}") {
+            "$tagObject`trefs/tags/1.5.5"
+            "$sourceCommit`trefs/tags/1.5.5^{}"
+            return
+        }
+        if ($invocation -like "*-C * fetch --no-tags origin refs/tags/1.5.5") {
+            return
+        }
+        if ($invocation -like "*-C * cat-file -t $tagObject") {
+            "tag"
+            return
+        }
+        if ($invocation -like "*-C * cat-file -p $tagObject") {
+            "object $sourceCommit"
+            "type commit"
+            "tag 1.5.5"
+            "tagger github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> 1787650000 -0400"
+            return
+        }
+        throw "Unexpected mocked git invocation: $invocation"
+    }
+
+    function global:gh {
+        $invocation = [string]::Join(' ', $args)
+        $global:LASTEXITCODE = 0
+        [object[]]$releaseAssets = @()
+        if ($global:recoveryMockConcurrentVisible) {
+            $releaseAssets = @([ordered]@{ id = $concurrentAssetId; name = $concurrentAssetName })
+        }
+        $release = [ordered]@{
+            id = 376286670
+            tag_name = "1.5.5"
+            draft = $true
+            immutable = $false
+            prerelease = $false
+            name = "Custodian 1.5.5"
+            body = "Approved notes`n"
+            assets = $releaseAssets
+        }
+
+        if ($invocation -eq "api repos/C-Tech-Solutions/custodian/releases/376286670") {
+            ConvertTo-Json -InputObject $release -Depth 10 -Compress
+            return
+        }
+        if ($invocation -like "api repos/C-Tech-Solutions/custodian/releases?per_page=100 --paginate --slurp") {
+            $releaseJson = ConvertTo-Json -InputObject $release -Depth 10 -Compress
+            "[[$releaseJson]]"
+            return
+        }
+        if ($invocation -like "api --method POST *https://uploads.github.com/*") {
+            $global:recoveryMockUploadCount++
+            if ($global:recoveryMockUploadCount -eq 1) {
+                ConvertTo-Json -InputObject ([ordered]@{ id = $ownedAssetId; name = $expectedRelease[0] }) -Compress
+                return
+            }
+            $global:recoveryMockConcurrentVisible = $true
+            $global:LASTEXITCODE = 1
+            return
+        }
+        if ($invocation -like "api --method DELETE repos/C-Tech-Solutions/custodian/releases/assets/*") {
+            $assetId = [Int64]($invocation -replace '^.*releases/assets/', '')
+            $global:recoveryMockDeletedAssetIds.Add($assetId)
+            return
+        }
+        throw "Unexpected mocked gh invocation: $invocation"
+    }
+
+    $env:GH_TOKEN = "test-only-token"
+    $recoveryFailure = $null
+    try {
+        & (Join-Path $PSScriptRoot "resume-empty-release-draft.ps1") `
+            -Version "1.5.5" `
+            -ExpectedCommit $sourceCommit `
+            -DraftId 376286670 `
+            -SourceRepositoryRoot $recoveryTestRoot
+    }
+    catch {
+        $recoveryFailure = $_.Exception.Message
+    }
+    if ($recoveryFailure -notlike "*Upload outcome for '$concurrentAssetName' was not confirmed*") {
+        throw "Mocked concurrent upload did not fail through the expected path: '$recoveryFailure'."
+    }
+    if (!$global:recoveryMockConcurrentVisible -or
+        $global:recoveryMockDeletedAssetIds.Count -ne 1 -or
+        $global:recoveryMockDeletedAssetIds[0] -ne $ownedAssetId -or
+        $global:recoveryMockDeletedAssetIds.Contains($concurrentAssetId)) {
+        throw "Recovery cleanup did not preserve the concurrent same-named asset while deleting only its owned asset ID."
+    }
+}
+finally {
+    $env:GH_TOKEN = $previousGhToken
+    Remove-Item Function:\global:gh -ErrorAction SilentlyContinue
+    Remove-Item Function:\global:git -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $recoveryTestRoot) {
+        $resolvedRecoveryTestRoot = (Resolve-Path -LiteralPath $recoveryTestRoot).Path
+        $resolvedSystemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if (!$resolvedRecoveryTestRoot.StartsWith($resolvedSystemTemp + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe recovery test cleanup path: '$resolvedRecoveryTestRoot'."
+        }
+        Remove-Item -LiteralPath $resolvedRecoveryTestRoot -Recurse -Force
+    }
+}
+
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml")
 $releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
 $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
