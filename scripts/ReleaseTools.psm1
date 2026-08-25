@@ -127,6 +127,57 @@ function Get-CustodianGitHubReleasesByTag {
     return $matches.ToArray()
 }
 
+function Wait-CustodianGitHubReleaseByTag {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Repository,
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+        [ValidateRange(1, 30)]
+        [int]$Attempts = 10,
+        [ValidateRange(0, 30)]
+        [int]$DelaySeconds = 2
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $matches = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
+        if ($matches.Count -gt 1) {
+            throw "Multiple GitHub releases exist for '$Version'."
+        }
+        if ($matches.Count -eq 1) {
+            return $matches[0]
+        }
+        if ($attempt -lt $Attempts -and $DelaySeconds -gt 0) {
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+
+    return $null
+}
+
+function Assert-CustodianEmptyDraftRelease {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Release,
+        [Parameter(Mandatory = $true)]
+        [Int64]$DraftId,
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    if ([Int64]$Release.id -ne $DraftId -or $Release.tag_name -cne $Version) {
+        throw "Draft release '$DraftId' does not match tag '$Version'."
+    }
+    if (!$Release.draft -or $Release.immutable) {
+        throw "Release '$DraftId' is not a mutable draft."
+    }
+    if (@($Release.assets).Count -ne 0) {
+        throw "Draft release '$DraftId' is not empty; existing assets are never overwritten."
+    }
+}
+
 Export-ModuleMember -Function @(
     "Assert-CustodianPublishPhase",
     "Test-CustodianDatedChangelogEntry",
@@ -134,5 +185,7 @@ Export-ModuleMember -Function @(
     "Get-CustodianReleaseAssetNames",
     "Assert-CustodianReleaseAbsent",
     "New-CustodianDraftReleaseArguments",
-    "Get-CustodianGitHubReleasesByTag"
+    "Get-CustodianGitHubReleasesByTag",
+    "Wait-CustodianGitHubReleaseByTag",
+    "Assert-CustodianEmptyDraftRelease"
 )

@@ -105,6 +105,27 @@ if ([string]::Join('|', $actualRelease) -ne [string]::Join('|', $expectedRelease
 Assert-CustodianReleaseAbsent -ReleaseExists $false -Version "1.5.5"
 Assert-Throws { Assert-CustodianReleaseAbsent -ReleaseExists $true -Version "1.5.5" } "never overwritten"
 
+$emptyDraft = [pscustomobject]@{
+    id = 376286670
+    tag_name = "1.5.5"
+    draft = $true
+    immutable = $false
+    assets = @()
+}
+Assert-CustodianEmptyDraftRelease -Release $emptyDraft -DraftId 376286670 -Version "1.5.5"
+Assert-Throws { Assert-CustodianEmptyDraftRelease -Release $emptyDraft -DraftId 376286671 -Version "1.5.5" } "does not match"
+Assert-Throws { Assert-CustodianEmptyDraftRelease -Release $emptyDraft -DraftId 376286670 -Version "1.5.6" } "does not match"
+Assert-Throws {
+    Assert-CustodianEmptyDraftRelease -Release ([pscustomobject]@{
+        id = 376286670; tag_name = "1.5.5"; draft = $false; immutable = $true; assets = @()
+    }) -DraftId 376286670 -Version "1.5.5"
+} "not a mutable draft"
+Assert-Throws {
+    Assert-CustodianEmptyDraftRelease -Release ([pscustomobject]@{
+        id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; assets = @([pscustomobject]@{ name = "existing.exe" })
+    }) -DraftId 376286670 -Version "1.5.5"
+} "not empty"
+
 $secretMarker = "must-not-appear-in-process-arguments"
 $arguments = New-CustodianDraftReleaseArguments `
     -Repository "C-Tech-Solutions/custodian" `
@@ -128,6 +149,23 @@ if ($errors.Count -ne 0) {
 $parameterNames = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath)
 if ($parameterNames -contains "Token" -or $uploadScript -match '(?i)--token') {
     throw "Upload script exposes credentials through parameters or command arguments."
+}
+if (!$uploadScript.Contains("Wait-CustodianGitHubReleaseByTag", [StringComparison]::Ordinal)) {
+    throw "Draft creation does not tolerate GitHub release-list eventual consistency."
+}
+
+foreach ($recoveryScriptName in @("assert-release-draft-recovery.ps1", "resume-empty-release-draft.ps1")) {
+    $recoveryScriptPath = Join-Path $PSScriptRoot $recoveryScriptName
+    $recoveryTokens = $null
+    $recoveryErrors = $null
+    $recoveryScript = Get-Content -Raw -LiteralPath $recoveryScriptPath
+    [void][Management.Automation.Language.Parser]::ParseInput($recoveryScript, [ref]$recoveryTokens, [ref]$recoveryErrors)
+    if ($recoveryErrors.Count -ne 0) {
+        throw "Recovery script '$recoveryScriptName' has PowerShell parse errors: $($recoveryErrors.Message -join '; ')"
+    }
+    if ($recoveryScript -match '(?i)--token') {
+        throw "Recovery script '$recoveryScriptName' exposes a command-line token path."
+    }
 }
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml")
@@ -280,6 +318,20 @@ foreach ($resumeContract in @("resume_published", "RequireDraftOrPublishedImmuta
         throw "Release workflow is missing resumable publication contract '$resumeContract'."
     }
 }
+foreach ($recoveryContract in @(
+    "recovery_source_sha",
+    "recovery_draft_id",
+    "validate-recovery:",
+    "recover-draft:",
+    "publish-recovered:",
+    "assert-release-draft-recovery.ps1",
+    "resume-empty-release-draft.ps1",
+    "-AttestationSourceDigest `$env:WORKFLOW_SHA"
+)) {
+    if (!$releaseWorkflow.Contains($recoveryContract, [StringComparison]::Ordinal)) {
+        throw "Release workflow is missing protected empty-draft recovery contract '$recoveryContract'."
+    }
+}
 
 $publishGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "publish-github-release.ps1")
 if ($publishGitHubScript -notmatch '\$release\.draft' -or
@@ -360,7 +412,10 @@ $checkoutContracts = @(
     @{ Lines = $ciWorkflowLines; Job = "vulnerability-scan"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "validate"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "sign-and-draft"; Expected = "true" },
-    @{ Lines = $releaseWorkflowLines; Job = "publish"; Expected = "false" }
+    @{ Lines = $releaseWorkflowLines; Job = "publish"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "validate-recovery"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "recover-draft"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "publish-recovered"; Expected = "false" }
 )
 foreach ($contract in $checkoutContracts) {
     $jobLines = @(Get-WorkflowJobLines -WorkflowLines $contract.Lines -JobName $contract.Job)
