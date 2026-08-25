@@ -617,8 +617,21 @@ if ($recoveryPermissionsStart -lt 0 -or
 if ($recoveryValidationJobLines -contains '      GH_TOKEN: ${{ github.token }}') {
     throw "Recovery validation must not expose the write-capable token at job scope."
 }
-$recoveryStepTokens = @($recoveryValidationJobLines | Where-Object { $_ -ceq '          GH_TOKEN: ${{ github.token }}' })
-if ($recoveryStepTokens.Count -ne 1) {
+$draftInspectionStart = [Array]::IndexOf($recoveryValidationJobLines, "      - name: Verify exact empty draft and annotated source tag")
+if ($draftInspectionStart -lt 0) {
+    throw "Recovery validation is missing its exact draft-inspection step."
+}
+$draftInspectionEnd = $recoveryValidationJobLines.Count
+for ($index = $draftInspectionStart + 1; $index -lt $recoveryValidationJobLines.Count; $index++) {
+    if ($recoveryValidationJobLines[$index] -match '^      - name:') {
+        $draftInspectionEnd = $index
+        break
+    }
+}
+$draftInspectionLines = @($recoveryValidationJobLines[$draftInspectionStart..($draftInspectionEnd - 1)])
+$recoveryTokenAssignments = @($recoveryValidationJobLines | Where-Object { $_ -match '^\s+GH_TOKEN:' })
+if ($recoveryTokenAssignments.Count -ne 1 -or
+    !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
     throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
 }
 
