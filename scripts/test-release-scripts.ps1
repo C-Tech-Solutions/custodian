@@ -346,6 +346,24 @@ function Assert-NoCheckoutInputKeys {
     }
 }
 
+function Assert-ExactWorkflowStepLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$StepLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$ExpectedLines
+    )
+
+    $actual = @($StepLines | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+    $actualKey = [string]::Join("`n", $actual)
+    $expectedKey = [string]::Join("`n", $ExpectedLines)
+    if ($actualKey -cne $expectedKey) {
+        throw "Workflow step does not match the exact canonical line allowlist."
+    }
+}
+
 function Assert-SingleTrustedWorkflowCheckout {
     param(
         [Parameter(Mandatory = $true)]
@@ -614,6 +632,20 @@ foreach ($repositoryOverrideFixture in @(
             -ForbiddenKeys @("repository")
     } "forbidden input key"
 }
+Assert-Throws {
+    Assert-ExactWorkflowStepLines `
+        -StepLines @(
+            $trustedCheckoutFixture
+            "        with:"
+            "          persist-credentials: false"
+            '          "repo\u0073itory": attacker/repository'
+        ) `
+        -ExpectedLines @(
+            $trustedCheckoutFixture
+            "        with:"
+            "          persist-credentials: false"
+        )
+} "exact canonical line allowlist"
 
 function Get-CheckoutPersistCredentials {
     param(
@@ -1287,31 +1319,42 @@ Assert-ExactActionAllowlist `
 Assert-ExactActionAllowlist `
     -JobLines $publishRecoveredJobLines `
     -ExpectedActionLines @($checkoutAction, $checkoutAction, $setupDotnetAction)
+$expectedWorkflowCheckoutLines = @(
+    "      - name: Checkout exact recovery workflow SHA",
+    $checkoutAction,
+    "        with:",
+    '          ref: ${{ inputs.commit_sha }}',
+    "          fetch-depth: 0",
+    "          persist-credentials: false"
+)
 foreach ($workflowCheckoutLines in @(
     $signingWorkflowCheckoutLines,
     $publishingWorkflowCheckoutLines
 )) {
-    if (!($workflowCheckoutLines -contains $checkoutAction) -or
-        !($workflowCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}') -or
-        !($workflowCheckoutLines -contains "          fetch-depth: 0") -or
-        !($workflowCheckoutLines -contains "          persist-credentials: false")) {
-        throw "Recovery signing and publication must use the exact workflow checkout."
-    }
+    Assert-ExactWorkflowStepLines `
+        -StepLines $workflowCheckoutLines `
+        -ExpectedLines $expectedWorkflowCheckoutLines
     Assert-NoCheckoutInputKeys `
         -StepLines $workflowCheckoutLines `
         -ForbiddenKeys @("path", "repository")
 }
+$expectedSourceCheckoutLines = @(
+    "      - name: Checkout exact release source",
+    $checkoutAction,
+    "        with:",
+    '          ref: ${{ inputs.recovery_source_sha }}',
+    "          path: release-source",
+    "          fetch-depth: 0",
+    "          persist-credentials: false"
+)
 foreach ($sourceCheckoutLines in @(
     $validatedSourceCheckoutLines,
     $signingSourceCheckoutLines,
     $publishingSourceCheckoutLines
 )) {
-    if (!($sourceCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
-        !($sourceCheckoutLines -contains '          ref: ${{ inputs.recovery_source_sha }}') -or
-        !($sourceCheckoutLines -contains "          path: release-source") -or
-        !($sourceCheckoutLines -contains "          persist-credentials: false")) {
-        throw "Recovery source validation and signing must use the same exact source checkout."
-    }
+    Assert-ExactWorkflowStepLines `
+        -StepLines $sourceCheckoutLines `
+        -ExpectedLines $expectedSourceCheckoutLines
     Assert-NoCheckoutInputKeys `
         -StepLines $sourceCheckoutLines `
         -ForbiddenKeys @("repository")
