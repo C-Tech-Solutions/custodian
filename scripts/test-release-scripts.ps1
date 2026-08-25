@@ -305,6 +305,18 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }).Count -ne 0) {
         throw "Release workflow must not use explicit or tagged YAML mapping keys."
     }
+    if (@($WorkflowLines | Where-Object {
+        $_ -match '^ {1,5}-(?:\s|$)' -or
+        $_ -match '^ {7,}-(?:\s|$)'
+    }).Count -ne 0) {
+        throw "Release workflow sequence entries must use canonical six-space indentation."
+    }
+    if (@($WorkflowLines | Where-Object {
+        $_ -match ':\s*[>|][0-9+-]*\s*(?:#.*)?$' -and
+        $_ -cne "        run: |"
+    }).Count -ne 0) {
+        throw "Release workflow block scalars are allowed only for canonical run steps."
+    }
 
     if (@($WorkflowLines | Where-Object {
         $_ -match '^      -\s*(?:#.*)?$' -or
@@ -574,6 +586,31 @@ Assert-Throws {
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
 } "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  recover-draft:",
+            "    steps:",
+            "       - uses: attacker/action@ref"
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "canonical six-space indentation"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  recover-draft:",
+            "    name: |",
+            "      - name: Fake trusted action",
+            "        uses: actions/checkout@trusted"
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "allowed only for canonical run steps"
 foreach ($nonCanonicalUsesFixture in @(
     '        "uses": actions/checkout@untrusted',
     "        uses : actions/cache@untrusted"
