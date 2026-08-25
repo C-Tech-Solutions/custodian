@@ -191,6 +191,9 @@ function Assert-NoGitHubOrSecretsContextReferences {
     }).Count -ne 0) {
         throw "Historical release-source validation must not contain YAML Unicode escapes."
     }
+    if ($workflowText -match "\\`n") {
+        throw "Historical release-source validation must not contain YAML escaped line continuations."
+    }
 }
 
 function Assert-RecoveryTokenScope {
@@ -402,6 +405,12 @@ foreach ($escapedContextFixture in @(
         Assert-NoGitHubOrSecretsContextReferences -WorkflowLines @($escapedContextFixture)
     } "must not contain YAML Unicode escapes"
 }
+Assert-Throws {
+    Assert-NoGitHubOrSecretsContextReferences -WorkflowLines @(
+        '        env: { LEAK: "${{ toJSON(secr\',
+        '          ets) }}" }'
+    )
+} "must not contain YAML escaped line continuations"
 
 $inheritedTokenWorkflowFixture = @(
     "name: Fixture",
