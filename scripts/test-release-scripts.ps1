@@ -312,6 +312,12 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }).Count -ne 0) {
         throw "Release workflow sequence entries must use canonical six-space indentation."
     }
+    if (@($allWorkflowLines | Where-Object {
+        $_ -match '^\s*(?:-\s+)?(?:"[^"]*"|''[^'']*'')\s*:' -or
+        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*(?:"[^"]*$|''[^'']*$)'
+    }).Count -ne 0) {
+        throw "Release workflow must not use quoted YAML mapping keys or values."
+    }
     if (@($WorkflowLines | Where-Object {
         $_ -match ':\s*[>|][0-9+-]*\s*(?:#.*)?$' -and
         $_ -cne "        run: |"
@@ -612,8 +618,41 @@ Assert-Throws {
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
 } "allowed only for canonical run steps"
+foreach ($multilineQuotedScalarFixture in @(
+    @(
+        '    name: "',
+        "      - name: Fake trusted action",
+        "        uses: actions/checkout@trusted",
+        '    "'
+    ),
+    @(
+        "    name: '",
+        "      - name: Fake trusted action",
+        "        uses: actions/checkout@trusted",
+        "    '"
+    )
+)) {
+    Assert-Throws {
+        Assert-SupportedRecoveryWorkflowSyntax `
+            -WorkflowLines @("name: Fixture") `
+            -RootEnvironmentLines @() `
+            -RecoveryJobLines $multilineQuotedScalarFixture
+    } "must not use quoted YAML mapping keys or values"
+}
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  validate-recovery:",
+            "    steps:",
+            "      - name: Quoted action key",
+            '        "uses": actions/checkout@untrusted'
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "must not use quoted YAML mapping keys or values"
 foreach ($nonCanonicalUsesFixture in @(
-    '        "uses": actions/checkout@untrusted',
     "        uses : actions/cache@untrusted"
 )) {
     Assert-Throws {
