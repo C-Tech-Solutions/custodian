@@ -437,6 +437,9 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     if ([string]::Join("`n", $contextScanLines) -match '(?s)\$\{\{.*?(?<![A-Za-z0-9_])(?:github|secrets)(?![A-Za-z0-9_]).*?\}\}') {
         throw "Write-capable recovery scope contains a GitHub or secrets context outside the exact allowlist."
     }
+    if ($RootEnvironmentLines.Count -ne 0) {
+        throw "Release workflow must not define a root environment."
+    }
 }
 
 function Assert-ExpectedCheckoutCount {
@@ -930,6 +933,12 @@ foreach ($rootDefaultsFixture in @("defaults:", "defaults :")) {
             -RecoveryJobLines @()
     } "must not define root run defaults"
 }
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @("env:", "  PATH: attacker-controlled") `
+        -RecoveryJobLines @()
+} "must not define a root environment"
 
 $trustedCheckoutFixture = @(
     "      - name: Checkout exact workflow SHA",
