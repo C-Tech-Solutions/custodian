@@ -53,6 +53,7 @@ public sealed class UpdateSecurityTests
         var packagePath = CreatePackage(
             "lib/app/Custodian.App.exe",
             "lib/app/Accessibility.dll",
+            "lib/app/cli/createdump.exe",
             "lib/app/DirectWriteForwarder.dll",
             "lib/app/cli/mscordaccore_amd64_amd64_10.0.826.23019.dll",
             "lib/app/tui/JetBrains.Annotations.dll");
@@ -73,6 +74,13 @@ public sealed class UpdateSecurityTests
                         SignerOrganization: "Microsoft Corporation",
                         CompanyName: "Microsoft Corporation",
                         OriginalFileName: "Accessibility.dll"),
+                    ["createdump.exe"] = new(
+                        true,
+                        "CN=.NET, O=Microsoft Corporation, C=US",
+                        ".NET",
+                        SignerOrganization: "Microsoft Corporation",
+                        CompanyName: "Microsoft Corporation",
+                        OriginalFileName: "FX_VER_INTERNALNAME_STR"),
                     ["DirectWriteForwarder.dll"] = new(
                         true,
                         "CN=.NET, O=Microsoft Corporation, C=US",
@@ -99,6 +107,7 @@ public sealed class UpdateSecurityTests
                 [
                     "lib/app/Custodian.App.exe",
                     "lib/app/Accessibility.dll",
+                    "lib/app/cli/createdump.exe",
                     "lib/app/DirectWriteForwarder.dll",
                     "lib/app/cli/mscordaccore_amd64_amd64_10.0.826.23019.dll",
                     "lib/app/tui/JetBrains.Annotations.dll"

@@ -177,6 +177,7 @@ internal static class UpdatePackageSignatureVerifier
         {
             ["Accessibility.dll"] = new("Accessibility-version.dll"),
             ["clrgcexp.dll"] = new("clrgc.dll"),
+            ["createdump.exe"] = new("FX_VER_INTERNALNAME_STR"),
             ["D3DCompiler_47_cor3.dll"] = new("d3dcompiler_47.dll"),
             ["DirectWriteForwarder.dll"] = new("DirectWriteForwarder", RequireMicrosoftCompanyName: false),
             ["hostfxr.dll"] = new(".NET Host Resolver -"),
