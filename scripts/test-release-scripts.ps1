@@ -327,11 +327,12 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         throw "Release workflow block scalars are allowed only for canonical run steps."
     }
 
-    if (@($WorkflowLines | Where-Object {
+    if (@($allWorkflowLines | Where-Object {
         $_ -match '^      -\s*(?:#.*)?$' -or
         $_ -match '^      -\s*\{' -or
         $_ -match '^        \s*\{' -or
-        $_ -match '^\s*steps:\s*\['
+        $_ -match '^\s*steps:\s*\[' -or
+        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*\{'
     }).Count -ne 0) {
         throw "Release workflow must use canonical block-style steps."
     }
@@ -568,6 +569,17 @@ Assert-Throws {
         ) `
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
+} "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            '    env: { FAKE: "',
+            "      - name: Fake trusted action",
+            "        uses: actions/checkout@trusted",
+            '    " }'
+        )
 } "canonical block-style steps"
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
