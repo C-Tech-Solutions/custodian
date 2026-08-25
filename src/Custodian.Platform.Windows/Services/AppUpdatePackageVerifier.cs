@@ -202,6 +202,10 @@ internal static class UpdatePackageSignatureVerifier
             throw new ArgumentException("Package path is required.", nameof(packagePath));
         }
 
+        var packageSignatureVerifier = signatureVerifier is IPackageAuthenticodeSignatureVerifierFactory factory
+            ? factory.CreatePackageVerifier()
+            : signatureVerifier;
+
         using var archive = ZipFile.OpenRead(packagePath);
         var archiveValidation = ValidateArchiveMetadata(
             archive.Entries.Select(entry => new UpdatePackageArchiveEntryMetadata(
@@ -216,7 +220,7 @@ internal static class UpdatePackageSignatureVerifier
             var tempPath = ExtractToTemporaryFile(entry);
             try
             {
-                var result = signatureVerifier.Verify(tempPath);
+                var result = packageSignatureVerifier.Verify(tempPath);
                 if (!result.IsTrusted)
                 {
                     throw new InvalidOperationException(
@@ -531,6 +535,11 @@ internal interface IAuthenticodeSignatureVerifier
     AuthenticodeSignatureResult Verify(string filePath);
 }
 
+internal interface IPackageAuthenticodeSignatureVerifierFactory
+{
+    IAuthenticodeSignatureVerifier CreatePackageVerifier();
+}
+
 internal sealed record AuthenticodeSignatureResult(
     bool IsTrusted,
     string? SignerSubject = null,
@@ -542,11 +551,117 @@ internal sealed record AuthenticodeSignatureResult(
 
 internal sealed record WintrustVerificationPolicy(uint RevocationChecks, uint ProviderFlags);
 
-internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignatureVerifier
+internal sealed record CertificateChainVerificationPolicy(
+    X509RevocationMode RevocationMode,
+    X509RevocationFlag RevocationFlag,
+    X509VerificationFlags VerificationFlags);
+
+internal sealed record CertificateChainVerificationResult(bool IsTrusted, string? FailureReason = null);
+
+internal interface ICertificateChainVerifier
 {
+    CertificateChainVerificationResult Verify(X509Certificate2 certificate);
+}
+
+internal sealed class WindowsCertificateChainVerifier : ICertificateChainVerifier
+{
+    internal static CertificateChainVerificationPolicy VerificationPolicy { get; } = new(
+        X509RevocationMode.Online,
+        X509RevocationFlag.ExcludeRoot,
+        X509VerificationFlags.IgnoreNotTimeValid);
+
+    internal static CertificateChainVerificationPolicy NativePolicyForTesting()
+    {
+        using var chain = new X509Chain();
+        ConfigurePolicy(chain.ChainPolicy);
+        return new CertificateChainVerificationPolicy(
+            chain.ChainPolicy.RevocationMode,
+            chain.ChainPolicy.RevocationFlag,
+            chain.ChainPolicy.VerificationFlags);
+    }
+
+    public CertificateChainVerificationResult Verify(X509Certificate2 certificate)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+
+        try
+        {
+            using var chain = new X509Chain();
+            ConfigurePolicy(chain.ChainPolicy);
+            if (chain.Build(certificate))
+            {
+                return new CertificateChainVerificationResult(true);
+            }
+
+            var statuses = chain.ChainStatus
+                .Select(status => status.Status)
+                .Where(status => status != X509ChainStatusFlags.NoError)
+                .Distinct()
+                .ToArray();
+            var reason = statuses.Length == 0
+                ? "certificate chain validation failed"
+                : $"certificate chain validation failed: {string.Join(", ", statuses)}";
+            return new CertificateChainVerificationResult(false, reason);
+        }
+        catch (CryptographicException ex)
+        {
+            return new CertificateChainVerificationResult(false, $"certificate chain validation failed: {ex.Message}");
+        }
+    }
+
+    private static void ConfigurePolicy(X509ChainPolicy policy)
+    {
+        policy.RevocationMode = VerificationPolicy.RevocationMode;
+        policy.RevocationFlag = VerificationPolicy.RevocationFlag;
+        policy.VerificationFlags = VerificationPolicy.VerificationFlags;
+        policy.UrlRetrievalTimeout = TimeSpan.FromSeconds(15);
+    }
+}
+
+internal sealed class WindowsAuthenticodeSignatureVerifier :
+    IAuthenticodeSignatureVerifier,
+    IPackageAuthenticodeSignatureVerifierFactory
+{
+    private readonly Func<string, int> _winTrustVerifier;
+    private readonly Func<string, X509Certificate2> _certificateLoader;
+    private readonly ICertificateChainVerifier _certificateChainVerifier;
+    private readonly Dictionary<string, CertificateChainVerificationResult>? _packageChainResults;
+
     internal static WintrustVerificationPolicy VerificationPolicy { get; } = new(
         (uint)WintrustRevocationChecks.WholeChain,
         (uint)WintrustProvFlags.RevocationCheckChainExcludeRoot);
+
+    public WindowsAuthenticodeSignatureVerifier()
+        : this(WinVerifyTrust, LoadSignerCertificate, new WindowsCertificateChainVerifier(), null)
+    {
+    }
+
+    internal WindowsAuthenticodeSignatureVerifier(
+        Func<string, int> winTrustVerifier,
+        Func<string, X509Certificate2> certificateLoader,
+        ICertificateChainVerifier certificateChainVerifier)
+        : this(winTrustVerifier, certificateLoader, certificateChainVerifier, null)
+    {
+    }
+
+    private WindowsAuthenticodeSignatureVerifier(
+        Func<string, int> winTrustVerifier,
+        Func<string, X509Certificate2> certificateLoader,
+        ICertificateChainVerifier certificateChainVerifier,
+        Dictionary<string, CertificateChainVerificationResult>? packageChainResults)
+    {
+        _winTrustVerifier = winTrustVerifier ?? throw new ArgumentNullException(nameof(winTrustVerifier));
+        _certificateLoader = certificateLoader ?? throw new ArgumentNullException(nameof(certificateLoader));
+        _certificateChainVerifier = certificateChainVerifier ?? throw new ArgumentNullException(nameof(certificateChainVerifier));
+        _packageChainResults = packageChainResults;
+    }
+
+    public IAuthenticodeSignatureVerifier CreatePackageVerifier()
+        => new WindowsAuthenticodeSignatureVerifier(
+            _winTrustVerifier,
+            _certificateLoader,
+            _certificateChainVerifier,
+            new Dictionary<string, CertificateChainVerificationResult>(StringComparer.OrdinalIgnoreCase));
 
     internal static WintrustVerificationPolicy NativeDataPolicyForTesting()
     {
@@ -557,7 +672,7 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
 
     public AuthenticodeSignatureResult Verify(string filePath)
     {
-        var trustResult = WinVerifyTrust(filePath);
+        var trustResult = _winTrustVerifier(filePath);
         if (trustResult != 0)
         {
             return new AuthenticodeSignatureResult(false, FailureReason: $"WinVerifyTrust returned 0x{trustResult:X8}");
@@ -565,10 +680,15 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
 
         try
         {
-#pragma warning disable SYSLIB0057
-            using var signedCertificate = X509Certificate.CreateFromSignedFile(filePath);
-            using var certificate = new X509Certificate2(signedCertificate);
-#pragma warning restore SYSLIB0057
+            using var certificate = _certificateLoader(filePath);
+            var chainResult = VerifyCertificateChain(certificate);
+            if (!chainResult.IsTrusted)
+            {
+                return new AuthenticodeSignatureResult(
+                    false,
+                    FailureReason: chainResult.FailureReason ?? "certificate chain validation failed");
+            }
+
             var versionInfo = FileVersionInfo.GetVersionInfo(filePath);
             return new AuthenticodeSignatureResult(
                 true,
@@ -582,6 +702,32 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         {
             return new AuthenticodeSignatureResult(false, FailureReason: ex.Message);
         }
+    }
+
+    private CertificateChainVerificationResult VerifyCertificateChain(X509Certificate2 certificate)
+    {
+        var certificateIdentity = Convert.ToHexString(SHA256.HashData(certificate.RawData));
+        if (_packageChainResults is not null &&
+            _packageChainResults.TryGetValue(certificateIdentity, out var cachedResult))
+        {
+            return cachedResult;
+        }
+
+        var result = _certificateChainVerifier.Verify(certificate);
+        if (_packageChainResults is not null)
+        {
+            _packageChainResults[certificateIdentity] = result;
+        }
+
+        return result;
+    }
+
+    private static X509Certificate2 LoadSignerCertificate(string filePath)
+    {
+#pragma warning disable SYSLIB0057
+        using var signedCertificate = X509Certificate.CreateFromSignedFile(filePath);
+        return new X509Certificate2(signedCertificate);
+#pragma warning restore SYSLIB0057
     }
 
     private static string? GetDistinguishedNameAttribute(X500DistinguishedName subject, string attributeName)

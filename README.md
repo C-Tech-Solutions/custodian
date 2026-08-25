@@ -54,11 +54,12 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
-## What's New In 1.5.5
+## What's New In 1.5.6
 
 - Update packages now enforce explicit publisher and file-identity rules for
-  all executable content, verify certificate revocation, and reject unsafe or
-  oversized archives before extraction.
+  all executable content, independently fail closed when certificate
+  revocation status is unavailable, and reject unsafe or oversized archives
+  before extraction.
 - Imported `.custodian-scan` files are review-only for file mutations: Copy,
   Move, Recycle, and Permanent Delete require a new live scan, while paths and
   rows can still be copied or exported.
@@ -180,7 +181,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.5
+.\scripts\publish-velopack.ps1 -Version 1.5.6
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -188,7 +189,7 @@ GitHub Releases so installed apps can discover updates:
 
 ```powershell
 $env:GH_TOKEN = "<token with release access>"
-.\scripts\upload-velopack-github.ps1 -Version 1.5.5 -ExpectedCommit <40-character-SHA>
+.\scripts\upload-velopack-github.ps1 -Version 1.5.6 -ExpectedCommit <40-character-SHA>
 ```
 
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
@@ -226,7 +227,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.5 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.6 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's

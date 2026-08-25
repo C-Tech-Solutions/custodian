@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $releaseTools = Join-Path $PSScriptRoot "ReleaseTools.psm1"
 Import-Module $releaseTools -Force
-$expectedVersion = "1.5.5"
+$expectedVersion = "1.5.6"
 $normalizedCommit = $CommitSha.ToLowerInvariant()
 
 if ($Version -ne $expectedVersion) {
