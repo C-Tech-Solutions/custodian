@@ -288,6 +288,13 @@ if ($publishGitHubScript -notmatch '\$release\.draft' -or
     throw "GitHub publication does not safely distinguish draft publication from immutable verification resume."
 }
 
+$createTagScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "create-release-tag.ps1")
+foreach ($taggerIdentityContract in @("user.name=", "user.email=", "github-actions[bot]")) {
+    if (!$createTagScript.Contains($taggerIdentityContract, [StringComparison]::Ordinal)) {
+        throw "Annotated tag creation is missing deterministic tagger identity contract '$taggerIdentityContract'."
+    }
+}
+
 $verifyGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "verify-github-release.ps1")
 foreach ($requiredAttestationArgument in @("--signer-workflow", "--source-digest", "--source-ref")) {
     if (!$verifyGitHubScript.Contains($requiredAttestationArgument, [StringComparison]::Ordinal)) {

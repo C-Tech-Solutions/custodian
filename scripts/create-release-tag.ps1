@@ -11,6 +11,8 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $normalizedCommit = $CommitSha.ToLowerInvariant()
 $tagRef = "refs/tags/$Version"
+$taggerName = "github-actions[bot]"
+$taggerEmail = "41898282+github-actions[bot]@users.noreply.github.com"
 $head = (git -C $repo rev-parse HEAD).Trim().ToLowerInvariant()
 if ($head -ne $normalizedCommit) {
     throw "Refusing to tag HEAD '$head'; expected '$normalizedCommit'."
@@ -63,7 +65,10 @@ elseif ($remoteExists) {
     Assert-LocalTagIdentity
 }
 else {
-    git -C $repo tag --annotate $Version $normalizedCommit --message "Custodian $Version"
+    git -C $repo `
+        -c "user.name=$taggerName" `
+        -c "user.email=$taggerEmail" `
+        tag --annotate $Version $normalizedCommit --message "Custodian $Version"
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create annotated tag '$Version'."
     }
