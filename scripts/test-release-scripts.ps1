@@ -218,6 +218,24 @@ function Get-ActionInvocationLines {
     })
 }
 
+function Assert-ExactActionAllowlist {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$ExpectedActionLines
+    )
+
+    $actual = @(Get-ActionInvocationLines -JobLines $JobLines)
+    $actualKey = [string]::Join("`n", @($actual | Sort-Object -CaseSensitive))
+    $expectedKey = [string]::Join("`n", @($ExpectedActionLines | Sort-Object -CaseSensitive))
+    if ($actualKey -cne $expectedKey) {
+        throw "Workflow job action invocations do not match the exact pinned allowlist."
+    }
+}
+
 function Assert-SupportedRecoveryWorkflowSyntax {
     param(
         [Parameter(Mandatory = $true)]
@@ -491,6 +509,16 @@ Assert-Throws {
         "      - uses: actions/cache@untrusted"
     ) -TrustedStepLines $trustedCheckoutFixture
 } "only the pinned trusted checkout action"
+Assert-Throws {
+    Assert-ExactActionAllowlist `
+        -JobLines @(
+            $trustedCheckoutFixture
+            "      - uses: actions/setup-dotnet@unpinned"
+        ) `
+        -ExpectedActionLines @(
+            "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+        )
+} "exact pinned allowlist"
 
 $releaseSourceOverrideFixture = @(
     "      - name: Checkout exact release source",
@@ -530,11 +558,23 @@ function Get-CheckoutPersistCredentials {
     $persistenceValues = [Collections.Generic.List[string]]::new()
     foreach ($checkoutIndex in $checkoutIndexes) {
         $persistenceValue = $null
+        $withIndex = -1
         for ($index = $checkoutIndex + 1; $index -lt $JobLines.Count; $index++) {
             if ($JobLines[$index] -match '^      -\s') {
                 break
             }
-            if ($JobLines[$index] -match '^          persist-credentials:\s*(?<value>true|false)\s*$') {
+            if ($JobLines[$index] -ceq "        with:") {
+                if ($withIndex -ge 0) {
+                    throw "Workflow checkout must contain exactly one with block."
+                }
+                $withIndex = $index
+                continue
+            }
+            if ($withIndex -ge 0 -and $JobLines[$index] -match '^        \S') {
+                break
+            }
+            if ($withIndex -ge 0 -and
+                $JobLines[$index] -match '^          persist-credentials:\s*(?<value>true|false)\s*$') {
                 $persistenceValue = $Matches.value
                 break
             }
@@ -563,6 +603,14 @@ Assert-Throws {
         "          persist-credentials: true"
     )
 } "persist-credentials values must be consistent"
+Assert-Throws {
+    Get-CheckoutPersistCredentials -JobLines @(
+        "      - name: Checkout with misplaced persistence",
+        "        uses: actions/checkout@first",
+        "        env:",
+        "          persist-credentials: false"
+    )
+} "must declare persist-credentials explicitly"
 
 Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $false -Sign $false -HasSigningOptions $false
 Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $false -Sign $false -HasSigningOptions $false
@@ -1126,16 +1174,52 @@ $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLi
 $validatedSourceCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $recoverySourceValidationJobLines `
     -StepName "Checkout exact release source")
+$signingWorkflowCheckoutLines = @(Get-WorkflowStepLines `
+    -JobLines $recoverDraftJobLines `
+    -StepName "Checkout exact recovery workflow SHA")
 $signingSourceCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $recoverDraftJobLines `
     -StepName "Checkout exact release source")
 $publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
+$publishingWorkflowCheckoutLines = @(Get-WorkflowStepLines `
+    -JobLines $publishRecoveredJobLines `
+    -StepName "Checkout exact recovery workflow SHA")
 $publishingSourceCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $publishRecoveredJobLines `
     -StepName "Checkout exact release source")
 Assert-ExpectedCheckoutCount -JobLines $recoverySourceValidationJobLines -ExpectedCount 1
 Assert-ExpectedCheckoutCount -JobLines $recoverDraftJobLines -ExpectedCount 2
 Assert-ExpectedCheckoutCount -JobLines $publishRecoveredJobLines -ExpectedCount 2
+$checkoutAction = "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+$setupDotnetAction = "        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68"
+Assert-ExactActionAllowlist `
+    -JobLines $recoverySourceValidationJobLines `
+    -ExpectedActionLines @($checkoutAction, $setupDotnetAction)
+Assert-ExactActionAllowlist `
+    -JobLines $recoverDraftJobLines `
+    -ExpectedActionLines @(
+        $checkoutAction,
+        $checkoutAction,
+        $setupDotnetAction,
+        "        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca",
+        "        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82",
+        "        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
+    )
+Assert-ExactActionAllowlist `
+    -JobLines $publishRecoveredJobLines `
+    -ExpectedActionLines @($checkoutAction, $checkoutAction, $setupDotnetAction)
+foreach ($workflowCheckoutLines in @(
+    $signingWorkflowCheckoutLines,
+    $publishingWorkflowCheckoutLines
+)) {
+    if (!($workflowCheckoutLines -contains $checkoutAction) -or
+        !($workflowCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}') -or
+        !($workflowCheckoutLines -contains "          fetch-depth: 0") -or
+        !($workflowCheckoutLines -contains "          persist-credentials: false") -or
+        @($workflowCheckoutLines | Where-Object { $_ -match '^          (?:path|repository):' }).Count -ne 0) {
+        throw "Recovery signing and publication must use the exact workflow checkout."
+    }
+}
 foreach ($sourceCheckoutLines in @(
     $validatedSourceCheckoutLines,
     $signingSourceCheckoutLines,
@@ -1144,7 +1228,8 @@ foreach ($sourceCheckoutLines in @(
     if (!($sourceCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
         !($sourceCheckoutLines -contains '          ref: ${{ inputs.recovery_source_sha }}') -or
         !($sourceCheckoutLines -contains "          path: release-source") -or
-        !($sourceCheckoutLines -contains "          persist-credentials: false")) {
+        !($sourceCheckoutLines -contains "          persist-credentials: false") -or
+        @($sourceCheckoutLines | Where-Object { $_ -match '^          repository:' }).Count -ne 0) {
         throw "Recovery source validation and signing must use the same exact source checkout."
     }
 }
