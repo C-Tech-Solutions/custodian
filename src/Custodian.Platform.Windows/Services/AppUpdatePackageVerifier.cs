@@ -547,6 +547,13 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         (uint)WintrustRevocationChecks.WholeChain,
         (uint)WintrustProvFlags.RevocationCheckChainExcludeRoot);
 
+    internal static WintrustVerificationPolicy NativeDataPolicyForTesting()
+    {
+        using var fileInfo = new WintrustFileInfo("policy-test.exe");
+        using var data = new WintrustData(fileInfo);
+        return new WintrustVerificationPolicy((uint)data.RevocationChecks, (uint)data.ProvFlags);
+    }
+
     public AuthenticodeSignatureResult Verify(string filePath)
     {
         var trustResult = WinVerifyTrust(filePath);
@@ -688,13 +695,15 @@ internal sealed class WindowsAuthenticodeSignatureVerifier : IAuthenticodeSignat
         public IntPtr PolicyCallbackData = IntPtr.Zero;
         public IntPtr SipClientData = IntPtr.Zero;
         public WintrustDataChoice UiChoice = WintrustDataChoice.None;
-        public WintrustRevocationChecks RevocationChecks = WintrustRevocationChecks.WholeChain;
+        public WintrustRevocationChecks RevocationChecks =
+            (WintrustRevocationChecks)VerificationPolicy.RevocationChecks;
         public WintrustUnionChoice UnionChoice;
         public IntPtr FileInfo;
         public WintrustStateAction StateAction;
         public IntPtr StateData = IntPtr.Zero;
         public IntPtr UrlReference = IntPtr.Zero;
-        public WintrustProvFlags ProvFlags = WintrustProvFlags.RevocationCheckChainExcludeRoot;
+        public WintrustProvFlags ProvFlags =
+            (WintrustProvFlags)VerificationPolicy.ProviderFlags;
         public uint UiContext = 0;
 
         public void Dispose()

@@ -45,16 +45,16 @@ internal static class DetailSelectionDeleteCommandService
             return Blocked(DetailSelectionDeleteBlockReason.Busy, "Wait for the current operation to finish first.");
         }
 
-        if (isPortableScan)
-        {
-            return Blocked(DetailSelectionDeleteBlockReason.PortableScan);
-        }
-
         if (isLoadedFromScanFile)
         {
             return Blocked(
                 DetailSelectionDeleteBlockReason.LoadedScan,
                 DetailSelectionActionService.ImportedScanFileOperationsMessage);
+        }
+
+        if (isPortableScan)
+        {
+            return Blocked(DetailSelectionDeleteBlockReason.PortableScan);
         }
 
         var paths = DetailSelectionActionService.FileSystemPaths(selectedRows);

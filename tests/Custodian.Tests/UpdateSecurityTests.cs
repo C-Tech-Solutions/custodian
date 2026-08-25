@@ -53,6 +53,8 @@ public sealed class UpdateSecurityTests
         var packagePath = CreatePackage(
             "lib/app/Custodian.App.exe",
             "lib/app/Accessibility.dll",
+            "lib/app/DirectWriteForwarder.dll",
+            "lib/app/cli/mscordaccore_amd64_amd64_10.0.826.23019.dll",
             "lib/app/tui/JetBrains.Annotations.dll");
         try
         {
@@ -71,6 +73,20 @@ public sealed class UpdateSecurityTests
                         SignerOrganization: "Microsoft Corporation",
                         CompanyName: "Microsoft Corporation",
                         OriginalFileName: "Accessibility.dll"),
+                    ["DirectWriteForwarder.dll"] = new(
+                        true,
+                        "CN=.NET, O=Microsoft Corporation, C=US",
+                        ".NET",
+                        SignerOrganization: "Microsoft Corporation",
+                        CompanyName: string.Empty,
+                        OriginalFileName: "DirectWriteForwarder"),
+                    ["mscordaccore_amd64_amd64_10.0.826.23019.dll"] = new(
+                        true,
+                        "CN=.NET DAC, O=Microsoft Corporation, C=US",
+                        ".NET DAC",
+                        SignerOrganization: "Microsoft Corporation",
+                        CompanyName: "Microsoft Corporation",
+                        OriginalFileName: "mscordaccore.dll"),
                     ["JetBrains.Annotations.dll"] = new(
                         true,
                         "CN=JetBrains s.r.o., O=JetBrains s.r.o., C=CZ",
@@ -83,6 +99,8 @@ public sealed class UpdateSecurityTests
                 [
                     "lib/app/Custodian.App.exe",
                     "lib/app/Accessibility.dll",
+                    "lib/app/DirectWriteForwarder.dll",
+                    "lib/app/cli/mscordaccore_amd64_amd64_10.0.826.23019.dll",
                     "lib/app/tui/JetBrains.Annotations.dll"
                 ],
                 result.VerifiedFiles);
@@ -356,6 +374,7 @@ public sealed class UpdateSecurityTests
         Assert.Equal(1u, policy.RevocationChecks);
         Assert.Equal(0x80u, policy.ProviderFlags);
         Assert.Equal(0u, policy.ProviderFlags & 0x100u);
+        Assert.Equal(policy, WindowsAuthenticodeSignatureVerifier.NativeDataPolicyForTesting());
     }
 
     [Fact]
@@ -467,14 +486,10 @@ public sealed class UpdateSecurityTests
         Assert.False(string.IsNullOrWhiteSpace(result.OriginalFileName));
     }
 
-    [Fact]
+    [SignedReleasePackageFact]
     public void ConfiguredSignedReleasePackagePassesFullPublisherPolicy()
     {
-        var packagePath = Environment.GetEnvironmentVariable("CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE");
-        if (string.IsNullOrWhiteSpace(packagePath))
-        {
-            return;
-        }
+        var packagePath = Environment.GetEnvironmentVariable("CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE")!;
 
         Assert.True(File.Exists(packagePath), $"Configured signed release package was not found: {packagePath}");
 
@@ -482,7 +497,14 @@ public sealed class UpdateSecurityTests
             packagePath,
             new WindowsAuthenticodeSignatureVerifier());
 
-        Assert.Equal(918, result.VerifiedFiles.Count);
+        using var archive = ZipFile.OpenRead(packagePath);
+        var expectedPeCount = archive.Entries.Count(entry =>
+        {
+            var extension = Path.GetExtension(Path.GetFileName(entry.FullName));
+            return string.Equals(extension, ".dll", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, ".exe", StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Equal(expectedPeCount, result.VerifiedFiles.Count);
     }
 
     private static AuthenticodeSignatureResult CustodianSignature()
@@ -547,6 +569,17 @@ public sealed class UpdateSecurityTests
     {
         public AuthenticodeSignatureResult Verify(string filePath)
             => MicrosoftSignature(Path.GetFileName(filePath));
+    }
+
+    private sealed class SignedReleasePackageFactAttribute : FactAttribute
+    {
+        public SignedReleasePackageFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE")))
+            {
+                Skip = "Set CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE to run the signed package integration test.";
+            }
+        }
     }
 
     private sealed class RecordingAuthenticodeSignatureVerifier(

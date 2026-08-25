@@ -100,6 +100,21 @@ public sealed class DetailSelectionDeleteCommandServiceTests
         Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, command.ToastMessage);
     }
 
+    [Fact]
+    public void ImportedPortableScansUseLoadedScanBlockReason()
+    {
+        var command = DetailSelectionDeleteCommandService.Build(
+            DetailSelectionDeleteMode.Recycle,
+            [Row("Pixel/Internal shared storage/DCIM/photo.jpg")],
+            isPortableScan: true,
+            isLoadedFromScanFile: true,
+            isBusy: false);
+
+        Assert.False(command.CanExecute);
+        Assert.Equal(DetailSelectionDeleteBlockReason.LoadedScan, command.BlockReason);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, command.ToastMessage);
+    }
+
     private static DetailRow Row(string path)
     {
         var entry = new FileSystemEntry

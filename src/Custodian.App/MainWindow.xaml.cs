@@ -2636,6 +2636,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (CurrentScanLoadedFromScanFile())
+        {
+            ShowToast(DetailSelectionActionService.ImportedScanFileOperationsMessage);
+            return;
+        }
+
         if (_currentScan is not { SourceKind: ScanSourceKind.PortableDevice } currentScan)
         {
             ShowToast("Copy to PC is only available for phone scans.");

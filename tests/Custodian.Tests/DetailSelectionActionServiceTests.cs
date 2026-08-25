@@ -203,6 +203,25 @@ public sealed class DetailSelectionActionServiceTests
         Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, state.PermanentDeleteToolTip);
     }
 
+    [Fact]
+    public void ImportedPortableScanBlocksCopyToPc()
+    {
+        var state = DetailSelectionActionService.Build(
+            [Row("Pixel/Internal shared storage/DCIM/photo.jpg", portableObjectId: "photo-id")],
+            isPortableScan: true,
+            isLoadedFromScanFile: true,
+            allSelectedRowsUseFileSystemPaths: false,
+            isBusy: false);
+
+        Assert.True(state.CanOpen);
+        Assert.True(state.CanReveal);
+        Assert.False(state.CanCopy);
+        Assert.False(state.CanMove);
+        Assert.False(state.CanDelete);
+        Assert.False(state.CanPermanentDelete);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, state.CopyToolTip);
+    }
+
     private static DetailRow Row(
         string path,
         string portableObjectId = "",
