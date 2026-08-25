@@ -300,6 +300,7 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     if (@($allWorkflowLines | Where-Object {
         $_ -notmatch '^\s*#' -and (
             $_ -match '^\s*\?(?:\s|$)' -or
+            $_ -match '^\s*-\s+\?(?:\s|$)' -or
             $_ -match '^\s*(?:-\s*)?!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
         )
     }).Count -ne 0) {
@@ -646,6 +647,10 @@ foreach ($nonCanonicalMappingKeyFixture in @(
     @(
         "        ? uses",
         "        : attacker/action@ref"
+    ),
+    @(
+        "      - ? run",
+        "        : malicious-command"
     ),
     @('        !!str uses: attacker/action@ref')
 )) {
