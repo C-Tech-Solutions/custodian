@@ -302,7 +302,7 @@ function Assert-SupportedRecoveryWorkflowSyntax {
             $_ -match '^\s*\?(?:\s|$)' -or
             $_ -match '^\s*-\s+\?(?:\s|$)' -or
             $_ -match '^\s*(?:-\s*)?!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)' -or
-            $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
+            $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
         )
     }).Count -ne 0) {
         throw "Release workflow must not use explicit or tagged YAML mapping keys."
@@ -314,9 +314,18 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         throw "Release workflow sequence entries must use canonical six-space indentation."
     }
     if (@($allWorkflowLines | Where-Object {
+        $_ -match '^      -\s*(?:#.*)?$' -or
+        $_ -match '^      -\s*\{' -or
+        $_ -match '^        \s*\{' -or
+        $_ -match '^\s*steps:\s*\[' -or
+        $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*\{'
+    }).Count -ne 0) {
+        throw "Release workflow must use canonical block-style steps."
+    }
+    if (@($allWorkflowLines | Where-Object {
         $_ -match '^\s*(?:-\s+)?(?:"[^"]*"|''[^'']*'')\s*:' -or
-        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*"(?:[^"\\]|\\.)*$' -or
-        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*''(?:[^'']|'''')*$'
+        $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*"(?:[^"\\]|\\.)*$' -or
+        $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*''(?:[^'']|'''')*$'
     }).Count -ne 0) {
         throw "Release workflow must not use quoted YAML mapping keys or values."
     }
@@ -325,16 +334,6 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         $_ -cne "        run: |"
     }).Count -ne 0) {
         throw "Release workflow block scalars are allowed only for canonical run steps."
-    }
-
-    if (@($allWorkflowLines | Where-Object {
-        $_ -match '^      -\s*(?:#.*)?$' -or
-        $_ -match '^      -\s*\{' -or
-        $_ -match '^        \s*\{' -or
-        $_ -match '^\s*steps:\s*\[' -or
-        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*\{'
-    }).Count -ne 0) {
-        throw "Release workflow must use canonical block-style steps."
     }
 
     $structuralUsesLines = @($WorkflowLines | Where-Object {
@@ -575,7 +574,7 @@ Assert-Throws {
         -WorkflowLines @("name: Fixture") `
         -RootEnvironmentLines @() `
         -RecoveryJobLines @(
-            '    env: { FAKE: "',
+            '    recovery.guard: { FAKE: "',
             "      - name: Fake trusted action",
             "        uses: actions/checkout@trusted",
             '    " }'
@@ -634,7 +633,7 @@ Assert-Throws {
 } "allowed only for canonical run steps"
 foreach ($multilineQuotedScalarFixture in @(
     @(
-        '    name: "',
+        '    recovery.guard: "',
         "      - name: Fake trusted action",
         "        uses: actions/checkout@trusted",
         '    "'
@@ -664,7 +663,7 @@ Assert-Throws {
         -WorkflowLines @("name: Fixture") `
         -RootEnvironmentLines @() `
         -RecoveryJobLines @(
-            '    name: !!str "',
+            '    recovery.guard: !!str "',
             "      - name: Fake trusted action",
             "        uses: actions/checkout@trusted",
             '    "'
