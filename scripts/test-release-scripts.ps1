@@ -23,6 +23,36 @@ function Assert-Throws {
     throw "Expected an error containing '$ExpectedMessage'."
 }
 
+function Get-WorkflowRootEnvironmentLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$WorkflowLines
+    )
+
+    $rootEnvironmentIndexes = [Collections.Generic.List[int]]::new()
+    for ($index = 0; $index -lt $WorkflowLines.Count; $index++) {
+        if ($WorkflowLines[$index] -match '^[''"]?env[''"]?\s*:') {
+            $rootEnvironmentIndexes.Add($index)
+        }
+    }
+    if ($rootEnvironmentIndexes.Count -gt 1) {
+        throw "Workflow must not contain duplicate root environment blocks."
+    }
+    if ($rootEnvironmentIndexes.Count -eq 0) {
+        return @()
+    }
+
+    $environmentLines = [Collections.Generic.List[string]]::new()
+    for ($index = $rootEnvironmentIndexes[0]; $index -lt $WorkflowLines.Count; $index++) {
+        if ($index -gt $rootEnvironmentIndexes[0] -and $WorkflowLines[$index] -match '^\S') {
+            break
+        }
+        $environmentLines.Add($WorkflowLines[$index])
+    }
+    return @($environmentLines)
+}
+
 function Get-WorkflowJobLines {
     param(
         [Parameter(Mandatory = $true)]
@@ -44,26 +74,7 @@ function Get-WorkflowJobLines {
             break
         }
     }
-    $inheritedEnvironmentLines = [Collections.Generic.List[string]]::new()
-    $rootEnvironmentIndexes = [Collections.Generic.List[int]]::new()
-    for ($index = 0; $index -lt $WorkflowLines.Count; $index++) {
-        if ($WorkflowLines[$index] -match '^[''"]?env[''"]?\s*:') {
-            $rootEnvironmentIndexes.Add($index)
-        }
-    }
-    if ($rootEnvironmentIndexes.Count -gt 1) {
-        throw "Workflow must not contain duplicate root environment blocks."
-    }
-    if ($rootEnvironmentIndexes.Count -eq 1) {
-        for ($index = $rootEnvironmentIndexes[0]; $index -lt $WorkflowLines.Count; $index++) {
-            if ($index -gt $rootEnvironmentIndexes[0] -and $WorkflowLines[$index] -match '^\S') {
-                break
-            }
-            $inheritedEnvironmentLines.Add($WorkflowLines[$index])
-        }
-    }
-
-    return @(@($inheritedEnvironmentLines) + @($WorkflowLines[$start..($end - 1)]))
+    return @($WorkflowLines[$start..($end - 1)])
 }
 
 function Get-WorkflowStepLines {
@@ -158,7 +169,7 @@ function Get-ExplicitGitHubTokenReferences {
     )
 
     return @($WorkflowLines | Where-Object {
-        $_ -match '\$\{\{.*?(?<![A-Za-z0-9_])(?:github\s*(?:\.\s*token|\[\s*[''"]token[''"]\s*\])|secrets\s*(?:\.\s*GITHUB_TOKEN|\[\s*[''"]GITHUB_TOKEN[''"]\s*\])).*?\}\}'
+        $_ -match '\$\{\{.*?(?<![A-Za-z0-9_])(?:github\s*(?:\.\s*token|\[)|secrets\s*(?:\.\s*GITHUB_TOKEN|\[)).*?\}\}'
     })
 }
 
@@ -181,6 +192,33 @@ function Assert-RecoveryTokenScope {
     }
 }
 
+function Get-CheckoutActionLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines
+    )
+
+    return @($JobLines | Where-Object {
+        $_ -match '^\s+(?:-\s+)?uses:\s+[''"]?actions/checkout@'
+    })
+}
+
+function Assert-ExpectedCheckoutCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines,
+        [Parameter(Mandatory = $true)]
+        [int]$ExpectedCount
+    )
+
+    $checkoutActions = @(Get-CheckoutActionLines -JobLines $JobLines)
+    if ($checkoutActions.Count -ne $ExpectedCount) {
+        throw "Workflow job must contain exactly $ExpectedCount checkout action(s)."
+    }
+}
+
 function Assert-SingleTrustedWorkflowCheckout {
     param(
         [Parameter(Mandatory = $true)]
@@ -191,11 +229,8 @@ function Assert-SingleTrustedWorkflowCheckout {
         [string[]]$TrustedStepLines
     )
 
-    $checkoutActions = @($JobLines | Where-Object {
-        $_ -match '^\s+(?:-\s+)?uses:\s+[''"]?actions/checkout@'
-    })
-    if ($checkoutActions.Count -ne 1 -or
-        !($TrustedStepLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")) {
+    Assert-ExpectedCheckoutCount -JobLines $JobLines -ExpectedCount 1
+    if (!($TrustedStepLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")) {
         throw "Recovery validation must contain exactly one trusted checkout action."
     }
 }
@@ -218,7 +253,8 @@ foreach ($compoundTokenReferenceFixture in @(
     '        run: echo "${{ github.token || inputs.fallback }}"',
     '        run: echo "${{ format(''{0}'', secrets.GITHUB_TOKEN) }}"',
     '        run: echo "${{ github[''token''] }}"',
-    '        run: echo "${{ secrets[''GITHUB_TOKEN''] }}"'
+    '        run: echo "${{ secrets[''GITHUB_TOKEN''] }}"',
+    '        run: echo "${{ github[format(''to{0}'', ''ken'')] }}"'
 )) {
     if (@(Get-ExplicitGitHubTokenReferences -WorkflowLines @($compoundTokenReferenceFixture)).Count -ne 1) {
         throw "Compound GitHub token reference fixture was not detected: $compoundTokenReferenceFixture"
@@ -242,9 +278,11 @@ $inheritedTokenJobFixture = @(Get-WorkflowJobLines `
 $inheritedTokenStepFixture = @(Get-WorkflowStepLines `
     -JobLines $inheritedTokenJobFixture `
     -StepName "Verify exact empty draft and annotated source tag")
+$inheritedTokenEnvironmentFixture = @(Get-WorkflowRootEnvironmentLines `
+    -WorkflowLines $inheritedTokenWorkflowFixture)
 Assert-Throws {
     Assert-RecoveryTokenScope `
-        -EffectiveJobLines $inheritedTokenJobFixture `
+        -EffectiveJobLines @($inheritedTokenEnvironmentFixture + $inheritedTokenJobFixture) `
         -DraftInspectionLines $inheritedTokenStepFixture
 } "only to the draft-inspection step"
 
@@ -264,11 +302,36 @@ $inlineInheritedTokenJobFixture = @(Get-WorkflowJobLines `
 $inlineInheritedTokenStepFixture = @(Get-WorkflowStepLines `
     -JobLines $inlineInheritedTokenJobFixture `
     -StepName "Verify exact empty draft and annotated source tag")
+$inlineInheritedTokenEnvironmentFixture = @(Get-WorkflowRootEnvironmentLines `
+    -WorkflowLines $inlineInheritedTokenWorkflowFixture)
 Assert-Throws {
     Assert-RecoveryTokenScope `
-        -EffectiveJobLines $inlineInheritedTokenJobFixture `
+        -EffectiveJobLines @($inlineInheritedTokenEnvironmentFixture + $inlineInheritedTokenJobFixture) `
         -DraftInspectionLines $inlineInheritedTokenStepFixture
 } "only to the draft-inspection step"
+
+$structuralEnvironmentFixture = @(
+    "name: Fixture",
+    "env:",
+    "  FAKE_STEP: |",
+    "      - name: Checkout exact workflow SHA",
+    "        uses: actions/checkout@untrusted",
+    '          ref: ${{ github.sha }}',
+    "          persist-credentials: false",
+    "jobs:",
+    "  validate-recovery:",
+    "    steps:",
+    "      - name: Actual harmless step",
+    "        run: echo harmless"
+)
+$structuralJobFixture = @(Get-WorkflowJobLines `
+    -WorkflowLines $structuralEnvironmentFixture `
+    -JobName "validate-recovery")
+Assert-Throws {
+    Get-WorkflowStepLines `
+        -JobLines $structuralJobFixture `
+        -StepName "Checkout exact workflow SHA"
+} "was not found"
 
 $trustedCheckoutFixture = @(
     "      - name: Checkout exact workflow SHA",
@@ -280,13 +343,31 @@ Assert-Throws {
         "      - name: Renamed source checkout"
         "        uses: actions/checkout@untrusted"
     ) -TrustedStepLines $trustedCheckoutFixture
-} "exactly one trusted checkout"
+} "exactly 1 checkout action"
 Assert-Throws {
     Assert-SingleTrustedWorkflowCheckout -JobLines @(
         $trustedCheckoutFixture
         "      - uses: actions/checkout@untrusted"
     ) -TrustedStepLines $trustedCheckoutFixture
-} "exactly one trusted checkout"
+} "exactly 1 checkout action"
+
+$releaseSourceOverrideFixture = @(
+    "      - name: Checkout exact release source",
+    "        uses: actions/checkout@first",
+    "        with:",
+    '          ref: ${{ inputs.recovery_source_sha }}',
+    "          path: release-source",
+    "      - name: Replace release source",
+    "        uses: actions/checkout@second",
+    "        with:",
+    "          ref: untrusted",
+    "          path: release-source"
+)
+Assert-Throws {
+    Assert-ExpectedCheckoutCount `
+        -JobLines $releaseSourceOverrideFixture `
+        -ExpectedCount 1
+} "exactly 1 checkout action"
 
 function Get-CheckoutPersistCredentials {
     param(
@@ -602,6 +683,7 @@ finally {
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml")
 $releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
+$releaseWorkflowEnvironmentLines = @(Get-WorkflowRootEnvironmentLines -WorkflowLines $releaseWorkflowLines)
 $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
 $ciWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml"))
 foreach ($lineEnding in @("`n", "`r`n")) {
@@ -884,15 +966,15 @@ $draftInspectionLines = @(Get-WorkflowStepLines `
     -JobLines $recoveryValidationJobLines `
     -StepName "Verify exact empty draft and annotated source tag")
 Assert-RecoveryTokenScope `
-    -EffectiveJobLines $recoveryValidationJobLines `
+    -EffectiveJobLines @($releaseWorkflowEnvironmentLines + $recoveryValidationJobLines) `
     -DraftInspectionLines $draftInspectionLines
 $recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
 $recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recoverySourceValidationJobLines)
 if ($recoverySourcePermissions.Count -ne 1 -or
     $recoverySourcePermissions[0] -cne "contents: read" -or
     !($recoverySourceValidationJobLines -contains "      - name: Checkout exact release source") -or
-    @(Get-GitHubCliTokenAssignments -WorkflowLines $recoverySourceValidationJobLines).Count -ne 0 -or
-    @(Get-ExplicitGitHubTokenReferences -WorkflowLines $recoverySourceValidationJobLines).Count -ne 0) {
+    @(Get-GitHubCliTokenAssignments -WorkflowLines @($releaseWorkflowEnvironmentLines + $recoverySourceValidationJobLines)).Count -ne 0 -or
+    @(Get-ExplicitGitHubTokenReferences -WorkflowLines @($releaseWorkflowEnvironmentLines + $recoverySourceValidationJobLines)).Count -ne 0) {
     throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
 }
 $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
@@ -902,7 +984,18 @@ $validatedSourceCheckoutLines = @(Get-WorkflowStepLines `
 $signingSourceCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $recoverDraftJobLines `
     -StepName "Checkout exact release source")
-foreach ($sourceCheckoutLines in @($validatedSourceCheckoutLines, $signingSourceCheckoutLines)) {
+$publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
+$publishingSourceCheckoutLines = @(Get-WorkflowStepLines `
+    -JobLines $publishRecoveredJobLines `
+    -StepName "Checkout exact release source")
+Assert-ExpectedCheckoutCount -JobLines $recoverySourceValidationJobLines -ExpectedCount 1
+Assert-ExpectedCheckoutCount -JobLines $recoverDraftJobLines -ExpectedCount 2
+Assert-ExpectedCheckoutCount -JobLines $publishRecoveredJobLines -ExpectedCount 2
+foreach ($sourceCheckoutLines in @(
+    $validatedSourceCheckoutLines,
+    $signingSourceCheckoutLines,
+    $publishingSourceCheckoutLines
+)) {
     if (!($sourceCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
         !($sourceCheckoutLines -contains '          ref: ${{ inputs.recovery_source_sha }}') -or
         !($sourceCheckoutLines -contains "          path: release-source") -or
@@ -910,7 +1003,6 @@ foreach ($sourceCheckoutLines in @($validatedSourceCheckoutLines, $signingSource
         throw "Recovery source validation and signing must use the same exact source checkout."
     }
 }
-$publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
 if (!($recoverySourceValidationJobLines -contains "    needs: validate-recovery") -or
     !($recoverySourceValidationJobLines -contains "    if: needs.validate-recovery.result == 'success'") -or
     !($recoverDraftJobLines -contains "    needs: validate-recovery-source") -or
