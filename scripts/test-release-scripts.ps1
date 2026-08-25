@@ -307,7 +307,8 @@ function Assert-SupportedRecoveryWorkflowSyntax {
 
     if (@($allWorkflowLines | Where-Object {
         $_ -notmatch '^\s*#' -and
-        $_ -match '(?::\s*|^\s*-\s*)[&*][^\s\[\]{},]+'
+        ($_ -match '(?::\s*|^\s*-\s*)[&*][^\s\[\]{},]+' -or
+            $_ -match '^\s*[&*][^\s\[\]{},]+')
     }).Count -ne 0) {
         throw "Release workflow must not use YAML anchors or aliases."
     }
@@ -578,6 +579,12 @@ Assert-Throws {
         -WorkflowLines @("name: Fixture") `
         -RootEnvironmentLines @("env:", "  GH_TOKEN: *token_env") `
         -RecoveryJobLines @()
+} "anchors or aliases"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @('        &action_key uses: attacker/action@ref')
 } "anchors or aliases"
 foreach ($numericAnchorFixture in @("env: &1", "env: *1")) {
     Assert-Throws {
