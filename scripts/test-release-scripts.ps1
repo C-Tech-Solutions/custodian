@@ -314,10 +314,8 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         '          ref: ${{ github.sha }}',
         '          GH_TOKEN: ${{ github.token }}'
     )
-    if (@($effectiveRecoveryLines | Where-Object {
-        $_ -match '\$\{\{.*?(?<![A-Za-z0-9_])(?:github|secrets)(?![A-Za-z0-9_]).*?\}\}' -and
-        $_ -notin $allowedContextLines
-    }).Count -ne 0) {
+    $contextScanLines = @($effectiveRecoveryLines | Where-Object { $_ -notin $allowedContextLines })
+    if ([string]::Join("`n", $contextScanLines) -match '(?s)\$\{\{.*?(?<![A-Za-z0-9_])(?:github|secrets)(?![A-Za-z0-9_]).*?\}\}') {
         throw "Write-capable recovery scope contains a GitHub or secrets context outside the exact allowlist."
     }
 }
@@ -588,6 +586,17 @@ Assert-Throws {
             "    steps:",
             "      - name: Dump context",
             '        run: echo "${{ toJSON(github) }}"'
+        )
+} "outside the exact allowlist"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            "  validate-recovery:",
+            "    env:",
+            '      LEAK: ${{ toJSON(',
+            '        github) }}'
         )
 } "outside the exact allowlist"
 foreach ($writeScopeEscapeFixture in @(
