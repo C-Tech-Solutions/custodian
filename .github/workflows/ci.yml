@@ -62,9 +62,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet list Custodian.slnx package --vulnerable --include-transitive 2>&1 | tee vuln.txt
+          dotnet list Custodian.slnx package --vulnerable --include-transitive --no-restore 2>&1 | tee vuln.txt
           if grep -qiE "has the following vulnerable packages" vuln.txt; then
             echo "::error::Vulnerable NuGet packages detected. See the log above."
+            exit 1
+          fi
+          if grep -qiE "NU1900|NU1905" vuln.txt; then
+            echo "::error::NuGet audit data was incomplete or unavailable."
             exit 1
           fi
           echo "No vulnerable packages found."

@@ -59,7 +59,7 @@ jobs:
       - name: Scan NuGet dependencies
         shell: pwsh
         run: |
-          $scan = & dotnet list Custodian.slnx package --vulnerable --include-transitive 2>&1
+          $scan = & dotnet list Custodian.slnx package --vulnerable --include-transitive --no-restore 2>&1
           $exitCode = $LASTEXITCODE
           $scan | Write-Host
           if ($exitCode -ne 0) {
@@ -67,6 +67,9 @@ jobs:
           }
           if ($scan -match "has the following vulnerable packages") {
             throw "Vulnerable NuGet packages were detected."
+          }
+          if ($scan -match "\bNU1900\b|\bNU1905\b") {
+            throw "NuGet audit data was incomplete or unavailable."
           }
 
       - name: Test release script contracts

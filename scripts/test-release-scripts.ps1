@@ -132,8 +132,35 @@ if ([regex]::Matches($ciWorkflow, 'persist-credentials:\s*false').Count -ne 2 -o
     [regex]::Matches($releaseWorkflow, 'persist-credentials:\s*false').Count -ne 2) {
     throw "Non-pushing checkout steps must disable persisted GitHub credentials."
 }
-if ($releaseWorkflow -notmatch '(?s)\n  validate:.*?permissions:\s*\n\s*contents:\s*read.*?\n  sign-and-draft:') {
+$releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
+$validateStart = [Array]::IndexOf($releaseWorkflowLines, "  validate:")
+$signingStart = [Array]::IndexOf($releaseWorkflowLines, "  sign-and-draft:")
+if ($validateStart -lt 0 -or $signingStart -le $validateStart) {
     throw "The pre-environment validation job must not have release-write permission."
+}
+$validateJobLines = @($releaseWorkflowLines[($validateStart + 1)..($signingStart - 1)])
+$permissionsStart = [Array]::IndexOf($validateJobLines, "    permissions:")
+if ($permissionsStart -lt 0) {
+    throw "The pre-environment validation job must not have release-write permission."
+}
+$permissionEntries = [Collections.Generic.List[string]]::new()
+for ($index = $permissionsStart + 1; $index -lt $validateJobLines.Count; $index++) {
+    $line = $validateJobLines[$index]
+    if ($line -match '^    \S') {
+        break
+    }
+    if ($line -match '^      (?<entry>[^#].*\S)\s*$') {
+        $permissionEntries.Add($Matches.entry.Trim())
+    }
+}
+if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: read") {
+    throw "The pre-environment validation job must not have release-write permission."
+}
+
+foreach ($auditContract in @("--no-restore", "NU1900", "NU1905")) {
+    if (!$releaseWorkflow.Contains($auditContract, [StringComparison]::Ordinal)) {
+        throw "Release vulnerability audit is missing fail-closed contract '$auditContract'."
+    }
 }
 
 Write-Host "Release script contract tests passed."
