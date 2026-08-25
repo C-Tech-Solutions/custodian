@@ -104,7 +104,7 @@ function Get-WorkflowStepLines {
 
     $end = $JobLines.Count
     for ($index = $start + 1; $index -lt $JobLines.Count; $index++) {
-        if ($JobLines[$index] -match '^      -\s') {
+        if ($JobLines[$index] -match '^      -(?:\s|$)') {
             $end = $index
             break
         }
@@ -307,6 +307,7 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }
 
     if (@($WorkflowLines | Where-Object {
+        $_ -match '^      -\s*(?:#.*)?$' -or
         $_ -match '^      -\s*\{' -or
         $_ -match '^        \s*\{' -or
         $_ -match '^\s*steps:\s*\['
@@ -560,6 +561,19 @@ Assert-Throws {
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
 } "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  recover-draft:",
+            "    steps:",
+            "      -",
+            "       uses: attacker/action@ref"
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "canonical block-style steps"
 foreach ($nonCanonicalUsesFixture in @(
     '        "uses": actions/checkout@untrusted',
     "        uses : actions/cache@untrusted"
@@ -772,7 +786,7 @@ function Get-CheckoutPersistCredentials {
         $persistenceValue = $null
         $withIndex = -1
         for ($index = $checkoutIndex + 1; $index -lt $JobLines.Count; $index++) {
-            if ($JobLines[$index] -match '^      -\s') {
+            if ($JobLines[$index] -match '^      -(?:\s|$)') {
                 break
             }
             if ($JobLines[$index] -ceq "        with:") {
@@ -820,6 +834,16 @@ Assert-Throws {
         "      - name: Checkout with misplaced persistence",
         "        uses: actions/checkout@first",
         "        env:",
+        "          persist-credentials: false"
+    )
+} "must declare persist-credentials explicitly"
+Assert-Throws {
+    Get-CheckoutPersistCredentials -JobLines @(
+        "      - name: Checkout without persistence",
+        "        uses: actions/checkout@first",
+        "      -",
+        "        name: Following step",
+        "        with:",
         "          persist-credentials: false"
     )
 } "must declare persist-credentials explicitly"
