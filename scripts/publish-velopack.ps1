@@ -87,7 +87,7 @@ function Add-TemplateArgument {
 }
 
 function New-AzureSigningTemplate {
-    $template = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$signScript`" -Path `"{{file}}`" -PreserveValidSignature"
+    $template = "pwsh -NoProfile -ExecutionPolicy Bypass -File `"$signScript`" -Path `"{{file}}`" -PreserveValidSignature"
     $template = Add-TemplateArgument -Template $template -Name "MetadataPath" -Value $AzureSigningMetadataPath
     $template = Add-TemplateArgument -Template $template -Name "SignToolPath" -Value $SignToolPath
     $template = Add-TemplateArgument -Template $template -Name "DlibPath" -Value $AzureSigningDlibPath

@@ -188,6 +188,10 @@ $publishVelopackScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 
 if (!$publishVelopackScript.Contains("-PreserveValidSignature", [StringComparison]::Ordinal)) {
     throw "Velopack's signing template must preserve valid Authenticode signatures."
 }
+if (!$publishVelopackScript.Contains('"pwsh -NoProfile', [StringComparison]::Ordinal) -or
+    $publishVelopackScript.Contains('"powershell -NoProfile', [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Velopack's signing template must run under PowerShell 7."
+}
 
 $signScriptPath = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
 $signTokens = $null
