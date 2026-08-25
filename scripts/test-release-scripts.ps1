@@ -623,7 +623,7 @@ if ($draftInspectionStart -lt 0) {
 }
 $draftInspectionEnd = $recoveryValidationJobLines.Count
 for ($index = $draftInspectionStart + 1; $index -lt $recoveryValidationJobLines.Count; $index++) {
-    if ($recoveryValidationJobLines[$index] -match '^      - name:') {
+    if ($recoveryValidationJobLines[$index] -match '^      -\s') {
         $draftInspectionEnd = $index
         break
     }
