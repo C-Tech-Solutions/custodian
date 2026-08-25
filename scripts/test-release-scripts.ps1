@@ -241,6 +241,15 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         throw "Release workflow must use canonical block-style steps."
     }
 
+    $structuralUsesLines = @($WorkflowLines | Where-Object {
+        $_ -match '^(?:        |      -\s+)[''"]?uses[''"]?\s*:'
+    })
+    if (@($structuralUsesLines | Where-Object {
+        $_ -notmatch '^(?:        uses:|      - uses:)\s+'
+    }).Count -ne 0) {
+        throw "Release workflow must use canonical bare uses keys without whitespace before the colon."
+    }
+
     if (@(@($WorkflowLines + $RootEnvironmentLines + $RecoveryJobLines) | Where-Object {
         $_ -notmatch '^\s*#' -and
         $_ -match '(?<![A-Za-z0-9_])[&*][A-Za-z_][A-Za-z0-9_-]*'
@@ -411,6 +420,24 @@ Assert-Throws {
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
 } "canonical block-style steps"
+foreach ($nonCanonicalUsesFixture in @(
+    '        "uses": actions/checkout@untrusted',
+    "        uses : actions/cache@untrusted"
+)) {
+    Assert-Throws {
+        Assert-SupportedRecoveryWorkflowSyntax `
+            -WorkflowLines @(
+                "name: Fixture",
+                "jobs:",
+                "  validate-recovery:",
+                "    steps:",
+                "      - name: Non-canonical action",
+                $nonCanonicalUsesFixture
+            ) `
+            -RootEnvironmentLines @() `
+            -RecoveryJobLines @()
+    } "canonical bare uses keys"
+}
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
         -WorkflowLines @("name: Fixture") `
