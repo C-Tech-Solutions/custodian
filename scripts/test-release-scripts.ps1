@@ -314,7 +314,8 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }
     if (@($allWorkflowLines | Where-Object {
         $_ -match '^\s*(?:-\s+)?(?:"[^"]*"|''[^'']*'')\s*:' -or
-        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*(?:"[^"]*$|''[^'']*$)'
+        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*"(?:[^"\\]|\\.)*$' -or
+        $_ -match '^\s*(?:-\s+)?[A-Za-z0-9_-]+\s*:\s*''(?:[^'']|'''')*$'
     }).Count -ne 0) {
         throw "Release workflow must not use quoted YAML mapping keys or values."
     }
@@ -621,6 +622,12 @@ Assert-Throws {
 foreach ($multilineQuotedScalarFixture in @(
     @(
         '    name: "',
+        "      - name: Fake trusted action",
+        "        uses: actions/checkout@trusted",
+        '    "'
+    ),
+    @(
+        '    name: "ignored \" text',
         "      - name: Fake trusted action",
         "        uses: actions/checkout@trusted",
         '    "'
