@@ -614,6 +614,13 @@ if ($recoveryPermissionsStart -lt 0 -or
     !($recoveryValidationJobLines -contains "      contents: write")) {
     throw "Recovery validation requires contents write permission to retrieve an existing draft release."
 }
+if ($recoveryValidationJobLines -contains '      GH_TOKEN: ${{ github.token }}') {
+    throw "Recovery validation must not expose the write-capable token at job scope."
+}
+$recoveryStepTokens = @($recoveryValidationJobLines | Where-Object { $_ -ceq '          GH_TOKEN: ${{ github.token }}' })
+if ($recoveryStepTokens.Count -ne 1) {
+    throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
+}
 
 foreach ($auditContract in @("--no-restore", "NU1900", "NU1905")) {
     if (!$releaseWorkflow.Contains($auditContract, [StringComparison]::Ordinal) -or

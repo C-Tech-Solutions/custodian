@@ -296,7 +296,6 @@ jobs:
       # GitHub only exposes draft releases to tokens with push-level contents access.
       contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
       WORKFLOW_SHA: ${{ inputs.commit_sha }}
       RELEASE_SHA: ${{ inputs.recovery_source_sha }}
@@ -311,6 +310,8 @@ jobs:
 
       - name: Verify exact empty draft and annotated source tag
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./scripts/assert-release-draft-recovery.ps1 -Version $env:RELEASE_VERSION -WorkflowCommitSha $env:WORKFLOW_SHA -SourceCommitSha $env:RELEASE_SHA -DraftId $env:RECOVERY_DRAFT_ID
 
       - name: Checkout exact release source
