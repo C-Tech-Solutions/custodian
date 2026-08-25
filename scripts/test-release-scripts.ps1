@@ -56,10 +56,19 @@ function Get-WorkflowStepLines {
         [string]$StepName
     )
 
-    $start = [Array]::IndexOf($JobLines, "      - name: $StepName")
-    if ($start -lt 0) {
+    $matchingIndexes = [Collections.Generic.List[int]]::new()
+    for ($index = 0; $index -lt $JobLines.Count; $index++) {
+        if ($JobLines[$index] -ceq "      - name: $StepName") {
+            $matchingIndexes.Add($index)
+        }
+    }
+    if ($matchingIndexes.Count -eq 0) {
         throw "Workflow step '$StepName' was not found."
     }
+    if ($matchingIndexes.Count -ne 1) {
+        throw "Workflow step '$StepName' must occur exactly once."
+    }
+    $start = $matchingIndexes[0]
 
     $end = $JobLines.Count
     for ($index = $start + 1; $index -lt $JobLines.Count; $index++) {
@@ -70,6 +79,15 @@ function Get-WorkflowStepLines {
     }
     return @($JobLines[$start..($end - 1)])
 }
+
+Assert-Throws {
+    Get-WorkflowStepLines -JobLines @(
+        "      - name: Checkout exact release source",
+        "        uses: actions/checkout@first",
+        "      - name: Checkout exact release source",
+        "        uses: actions/checkout@second"
+    ) -StepName "Checkout exact release source"
+} "must occur exactly once"
 
 function Get-CheckoutPersistCredentials {
     param(
