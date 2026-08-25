@@ -202,8 +202,69 @@ function Get-CheckoutActionLines {
     )
 
     return @($JobLines | Where-Object {
-        $_ -match '^\s+(?:-\s+)?uses:\s+[''"]?actions/checkout@'
+        $_ -match '^(?:        uses:|      - uses:)\s+[''"]?actions/checkout@'
     })
+}
+
+function Get-ActionInvocationLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines
+    )
+
+    return @($JobLines | Where-Object {
+        $_ -match '^(?:        uses:|      - uses:)\s+'
+    })
+}
+
+function Assert-SupportedRecoveryWorkflowSyntax {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$WorkflowLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$RootEnvironmentLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$RecoveryJobLines
+    )
+
+    if (@($WorkflowLines | Where-Object {
+        $_ -match '^      -\s*\{' -or
+        $_ -match '^\s*steps:\s*\['
+    }).Count -ne 0) {
+        throw "Release workflow must use canonical block-style steps."
+    }
+
+    if (@(@($WorkflowLines + $RootEnvironmentLines + $RecoveryJobLines) | Where-Object {
+        $_ -notmatch '^\s*#' -and
+        $_ -match '(?<![A-Za-z0-9_])[&*][A-Za-z_][A-Za-z0-9_-]*'
+    }).Count -ne 0) {
+        throw "Release workflow must not use YAML anchors or aliases."
+    }
+
+    $effectiveRecoveryLines = @($RootEnvironmentLines + $RecoveryJobLines)
+    if (@($effectiveRecoveryLines | Where-Object {
+        $_ -match ':\s*[>|][0-9+-]*\s*(?:#.*)?$'
+    }).Count -ne 0) {
+        throw "Write-capable recovery scope must not use YAML block or folded scalars."
+    }
+
+    $allowedContextLines = @(
+        '          ref: ${{ github.sha }}',
+        '          GH_TOKEN: ${{ github.token }}'
+    )
+    if (@($effectiveRecoveryLines | Where-Object {
+        $_ -match '\$\{\{.*?(?<![A-Za-z0-9_])(?:github|secrets)(?![A-Za-z0-9_]).*?\}\}' -and
+        $_ -notin $allowedContextLines
+    }).Count -ne 0) {
+        throw "Write-capable recovery scope contains a GitHub or secrets context outside the exact allowlist."
+    }
 }
 
 function Assert-ExpectedCheckoutCount {
@@ -232,8 +293,10 @@ function Assert-SingleTrustedWorkflowCheckout {
     )
 
     Assert-ExpectedCheckoutCount -JobLines $JobLines -ExpectedCount 1
-    if (!($TrustedStepLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")) {
-        throw "Recovery validation must contain exactly one trusted checkout action."
+    $actionInvocations = @(Get-ActionInvocationLines -JobLines $JobLines)
+    if ($actionInvocations.Count -ne 1 -or
+        !($TrustedStepLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")) {
+        throw "Recovery validation must contain only the pinned trusted checkout action."
     }
 }
 
@@ -336,6 +399,48 @@ Assert-Throws {
         -StepName "Checkout exact workflow SHA"
 } "was not found"
 
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @(
+            "name: Fixture",
+            "jobs:",
+            "  validate-recovery:",
+            "    steps:",
+            "      - { uses: actions/checkout@untrusted }"
+        ) `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @("env:", "  GH_TOKEN: *token_env") `
+        -RecoveryJobLines @()
+} "anchors or aliases"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            "  validate-recovery:",
+            "    steps:",
+            "      - name: Folded token reference",
+            "        run: >",
+            '          echo "${{ github.token }}"'
+        )
+} "block or folded scalars"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            "  validate-recovery:",
+            "    steps:",
+            "      - name: Dump context",
+            '        run: echo "${{ toJSON(github) }}"'
+        )
+} "outside the exact allowlist"
+
 $trustedCheckoutFixture = @(
     "      - name: Checkout exact workflow SHA",
     "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
@@ -353,6 +458,12 @@ Assert-Throws {
         "      - uses: actions/checkout@untrusted"
     ) -TrustedStepLines $trustedCheckoutFixture
 } "exactly 1 checkout action"
+Assert-Throws {
+    Assert-SingleTrustedWorkflowCheckout -JobLines @(
+        $trustedCheckoutFixture
+        "      - uses: actions/cache@untrusted"
+    ) -TrustedStepLines $trustedCheckoutFixture
+} "only the pinned trusted checkout action"
 
 $releaseSourceOverrideFixture = @(
     "      - name: Checkout exact release source",
@@ -381,7 +492,7 @@ function Get-CheckoutPersistCredentials {
 
     $checkoutIndexes = [Collections.Generic.List[int]]::new()
     for ($index = 0; $index -lt $JobLines.Count; $index++) {
-        if ($JobLines[$index] -match '^\s+(?:-\s+)?uses:\s+[''"]?actions/checkout@') {
+        if ($JobLines[$index] -match '^(?:        uses:|      - uses:)\s+[''"]?actions/checkout@') {
             $checkoutIndexes.Add($index)
         }
     }
@@ -949,6 +1060,10 @@ if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: rea
     throw "The pre-environment validation job must not have release-write permission."
 }
 $recoveryValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery")
+Assert-SupportedRecoveryWorkflowSyntax `
+    -WorkflowLines $releaseWorkflowLines `
+    -RootEnvironmentLines $releaseWorkflowEnvironmentLines `
+    -RecoveryJobLines $recoveryValidationJobLines
 $recoveryCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $recoveryValidationJobLines `
     -StepName "Checkout exact workflow SHA")
