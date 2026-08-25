@@ -1750,6 +1750,134 @@ if ($recoverySourcePermissions.Count -ne 1 -or
     throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
 }
 $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
+$expectedRecoverDraftJob = @'
+  recover-draft:
+    name: Rebuild, attest, and populate empty draft
+    needs: validate-recovery-source
+    if: needs.validate-recovery-source.result == 'success'
+    runs-on: windows-latest
+    environment: release-signing
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      WORKFLOW_SHA: ${{ inputs.commit_sha }}
+      RELEASE_SHA: ${{ inputs.recovery_source_sha }}
+      RECOVERY_DRAFT_ID: ${{ inputs.recovery_draft_id }}
+    steps:
+      - name: Checkout exact recovery workflow SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.recovery_source_sha }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: release-source/global.json
+
+      - name: Restore locked release-source dependencies
+        working-directory: release-source
+        run: dotnet restore Custodian.slnx --locked-mode --runtime win-x64
+
+      - name: Authenticate to Azure with federated OIDC
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Prepare deterministic release-source tree
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/publish-velopack.ps1 -Version $env:RELEASE_VERSION -PrepareOnly
+
+      - name: Select only unsigned release-source PE files
+        id: recovery-signing-catalog
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/prepare-release-signing-catalog.ps1
+
+      - name: Sign unsigned release-source PEs
+        if: steps.recovery-signing-catalog.outputs.unsigned_count != '0'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-catalog: ${{ steps.recovery-signing-catalog.outputs.catalog_path }}
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          exclude-azure-cli-credential: false
+          batch-size: 30000
+
+      - name: Verify prepared release-source publisher policy
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/verify-package-publisher-policy.ps1 -PublishRoot artifacts/velopack-publish/Custodian
+
+      - name: Pack release source and sign generated Velopack PEs
+        working-directory: release-source
+        shell: pwsh
+        env:
+          CUSTODIAN_AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          CUSTODIAN_AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          CUSTODIAN_AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: ./scripts/publish-velopack.ps1 -Version $env:RELEASE_VERSION -PackOnly -Sign
+
+      - name: Verify recovered Velopack assets and signatures
+        working-directory: release-source
+        shell: pwsh
+        run: |
+          ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION
+          ./scripts/verify-package-publisher-policy.ps1 -PackagePath "artifacts/velopack/Custodian.DiskAnalyzer-$env:RELEASE_VERSION-full.nupkg"
+
+      - name: Generate and validate recovered SPDX SBOM
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/generate-release-sbom.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:RELEASE_SHA -ToolVersion 4.1.5
+
+      - name: Generate recovered lowercase SHA-256 checksums
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/generate-release-checksums.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Verify recovered complete release asset set
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION -IncludeAncillaryAssets
+
+      - name: Attest every recovered release asset
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ github.workspace }}/release-source/artifacts/velopack/*
+
+      - name: Re-verify existing annotated release tag
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/create-release-tag.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:RELEASE_SHA
+
+      - name: Populate exact empty draft without overwriting
+        shell: pwsh
+        run: ./scripts/resume-empty-release-draft.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -DraftId $env:RECOVERY_DRAFT_ID -SourceRepositoryRoot "${{ github.workspace }}/release-source"
+'@
+Assert-ExactWorkflowLines `
+    -ActualLines $recoverDraftJobLines `
+    -ExpectedLines @($expectedRecoverDraftJob -split "`r?`n") `
+    -FailureMessage "The protected recovery signing job must match its exact trusted contract."
 $validatedSourceCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $recoverySourceValidationJobLines `
     -StepName "Checkout exact release source")
@@ -1760,6 +1888,91 @@ $signingSourceCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $recoverDraftJobLines `
     -StepName "Checkout exact release source")
 $publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
+$expectedPublishRecoveredJob = @'
+  publish-recovered:
+    name: Re-verify and publish recovered immutable release
+    needs: [validate-recovery-source, recover-draft]
+    if: needs.validate-recovery-source.result == 'success' && needs.recover-draft.result == 'success'
+    runs-on: windows-latest
+    environment: release-publish
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      WORKFLOW_SHA: ${{ inputs.commit_sha }}
+      RELEASE_SHA: ${{ inputs.recovery_source_sha }}
+    steps:
+      - name: Checkout exact recovery workflow SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.recovery_source_sha }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: release-source/global.json
+
+      - name: Re-download recovered draft assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-source/artifacts/release-download | Out-Null
+          gh release download $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --dir release-source/artifacts/release-download
+
+      - name: Restore locked release-source dependencies
+        working-directory: release-source
+        run: dotnet restore Custodian.slnx --locked-mode
+
+      - name: Verify recovered binaries and publisher policy
+        working-directory: release-source
+        shell: pwsh
+        run: |
+          ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION -OutputRoot artifacts/release-download -IncludeAncillaryAssets
+          ./scripts/verify-package-publisher-policy.ps1 -PackagePath "artifacts/release-download/Custodian.DiskAnalyzer-$env:RELEASE_VERSION-full.nupkg"
+
+      - name: Verify recovered digests, attestations, and tag
+        shell: pwsh
+        run: ./scripts/verify-github-release.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -AssetRoot "${{ github.workspace }}/release-source/artifacts/release-download" -RequireDraft -VerifyAttestations -AttestationSourceDigest $env:WORKFLOW_SHA
+
+      - name: Require immutable-release acceptance for recovered source
+        shell: pwsh
+        env:
+          IMMUTABLE_RELEASES_ACCEPTED_FOR: ${{ vars.IMMUTABLE_RELEASES_ACCEPTED_FOR }}
+        run: |
+          $expectedAcceptance = "$env:RELEASE_VERSION`:$env:RELEASE_SHA"
+          if ($env:IMMUTABLE_RELEASES_ACCEPTED_FOR -ne $expectedAcceptance) {
+            throw "The protected release-publish environment has not recorded immutable-release acceptance for '$expectedAcceptance'."
+          }
+
+      - name: Publish recovered draft as Latest
+        working-directory: release-source
+        shell: pwsh
+        run: ./scripts/publish-github-release.ps1 -Version $env:RELEASE_VERSION -Repository $env:GITHUB_REPOSITORY
+
+      - name: Verify recovered published immutable release
+        shell: pwsh
+        run: |
+          ./scripts/verify-github-release.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -AssetRoot "${{ github.workspace }}/release-source/artifacts/release-download" -RequirePublishedImmutable -VerifyAttestations -AttestationSourceDigest $env:WORKFLOW_SHA
+          $latest = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --json tagName,isLatest | ConvertFrom-Json
+          if ($latest.Count -ne 1 -or !$latest[0].isLatest -or $latest[0].tagName -ne $env:RELEASE_VERSION) {
+            throw "Custodian $env:RELEASE_VERSION is not the Latest release."
+          }
+'@
+Assert-ExactWorkflowLines `
+    -ActualLines $publishRecoveredJobLines `
+    -ExpectedLines @($expectedPublishRecoveredJob -split "`r?`n") `
+    -FailureMessage "The protected recovery publication job must match its exact trusted contract."
 $publishingWorkflowCheckoutLines = @(Get-WorkflowStepLines `
     -JobLines $publishRecoveredJobLines `
     -StepName "Checkout exact recovery workflow SHA")
