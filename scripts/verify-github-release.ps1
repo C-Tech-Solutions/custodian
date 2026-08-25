@@ -9,6 +9,7 @@ param(
     [string]$AssetRoot,
     [string]$Repository = "C-Tech-Solutions/custodian",
     [switch]$RequireDraft,
+    [switch]$RequireDraftOrPublishedImmutable,
     [switch]$RequirePublishedImmutable,
     [switch]$VerifyAttestations
 )
@@ -18,8 +19,14 @@ $repo = Split-Path -Parent $PSScriptRoot
 $releaseTools = Join-Path $PSScriptRoot "ReleaseTools.psm1"
 Import-Module $releaseTools -Force
 
-if ($RequireDraft -and $RequirePublishedImmutable) {
-    throw "Release verification cannot require both draft and published states."
+$requiredStateCount = 0
+foreach ($stateRequirement in @($RequireDraft, $RequireDraftOrPublishedImmutable, $RequirePublishedImmutable)) {
+    if ($stateRequirement) {
+        $requiredStateCount++
+    }
+}
+if ($requiredStateCount -gt 1) {
+    throw "Release verification cannot require multiple release states."
 }
 
 $normalizedCommit = $ExpectedCommit.ToLowerInvariant()
@@ -35,6 +42,9 @@ if ($releaseMatches.Count -ne 1) {
 $release = $releaseMatches[0]
 if ($RequireDraft -and !$release.draft) {
     throw "Release '$Version' is not a draft."
+}
+if ($RequireDraftOrPublishedImmutable -and !$release.draft -and !$release.immutable) {
+    throw "Release '$Version' is neither a draft nor published immutable."
 }
 if ($RequirePublishedImmutable -and ($release.draft -or !$release.immutable)) {
     throw "Release '$Version' is not published and immutable."

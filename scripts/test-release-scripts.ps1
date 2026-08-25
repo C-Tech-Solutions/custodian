@@ -96,6 +96,22 @@ if ($releaseWorkflow -notmatch 'IMMUTABLE_RELEASES_ACCEPTED_FOR' -or
     $releaseWorkflow -notmatch '\$env:RELEASE_VERSION`:\$env:RELEASE_SHA') {
     throw "Release workflow does not bind immutable-release acceptance to the exact version and commit."
 }
+if ($releaseWorkflow -match 'if \("\$\{\{ vars\.IMMUTABLE_RELEASES_ACCEPTED_FOR \}\}"' -or
+    $releaseWorkflow -notmatch 'IMMUTABLE_RELEASES_ACCEPTED_FOR:\s*\$\{\{ vars\.IMMUTABLE_RELEASES_ACCEPTED_FOR \}\}') {
+    throw "Immutable-release acceptance must enter PowerShell through the environment, not template-expanded script source."
+}
+foreach ($resumeContract in @("resume_published", "RequireDraftOrPublishedImmutable", "publish-github-release.ps1")) {
+    if (!$releaseWorkflow.Contains($resumeContract, [StringComparison]::Ordinal)) {
+        throw "Release workflow is missing resumable publication contract '$resumeContract'."
+    }
+}
+
+$publishGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "publish-github-release.ps1")
+if ($publishGitHubScript -notmatch '\$release\.draft' -or
+    $publishGitHubScript -notmatch '\$release\.immutable' -or
+    $publishGitHubScript -match '(?i)--token') {
+    throw "GitHub publication does not safely distinguish draft publication from immutable verification resume."
+}
 
 $verifyGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "verify-github-release.ps1")
 foreach ($requiredAttestationArgument in @("--signer-workflow", "--source-digest", "--source-ref")) {

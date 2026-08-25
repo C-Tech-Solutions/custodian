@@ -22,7 +22,9 @@ jobs:
     name: Validate exact source
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
+    outputs:
+      resume_published: ${{ steps.release-preflight.outputs.resume_published }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -41,6 +43,7 @@ jobs:
           global-json-file: global.json
 
       - name: Verify release preflight
+        id: release-preflight
         shell: pwsh
         run: ./scripts/assert-release-preflight.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:RELEASE_SHA
 
@@ -73,6 +76,7 @@ jobs:
   sign-and-draft:
     name: Sign, attest, and create draft
     needs: validate
+    if: needs.validate.outputs.resume_published != 'true'
     runs-on: windows-latest
     environment: release-signing
     permissions:
@@ -180,7 +184,8 @@ jobs:
 
   publish:
     name: Re-verify and publish immutable release
-    needs: sign-and-draft
+    needs: [validate, sign-and-draft]
+    if: always() && needs.validate.result == 'success' && (needs.sign-and-draft.result == 'success' || needs.sign-and-draft.result == 'skipped')
     runs-on: windows-latest
     environment: release-publish
     permissions:
@@ -218,21 +223,23 @@ jobs:
           ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION -OutputRoot artifacts/release-download -IncludeAncillaryAssets
           ./scripts/verify-package-publisher-policy.ps1 -PackagePath "artifacts/release-download/Custodian.DiskAnalyzer-$env:RELEASE_VERSION-full.nupkg"
 
-      - name: Verify draft digests, attestations, and tag
+      - name: Verify release digests, attestations, and tag
         shell: pwsh
-        run: ./scripts/verify-github-release.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -AssetRoot artifacts/release-download -RequireDraft -VerifyAttestations
+        run: ./scripts/verify-github-release.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -AssetRoot artifacts/release-download -RequireDraftOrPublishedImmutable -VerifyAttestations
 
       - name: Require immutable-release acceptance
         shell: pwsh
+        env:
+          IMMUTABLE_RELEASES_ACCEPTED_FOR: ${{ vars.IMMUTABLE_RELEASES_ACCEPTED_FOR }}
         run: |
           $expectedAcceptance = "$env:RELEASE_VERSION`:$env:RELEASE_SHA"
-          if ("${{ vars.IMMUTABLE_RELEASES_ACCEPTED_FOR }}" -ne $expectedAcceptance) {
+          if ($env:IMMUTABLE_RELEASES_ACCEPTED_FOR -ne $expectedAcceptance) {
             throw "The protected release-publish environment has not recorded immutable-release acceptance for '$expectedAcceptance'."
           }
 
       - name: Publish as Latest
         shell: pwsh
-        run: gh release edit $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --draft=false --latest
+        run: ./scripts/publish-github-release.ps1 -Version $env:RELEASE_VERSION -Repository $env:GITHUB_REPOSITORY
 
       - name: Verify published immutable release
         shell: pwsh

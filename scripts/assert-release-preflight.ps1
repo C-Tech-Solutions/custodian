@@ -66,8 +66,21 @@ if ($remoteTag.Count -ne 0) {
 }
 
 $existingReleases = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
-if ($existingReleases.Count -ne 0) {
-    throw "GitHub release '$Version' already exists. Releases and assets are never overwritten."
+$resumePublished = $false
+if ($existingReleases.Count -gt 1) {
+    throw "Multiple GitHub releases exist for '$Version'. Releases and assets are never overwritten."
+}
+if ($existingReleases.Count -eq 1) {
+    $existingRelease = $existingReleases[0]
+    if ($existingRelease.draft -or !$existingRelease.immutable) {
+        throw "GitHub release '$Version' already exists but is not published and immutable. Releases and assets are never overwritten."
+    }
+    $resumePublished = $true
+    Write-Host "Existing published immutable release '$Version' will be re-verified without rebuilding or republishing."
+}
+
+if (![string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
+    "resume_published=$($resumePublished.ToString().ToLowerInvariant())" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Append -Encoding utf8
 }
 
 Write-Host "Release preflight passed for Custodian $Version at $normalizedCommit."
