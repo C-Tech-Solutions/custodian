@@ -112,6 +112,34 @@ function Get-WorkflowStepLines {
     return @($JobLines[$start..($end - 1)])
 }
 
+function Assert-ExactWorkflowLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$ActualLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$ExpectedLines,
+        [Parameter(Mandatory = $true)]
+        [string]$FailureMessage
+    )
+
+    $normalizedActual = [Collections.Generic.List[string]]::new()
+    foreach ($line in $ActualLines) {
+        $normalizedActual.Add($line)
+    }
+    while ($normalizedActual.Count -gt 0 -and
+        $normalizedActual[$normalizedActual.Count - 1] -ceq "") {
+        $normalizedActual.RemoveAt($normalizedActual.Count - 1)
+    }
+    if ([string]::Join("`n", $normalizedActual) -cne
+        [string]::Join("`n", $ExpectedLines)) {
+        throw $FailureMessage
+    }
+}
+
 Assert-Throws {
     Get-WorkflowStepLines -JobLines @(
         "      - name: Checkout exact release source",
@@ -120,6 +148,12 @@ Assert-Throws {
         "        uses: actions/checkout@second"
     ) -StepName "Checkout exact release source"
 } "must occur exactly once"
+Assert-Throws {
+    Assert-ExactWorkflowLines `
+        -ActualLines @("trusted", "malicious") `
+        -ExpectedLines @("trusted") `
+        -FailureMessage "Workflow lines changed unexpectedly."
+} "changed unexpectedly"
 
 function Get-WorkflowPermissionEntries {
     param(
@@ -1562,6 +1596,41 @@ if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: rea
     throw "The pre-environment validation job must not have release-write permission."
 }
 $recoveryValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery")
+Assert-ExactWorkflowLines `
+    -ActualLines $recoveryValidationJobLines `
+    -ExpectedLines @(
+        "  validate-recovery:",
+        "    name: Validate protected empty-draft recovery",
+        "    needs: validate-dispatch",
+        "    if: inputs.recovery_draft_id != '' && inputs.recovery_source_sha != ''",
+        "    runs-on: windows-latest",
+        "    permissions:",
+        "      # GitHub only exposes draft releases to tokens with push-level contents access.",
+        "      contents: write",
+        "    env:",
+        '      RELEASE_VERSION: ${{ inputs.version }}',
+        '      WORKFLOW_SHA: ${{ inputs.commit_sha }}',
+        '      RELEASE_SHA: ${{ inputs.recovery_source_sha }}',
+        '      RECOVERY_DRAFT_ID: ${{ inputs.recovery_draft_id }}',
+        "    steps:",
+        "      - name: Checkout exact workflow SHA",
+        "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        '          ref: ${{ github.sha }}',
+        "          fetch-depth: 0",
+        "          persist-credentials: false",
+        "",
+        "      - name: Test recovery workflow contracts",
+        "        shell: pwsh",
+        "        run: ./scripts/test-release-scripts.ps1",
+        "",
+        "      - name: Verify exact empty draft and annotated source tag",
+        "        shell: pwsh",
+        "        env:",
+        '          GH_TOKEN: ${{ github.token }}',
+        '        run: ./scripts/assert-release-draft-recovery.ps1 -Version $env:RELEASE_VERSION -WorkflowCommitSha $env:WORKFLOW_SHA -SourceCommitSha $env:RELEASE_SHA -DraftId $env:RECOVERY_DRAFT_ID'
+    ) `
+    -FailureMessage "The write-capable recovery validation job must match its exact trusted contract."
 Assert-SupportedRecoveryWorkflowSyntax `
     -WorkflowLines $releaseWorkflowLines `
     -RootEnvironmentLines $releaseWorkflowEnvironmentLines `
