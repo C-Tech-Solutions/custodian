@@ -302,7 +302,7 @@ function Assert-SupportedRecoveryWorkflowSyntax {
             $_ -match '^\s*\?(?:\s|$)' -or
             $_ -match '^\s*-\s+\?(?:\s|$)' -or
             $_ -match '^\s*(?:-\s*)?!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)' -or
-            $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
+            $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
         )
     }).Count -ne 0) {
         throw "Release workflow must not use explicit or tagged YAML mapping keys."
@@ -313,19 +313,27 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     }).Count -ne 0) {
         throw "Release workflow sequence entries must use canonical six-space indentation."
     }
+    $allowedFlowSequenceLines = @(
+        '    needs: [validate, sign-and-draft]',
+        '    needs: [validate-recovery-source, recover-draft]'
+    )
     if (@($allWorkflowLines | Where-Object {
-        $_ -match '^      -\s*(?:#.*)?$' -or
-        $_ -match '^      -\s*\{' -or
-        $_ -match '^        \s*\{' -or
-        $_ -match '^\s*steps:\s*\[' -or
-        $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*\{'
+        $_ -notmatch '^\s*#' -and
+        $_ -notin $allowedFlowSequenceLines -and (
+            $_ -match '^      -\s*(?:#.*)?$' -or
+            $_ -match '^      -\s*[\[{]' -or
+            $_ -match '^\s*[\[{]' -or
+            $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*[\[{]'
+        )
     }).Count -ne 0) {
         throw "Release workflow must use canonical block-style steps."
     }
     if (@($allWorkflowLines | Where-Object {
-        $_ -match '^\s*(?:-\s+)?(?:"[^"]*"|''[^'']*'')\s*:' -or
-        $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*"(?:[^"\\]|\\.)*$' -or
-        $_ -match '^\s*(?:-\s+)?[^#\r\n]+:\s*''(?:[^'']|'''')*$'
+        $_ -notmatch '^\s*#' -and (
+            $_ -match '^\s*(?:-\s+)?(?:"[^"]*"|''[^'']*'')\s*:' -or
+            $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*"(?:[^"\\]|\\.)*$' -or
+            $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*''(?:[^'']|'''')*$'
+        )
     }).Count -ne 0) {
         throw "Release workflow must not use quoted YAML mapping keys or values."
     }
@@ -574,11 +582,29 @@ Assert-Throws {
         -WorkflowLines @("name: Fixture") `
         -RootEnvironmentLines @() `
         -RecoveryJobLines @(
-            '    recovery.guard: { FAKE: "',
+            '    recovery#guard: { FAKE: "',
             "      - name: Fake trusted action",
             "        uses: actions/checkout@trusted",
             '    " }'
         )
+} "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            "    env:",
+            '      { FAKE: "',
+            "      - name: Fake trusted action",
+            "        uses: actions/checkout@trusted",
+            '      " }'
+        )
+} "canonical block-style steps"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @('    recovery#guard: [ "', '    " ]')
 } "canonical block-style steps"
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
@@ -633,7 +659,7 @@ Assert-Throws {
 } "allowed only for canonical run steps"
 foreach ($multilineQuotedScalarFixture in @(
     @(
-        '    recovery.guard: "',
+        '    recovery#guard: "',
         "      - name: Fake trusted action",
         "        uses: actions/checkout@trusted",
         '    "'
@@ -663,7 +689,7 @@ Assert-Throws {
         -WorkflowLines @("name: Fixture") `
         -RootEnvironmentLines @() `
         -RecoveryJobLines @(
-            '    recovery.guard: !!str "',
+            '    recovery#guard: !!str "',
             "      - name: Fake trusted action",
             "        uses: actions/checkout@trusted",
             '    "'
