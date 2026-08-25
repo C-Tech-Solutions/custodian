@@ -1,0 +1,241 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact Custodian version to release
+        required: true
+        default: 1.5.5
+        type: string
+      commit_sha:
+        description: Exact 40-character commit SHA from master
+        required: true
+        type: string
+
+concurrency:
+  group: custodian-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact source
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SHA: ${{ inputs.commit_sha }}
+    steps:
+      - name: Checkout exact dispatch SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+
+      - name: Verify release preflight
+        shell: pwsh
+        run: ./scripts/assert-release-preflight.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:RELEASE_SHA
+
+      - name: Restore locked dependencies
+        run: dotnet restore Custodian.slnx --locked-mode
+
+      - name: Build Release
+        run: dotnet build Custodian.slnx --configuration Release --no-restore
+
+      - name: Run complete tests
+        run: dotnet test Custodian.slnx --configuration Release --no-build
+
+      - name: Scan NuGet dependencies
+        shell: pwsh
+        run: |
+          $scan = & dotnet list Custodian.slnx package --vulnerable --include-transitive 2>&1
+          $exitCode = $LASTEXITCODE
+          $scan | Write-Host
+          if ($exitCode -ne 0) {
+            throw "NuGet vulnerability scan failed with exit code $exitCode."
+          }
+          if ($scan -match "has the following vulnerable packages") {
+            throw "Vulnerable NuGet packages were detected."
+          }
+
+      - name: Test release script contracts
+        shell: pwsh
+        run: ./scripts/test-release-scripts.ps1
+
+  sign-and-draft:
+    name: Sign, attest, and create draft
+    needs: validate
+    runs-on: windows-latest
+    environment: release-signing
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SHA: ${{ inputs.commit_sha }}
+    steps:
+      - name: Checkout exact dispatch SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+
+      - name: Restore locked dependencies
+        run: dotnet restore Custodian.slnx --locked-mode --runtime win-x64
+
+      - name: Authenticate to Azure with federated OIDC
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Prepare deterministic publish tree
+        shell: pwsh
+        run: ./scripts/publish-velopack.ps1 -Version $env:RELEASE_VERSION -PrepareOnly
+
+      - name: Select only unsigned PE files
+        id: signing-catalog
+        shell: pwsh
+        run: ./scripts/prepare-release-signing-catalog.ps1
+
+      - name: Sign unsigned publish-tree PEs
+        if: steps.signing-catalog.outputs.unsigned_count != '0'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-catalog: ${{ steps.signing-catalog.outputs.catalog_path }}
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          exclude-azure-cli-credential: false
+          batch-size: 30000
+
+      - name: Verify prepared tree with production publisher policy
+        shell: pwsh
+        run: ./scripts/verify-package-publisher-policy.ps1 -PublishRoot artifacts/velopack-publish/Custodian
+
+      - name: Pack signed tree with Velopack
+        shell: pwsh
+        run: ./scripts/publish-velopack.ps1 -Version $env:RELEASE_VERSION -PackOnly
+
+      - name: Sign generated Setup executable
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\artifacts\velopack\Custodian.DiskAnalyzer-win-Setup.exe
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          exclude-azure-cli-credential: false
+
+      - name: Verify final Velopack assets and signatures
+        shell: pwsh
+        run: |
+          ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION
+          ./scripts/verify-package-publisher-policy.ps1 -PackagePath "artifacts/velopack/Custodian.DiskAnalyzer-$env:RELEASE_VERSION-full.nupkg"
+
+      - name: Generate and validate SPDX SBOM
+        shell: pwsh
+        run: ./scripts/generate-release-sbom.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:RELEASE_SHA -ToolVersion 4.1.5
+
+      - name: Generate lowercase SHA-256 checksums
+        shell: pwsh
+        run: ./scripts/generate-release-checksums.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Verify complete release asset set
+        shell: pwsh
+        run: ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION -IncludeAncillaryAssets
+
+      - name: Attest every release asset
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ github.workspace }}/artifacts/velopack/*
+
+      - name: Create and verify annotated release tag
+        shell: pwsh
+        run: ./scripts/create-release-tag.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:RELEASE_SHA
+
+      - name: Create draft release without overwriting
+        shell: pwsh
+        run: ./scripts/upload-velopack-github.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA
+
+  publish:
+    name: Re-verify and publish immutable release
+    needs: sign-and-draft
+    runs-on: windows-latest
+    environment: release-publish
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SHA: ${{ inputs.commit_sha }}
+    steps:
+      - name: Checkout exact release SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+
+      - name: Re-download draft assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/release-download | Out-Null
+          gh release download $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --dir artifacts/release-download
+
+      - name: Restore locked dependencies
+        run: dotnet restore Custodian.slnx --locked-mode
+
+      - name: Verify downloaded binaries and publisher policy
+        shell: pwsh
+        run: |
+          ./scripts/verify-release-assets.ps1 -Version $env:RELEASE_VERSION -OutputRoot artifacts/release-download -IncludeAncillaryAssets
+          ./scripts/verify-package-publisher-policy.ps1 -PackagePath "artifacts/release-download/Custodian.DiskAnalyzer-$env:RELEASE_VERSION-full.nupkg"
+
+      - name: Verify draft digests, attestations, and tag
+        shell: pwsh
+        run: ./scripts/verify-github-release.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -AssetRoot artifacts/release-download -RequireDraft -VerifyAttestations
+
+      - name: Require immutable-release acceptance
+        shell: pwsh
+        run: |
+          if ("${{ vars.IMMUTABLE_RELEASES_ENABLED }}" -ne "true") {
+            throw "The protected release-publish environment has not recorded immutable-release acceptance."
+          }
+
+      - name: Publish as Latest
+        shell: pwsh
+        run: gh release edit $env:RELEASE_VERSION --repo $env:GITHUB_REPOSITORY --draft=false --latest
+
+      - name: Verify published immutable release
+        shell: pwsh
+        run: |
+          ./scripts/verify-github-release.ps1 -Version $env:RELEASE_VERSION -ExpectedCommit $env:RELEASE_SHA -AssetRoot artifacts/release-download -RequirePublishedImmutable -VerifyAttestations
+          $latest = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --json tagName,isLatest | ConvertFrom-Json
+          if ($latest.Count -ne 1 -or !$latest[0].isLatest -or $latest[0].tagName -ne $env:RELEASE_VERSION) {
+            throw "Custodian $env:RELEASE_VERSION is not the Latest release."
+          }

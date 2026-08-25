@@ -285,6 +285,18 @@
           "Velopack": "[0.0.626, )"
         }
       }
+    },
+    "net10.0-windows7.0/win-x64": {
+      "Onigwrap": {
+        "type": "Transitive",
+        "resolved": "1.0.11",
+        "contentHash": "5/WAxSYWfiiPzp1X13qqdqjFmYLKDD/U7Vh3WCkKxWG9BjqdrXnQE5fCKCFJX+xWvuYLTxwZIVWBwBWObViE8g=="
+      },
+      "SourceGear.sqlite3": {
+        "type": "Transitive",
+        "resolved": "3.50.4.5",
+        "contentHash": "UtnipXhJYZKQOQIfpws/msLK7IRhMplE1CZCaZLIQXRnGD474QVpO/J9nMlQQY8NZueGz1aidjoxDRnrC1NT3Q=="
+      }
     }
   }
 }

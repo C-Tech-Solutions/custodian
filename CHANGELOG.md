@@ -6,6 +6,20 @@ All notable changes to Custodian are tracked here.
 
 _No unreleased changes._
 
+## 1.5.5 - 2026-08-25
+
+### Security
+
+- Required every executable update-package entry to match an explicit C-Tech, Microsoft, or JetBrains publisher and file-identity policy, with whole-chain revocation checking excluding the root certificate.
+- Added bounded archive preflight checks for entry counts, executable counts, individual and aggregate uncompressed sizes, duplicate normalized paths, traversal paths, integer overflow, and inconsistent metadata.
+- Disabled Copy, Move, Recycle, and Permanent Delete for imported `.custodian-scan` data at both command construction and execution boundaries while retaining review and export actions.
+- Added a protected OIDC release workflow with phase-separated publishing, preserved third-party signatures, exact package-policy verification, an SPDX SBOM, SHA-256 checksums, artifact attestations, and immutable publication.
+- Removed GitHub token command-line handling from the release uploader.
+
+### Release note
+
+- No evidence of compromise was identified during the security review.
+
 ## 1.5.4 - 2026-07-11
 
 ### Added

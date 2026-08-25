@@ -54,17 +54,18 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
-## What's New In 1.5.4
+## What's New In 1.5.5
 
-- Update verification now uses a themed, interaction-blocking handoff screen
-  instead of repainting target and folder-map controls with Windows' light
-  disabled backgrounds.
-- Help now includes an About Custodian dialog showing the installed version and
-  a direct link to the GitHub repository.
+- Update packages now enforce explicit publisher and file-identity rules for
+  all executable content, verify certificate revocation, and reject unsafe or
+  oversized archives before extraction.
+- Imported `.custodian-scan` files are review-only for file mutations: Copy,
+  Move, Recycle, and Permanent Delete require a new live scan, while paths and
+  rows can still be copied or exported.
+- Release assets now include an SPDX SBOM, SHA-256 checksums, GitHub artifact
+  attestations, and immutable-release protection.
 
-> **One-time recovery:** Custodian 1.5.1 and 1.5.2 cannot automatically install
-> the updater repair. Download and run the signed 1.5.4 Setup executable once;
-> automatic updates work normally after that installation.
+No evidence of compromise was identified during the security review.
 
 ## Privacy And Safety
 
@@ -91,6 +92,8 @@ Release assets include:
 - `Custodian.DiskAnalyzer-win-Portable.zip` - portable desktop app, TUI, and CLI.
 - `Custodian.DiskAnalyzer-<version>-full.nupkg`, `RELEASES`, and
   `releases.win.json` - Velopack update assets for installed clients.
+- `Custodian-<version>.spdx.json` and `SHA256SUMS.txt` - release provenance and
+  integrity metadata.
 
 ## Requirements
 
@@ -177,15 +180,15 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.4
+.\scripts\publish-velopack.ps1 -Version 1.5.5
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
 GitHub Releases so installed apps can discover updates:
 
 ```powershell
-$env:GITHUB_TOKEN = "<token with release access>"
-.\scripts\upload-velopack-github.ps1 -Publish
+$env:GH_TOKEN = "<token with release access>"
+.\scripts\upload-velopack-github.ps1 -Version 1.5.5 -ExpectedCommit <40-character-SHA>
 ```
 
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
@@ -202,9 +205,9 @@ winget install -e --id Microsoft.Azure.ArtifactSigningClientTools
 ```
 
 Then authenticate with Azure. For local signing, `az login` is enough when the
-Azure CLI is installed and the signed-in identity has the certificate profile
-signer role. For CI, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
-`AZURE_CLIENT_SECRET` for an app registration with the same signing permission.
+Azure CLI is installed and the signed-in identity has the certificate-profile
+signer role. The protected GitHub release workflow uses federated OIDC and does
+not store an Azure client secret.
 
 Provide the signing profile with either a metadata file:
 
@@ -223,7 +226,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.4 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.5 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's
