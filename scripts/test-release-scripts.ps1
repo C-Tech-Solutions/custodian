@@ -23,6 +23,59 @@ function Assert-Throws {
     throw "Expected an error containing '$ExpectedMessage'."
 }
 
+function Get-WorkflowJobLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$WorkflowLines,
+        [Parameter(Mandatory = $true)]
+        [string]$JobName
+    )
+
+    $start = [Array]::IndexOf($WorkflowLines, "  $JobName`:")
+    if ($start -lt 0) {
+        throw "Workflow job '$JobName' was not found."
+    }
+
+    $end = $WorkflowLines.Count
+    for ($index = $start + 1; $index -lt $WorkflowLines.Count; $index++) {
+        if ($WorkflowLines[$index] -match '^  [A-Za-z0-9_-]+:$') {
+            $end = $index
+            break
+        }
+    }
+    return @($WorkflowLines[$start..($end - 1)])
+}
+
+function Get-CheckoutPersistCredentials {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines
+    )
+
+    $checkoutIndex = -1
+    for ($index = 0; $index -lt $JobLines.Count; $index++) {
+        if ($JobLines[$index] -match '^        uses: actions/checkout@') {
+            $checkoutIndex = $index
+            break
+        }
+    }
+    if ($checkoutIndex -lt 0) {
+        throw "Workflow job is missing its checkout step."
+    }
+
+    for ($index = $checkoutIndex + 1; $index -lt $JobLines.Count; $index++) {
+        if ($JobLines[$index] -match '^      - name:') {
+            break
+        }
+        if ($JobLines[$index] -match '^          persist-credentials:\s*(?<value>true|false)\s*$') {
+            return $Matches.value
+        }
+    }
+    throw "Workflow checkout does not declare persist-credentials explicitly."
+}
+
 Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $false -Sign $false -HasSigningOptions $false
 Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $false -Sign $false -HasSigningOptions $false
 Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $true -Sign $false -HasSigningOptions $false
@@ -44,7 +97,8 @@ if ([string]::Join('|', $actualVelopack) -ne [string]::Join('|', $expectedVelopa
 }
 
 $actualRelease = @(Get-CustodianReleaseAssetNames -Version "1.5.5")
-if ($actualRelease.Count -ne 7 -or "Custodian-1.5.5.spdx.json" -notin $actualRelease -or "SHA256SUMS.txt" -notin $actualRelease) {
+$expectedRelease = @($expectedVelopack) + @("Custodian-1.5.5.spdx.json", "SHA256SUMS.txt")
+if ([string]::Join('|', $actualRelease) -ne [string]::Join('|', $expectedRelease)) {
     throw "Unexpected complete release asset contract: $($actualRelease -join ', ')"
 }
 
@@ -77,6 +131,9 @@ if ($parameterNames -contains "Token" -or $uploadScript -match '(?i)--token') {
 }
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml")
+$releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
+$ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
+$ciWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml"))
 $requiredActionPins = @(
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
@@ -127,18 +184,21 @@ foreach ($requiredIndexField in @("PackageId", "FileName", "SHA1", "SHA256", "Si
     }
 }
 
-$ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
-if ([regex]::Matches($ciWorkflow, 'persist-credentials:\s*false').Count -ne 2 -or
-    [regex]::Matches($releaseWorkflow, 'persist-credentials:\s*false').Count -ne 2) {
-    throw "Non-pushing checkout steps must disable persisted GitHub credentials."
+$checkoutContracts = @(
+    @{ Lines = $ciWorkflowLines; Job = "build-test"; Expected = "false" },
+    @{ Lines = $ciWorkflowLines; Job = "vulnerability-scan"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "validate"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "sign-and-draft"; Expected = "true" },
+    @{ Lines = $releaseWorkflowLines; Job = "publish"; Expected = "false" }
+)
+foreach ($contract in $checkoutContracts) {
+    $jobLines = @(Get-WorkflowJobLines -WorkflowLines $contract.Lines -JobName $contract.Job)
+    $actualPersistence = Get-CheckoutPersistCredentials -JobLines $jobLines
+    if ($actualPersistence -cne $contract.Expected) {
+        throw "Workflow job '$($contract.Job)' must set checkout persist-credentials to '$($contract.Expected)'."
+    }
 }
-$releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
-$validateStart = [Array]::IndexOf($releaseWorkflowLines, "  validate:")
-$signingStart = [Array]::IndexOf($releaseWorkflowLines, "  sign-and-draft:")
-if ($validateStart -lt 0 -or $signingStart -le $validateStart) {
-    throw "The pre-environment validation job must not have release-write permission."
-}
-$validateJobLines = @($releaseWorkflowLines[($validateStart + 1)..($signingStart - 1)])
+$validateJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate")
 $permissionsStart = [Array]::IndexOf($validateJobLines, "    permissions:")
 if ($permissionsStart -lt 0) {
     throw "The pre-environment validation job must not have release-write permission."
