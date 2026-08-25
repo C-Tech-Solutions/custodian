@@ -280,6 +280,14 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         [string]::Join("`n", $allWorkflowLines) -match "\\`n") {
         throw "Release workflow must not use YAML decoded escapes."
     }
+    if (@($allWorkflowLines | Where-Object {
+        $_ -notmatch '^\s*#' -and (
+            $_ -match '^\s*\?(?:\s|$)' -or
+            $_ -match '^\s*(?:-\s*)?!{1,2}(?:<[^>]+>|[^\s]+)(?:\s|$)'
+        )
+    }).Count -ne 0) {
+        throw "Release workflow must not use explicit or tagged YAML mapping keys."
+    }
 
     if (@($WorkflowLines | Where-Object {
         $_ -match '^      -\s*\{' -or
@@ -551,6 +559,20 @@ Assert-Throws {
         -RootEnvironmentLines @() `
         -RecoveryJobLines @()
 } "must not use YAML decoded escapes"
+foreach ($nonCanonicalMappingKeyFixture in @(
+    @(
+        "        ? uses",
+        "        : attacker/action@ref"
+    ),
+    @('        !!str uses: attacker/action@ref')
+)) {
+    Assert-Throws {
+        Assert-SupportedRecoveryWorkflowSyntax `
+            -WorkflowLines @("name: Fixture") `
+            -RootEnvironmentLines @() `
+            -RecoveryJobLines $nonCanonicalMappingKeyFixture
+    } "must not use explicit or tagged YAML mapping keys"
+}
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
         -WorkflowLines @("name: Fixture") `
@@ -1349,6 +1371,61 @@ $setupDotnetAction = "        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28
 Assert-ExactActionAllowlist `
     -JobLines $recoverySourceValidationJobLines `
     -ExpectedActionLines @($checkoutAction, $setupDotnetAction)
+$sourceValidationStepContracts = @(
+    @{
+        Name = "Restore locked release-source dependencies"
+        Lines = @(
+            "      - name: Restore locked release-source dependencies",
+            "        working-directory: release-source",
+            "        run: dotnet restore Custodian.slnx --locked-mode"
+        )
+    },
+    @{
+        Name = "Build exact release source"
+        Lines = @(
+            "      - name: Build exact release source",
+            "        working-directory: release-source",
+            "        run: dotnet build Custodian.slnx --configuration Release --no-restore"
+        )
+    },
+    @{
+        Name = "Test exact release source"
+        Lines = @(
+            "      - name: Test exact release source",
+            "        working-directory: release-source",
+            "        run: dotnet test Custodian.slnx --configuration Release --no-build"
+        )
+    },
+    @{
+        Name = "Scan exact release-source dependencies"
+        Lines = @(
+            "      - name: Scan exact release-source dependencies",
+            "        working-directory: release-source",
+            "        shell: pwsh",
+            "        run: |",
+            '          $scan = & dotnet list Custodian.slnx package --vulnerable --include-transitive --no-restore 2>&1',
+            '          $exitCode = $LASTEXITCODE',
+            '          $scan | Write-Host',
+            '          if ($exitCode -ne 0) {',
+            '            throw "NuGet vulnerability scan failed with exit code $exitCode."',
+            "          }",
+            '          if ($scan -match "has the following vulnerable packages") {',
+            '            throw "Vulnerable NuGet packages were detected."',
+            "          }",
+            '          if ($scan -match "\bNU1900\b|\bNU1905\b") {',
+            '            throw "NuGet audit data was incomplete or unavailable."',
+            "          }"
+        )
+    }
+)
+foreach ($sourceValidationStepContract in $sourceValidationStepContracts) {
+    $sourceValidationStepLines = @(Get-WorkflowStepLines `
+        -JobLines $recoverySourceValidationJobLines `
+        -StepName $sourceValidationStepContract.Name)
+    Assert-ExactWorkflowStepLines `
+        -StepLines $sourceValidationStepLines `
+        -ExpectedLines $sourceValidationStepContract.Lines
+}
 Assert-ExactActionAllowlist `
     -JobLines $recoverDraftJobLines `
     -ExpectedActionLines @(
