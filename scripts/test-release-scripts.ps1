@@ -190,6 +190,46 @@ if (!$publishVelopackScript.Contains("-PreserveValidSignature", [StringCompariso
 }
 
 $signScriptPath = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
+$signTokens = $null
+$signErrors = $null
+$signAst = [Management.Automation.Language.Parser]::ParseFile($signScriptPath, [ref]$signTokens, [ref]$signErrors)
+$cacheResolverAst = $signAst.Find({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq "Find-NewestArtifactSigningCacheFile"
+}, $true)
+if ($null -eq $cacheResolverAst) {
+    throw "The signing script is missing its version-aware cache resolver."
+}
+Invoke-Expression $cacheResolverAst.Extent.Text
+
+$cacheFixture = Join-Path ([IO.Path]::GetTempPath()) ("custodian-signing-cache-{0}" -f [Guid]::NewGuid().ToString("N"))
+try {
+    foreach ($version in @("10.0.9", "10.0.10")) {
+        $toolDirectory = Join-Path $cacheFixture "Microsoft.Windows.SDK.BuildTools.$version\bin\x64"
+        New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $toolDirectory "signtool.exe") -Force | Out-Null
+    }
+    $selectedCachedTool = Find-NewestArtifactSigningCacheFile `
+        -CacheRoot $cacheFixture `
+        -PackageName "Microsoft.Windows.SDK.BuildTools" `
+        -Filter "signtool.exe" `
+        -RequiredPathPattern '\\x64\\signtool\.exe$'
+    if ($null -eq $selectedCachedTool -or $selectedCachedTool.FullName -notmatch 'Microsoft\.Windows\.SDK\.BuildTools\.10\.0\.10\\') {
+        throw "The signing cache resolver did not select the newest parsed package version."
+    }
+}
+finally {
+    $resolvedCacheFixture = [IO.Path]::GetFullPath($cacheFixture)
+    $resolvedTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if (!$resolvedCacheFixture.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean an unexpected signing-cache fixture path."
+    }
+    if (Test-Path -LiteralPath $resolvedCacheFixture -PathType Container) {
+        Remove-Item -LiteralPath $resolvedCacheFixture -Recurse -Force
+    }
+}
+
 $knownSignedFile = (Get-Command pwsh -ErrorAction Stop).Source
 $knownSignature = Get-AuthenticodeSignature -LiteralPath $knownSignedFile
 if ($knownSignature.Status -ne [Management.Automation.SignatureStatus]::Valid) {

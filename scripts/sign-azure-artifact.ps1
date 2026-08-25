@@ -57,6 +57,50 @@ function Resolve-RequiredFile {
     return (Resolve-Path -LiteralPath $CandidatePath).Path
 }
 
+function Find-NewestArtifactSigningCacheFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CacheRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$PackageName,
+        [Parameter(Mandatory = $true)]
+        [string]$Filter,
+        [Parameter(Mandatory = $true)]
+        [string]$RequiredPathPattern
+    )
+
+    if (!(Test-Path -LiteralPath $CacheRoot -PathType Container)) {
+        return $null
+    }
+
+    $packagePrefix = "$PackageName."
+    return Get-ChildItem -LiteralPath $CacheRoot -Recurse -Filter $Filter -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match $RequiredPathPattern } |
+        Sort-Object -Property @{
+            Expression = {
+                $relativePath = [IO.Path]::GetRelativePath($CacheRoot, $_.FullName)
+                $packageDirectory = ($relativePath -split '[\\/]', 2)[0]
+                $versionText = if ($packageDirectory.StartsWith($packagePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    $packageDirectory.Substring($packagePrefix.Length)
+                }
+                else {
+                    "0.0"
+                }
+                try {
+                    [version]$versionText
+                }
+                catch {
+                    [version]"0.0"
+                }
+            }
+            Descending = $true
+        }, @{
+            Expression = { $_.FullName }
+            Descending = $true
+        } |
+        Select-Object -First 1
+}
+
 function Find-SignTool {
     param([string]$ExplicitPath)
 
@@ -100,14 +144,13 @@ function Find-SignTool {
     }
 
     $artifactSigningCache = Join-Path $env:LOCALAPPDATA "ArtifactSigning\Microsoft.Windows.SDK.BuildTools"
-    if (Test-Path -LiteralPath $artifactSigningCache -PathType Container) {
-        $cachedTool = Get-ChildItem -LiteralPath $artifactSigningCache -Recurse -Filter "signtool.exe" -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
-            Sort-Object -Property FullName -Descending |
-            Select-Object -First 1
-        if ($null -ne $cachedTool) {
-            return $cachedTool.FullName
-        }
+    $cachedTool = Find-NewestArtifactSigningCacheFile `
+        -CacheRoot $artifactSigningCache `
+        -PackageName "Microsoft.Windows.SDK.BuildTools" `
+        -Filter "signtool.exe" `
+        -RequiredPathPattern '\\x64\\signtool\.exe$'
+    if ($null -ne $cachedTool) {
+        return $cachedTool.FullName
     }
 
     throw "SignTool was not found. Install Microsoft.Azure.ArtifactSigningClientTools or Windows SDK Build Tools, or set CUSTODIAN_SIGNTOOL_PATH."
@@ -137,10 +180,11 @@ function Find-AzureSigningDlib {
             return (Resolve-Path -LiteralPath $candidatePath).Path
         }
         if (Test-Path -LiteralPath $candidatePath -PathType Container) {
-            $cachedDlib = Get-ChildItem -LiteralPath $candidatePath -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '\\x64\\Azure\.CodeSigning\.Dlib\.dll$' } |
-                Sort-Object -Property FullName -Descending |
-                Select-Object -First 1
+            $cachedDlib = Find-NewestArtifactSigningCacheFile `
+                -CacheRoot $candidatePath `
+                -PackageName "Microsoft.ArtifactSigning.Client" `
+                -Filter "Azure.CodeSigning.Dlib.dll" `
+                -RequiredPathPattern '\\x64\\Azure\.CodeSigning\.Dlib\.dll$'
             if ($null -ne $cachedDlib) {
                 return $cachedDlib.FullName
             }
