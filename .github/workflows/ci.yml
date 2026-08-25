@@ -17,10 +17,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           global-json-file: global.json
 
@@ -35,15 +37,21 @@ jobs:
       - name: Test
         run: dotnet test Custodian.slnx -c Release --no-build
 
+      - name: Test release script contracts
+        shell: pwsh
+        run: ./scripts/test-release-scripts.ps1
+
   vulnerability-scan:
     runs-on: windows-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           global-json-file: global.json
 
@@ -54,9 +62,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet list Custodian.slnx package --vulnerable --include-transitive 2>&1 | tee vuln.txt
+          dotnet list Custodian.slnx package --vulnerable --include-transitive --no-restore 2>&1 | tee vuln.txt
           if grep -qiE "has the following vulnerable packages" vuln.txt; then
             echo "::error::Vulnerable NuGet packages detected. See the log above."
+            exit 1
+          fi
+          if grep -qiE "NU1900|NU1905" vuln.txt; then
+            echo "::error::NuGet audit data was incomplete or unavailable."
             exit 1
           fi
           echo "No vulnerable packages found."

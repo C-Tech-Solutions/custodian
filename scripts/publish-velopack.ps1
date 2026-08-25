@@ -7,6 +7,8 @@ param(
     [string]$PackId = "Custodian.DiskAnalyzer",
     [string]$Channel = "win",
     [switch]$PreserveExistingReleases,
+    [switch]$PrepareOnly,
+    [switch]$PackOnly,
     [switch]$Sign,
     [string]$AzureSigningMetadataPath,
     [string]$SignToolPath,
@@ -23,6 +25,25 @@ $appOut = Join-Path $publishRoot "Custodian"
 $output = Join-Path $repo $OutputRoot
 $signScript = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
 $packageIcon = Join-Path $repo "src\Custodian.App\Assets\Custodian.ico"
+$releaseTools = Join-Path $PSScriptRoot "ReleaseTools.psm1"
+
+Import-Module $releaseTools -Force
+
+$hasSigningOptions =
+    ![string]::IsNullOrWhiteSpace($AzureSigningMetadataPath) -or
+    ![string]::IsNullOrWhiteSpace($SignToolPath) -or
+    ![string]::IsNullOrWhiteSpace($AzureSigningDlibPath) -or
+    ![string]::IsNullOrWhiteSpace($TimestampUrl) -or
+    $SkipSigningVerification -or
+    $DebugSigning
+Assert-CustodianPublishPhase `
+    -PrepareOnly $PrepareOnly `
+    -PackOnly $PackOnly `
+    -Sign $Sign `
+    -HasSigningOptions $hasSigningOptions
+
+$shouldPrepare = !$PackOnly
+$shouldPack = !$PrepareOnly
 
 function Get-NumericVersion {
     param(
@@ -85,15 +106,85 @@ function New-AzureSigningTemplate {
 
 $numericVersion = Get-NumericVersion -InputVersion $Version
 
-if (Test-Path $publishRoot) {
-    Remove-Item $publishRoot -Recurse -Force
+if ($shouldPrepare) {
+    if (Test-Path $publishRoot) {
+        Remove-Item $publishRoot -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Force -Path $appOut | Out-Null
+
+    dotnet restore (Join-Path $repo "Custodian.slnx") --locked-mode --runtime $Runtime
+    if ($LASTEXITCODE -ne 0) {
+        throw "Locked restore failed before preparing the Velopack publish tree."
+    }
+
+    dotnet publish (Join-Path $repo "src\Custodian.App\Custodian.App.csproj") `
+        -c $Configuration `
+        -r $Runtime `
+        --self-contained true `
+        --no-restore `
+        -p:PublishSingleFile=false `
+        -p:Version=$Version `
+        -p:AssemblyVersion=$numericVersion `
+        -p:FileVersion=$numericVersion `
+        -p:InformationalVersion=$Version `
+        -o $appOut
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custodian.App publish failed with exit code $LASTEXITCODE."
+    }
+
+    dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
+        -c $Configuration `
+        -r $Runtime `
+        --self-contained true `
+        --no-restore `
+        -p:PublishSingleFile=false `
+        -p:Version=$Version `
+        -p:AssemblyVersion=$numericVersion `
+        -p:FileVersion=$numericVersion `
+        -p:InformationalVersion=$Version `
+        -o (Join-Path $appOut "cli")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custodian.Cli publish failed with exit code $LASTEXITCODE."
+    }
+
+    dotnet publish (Join-Path $repo "src\Custodian.Tui\Custodian.Tui.csproj") `
+        -c $Configuration `
+        -r $Runtime `
+        --self-contained true `
+        --no-restore `
+        -p:PublishSingleFile=false `
+        -p:Version=$Version `
+        -p:AssemblyVersion=$numericVersion `
+        -p:FileVersion=$numericVersion `
+        -p:InformationalVersion=$Version `
+        -o (Join-Path $appOut "tui")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custodian.Tui publish failed with exit code $LASTEXITCODE."
+    }
+
+    Write-Host "Velopack publish input prepared: $appOut"
+}
+
+if (!$shouldPack) {
+    return
+}
+
+if (!(Test-Path -LiteralPath $appOut -PathType Container)) {
+    throw "Prepared Velopack publish input was not found at '$appOut'. Run with -PrepareOnly first."
+}
+
+foreach ($requiredFile in @("Custodian.App.exe", "cli\Custodian.Cli.exe", "tui\Custodian.Tui.exe")) {
+    $requiredPath = Join-Path $appOut $requiredFile
+    if (!(Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Prepared Velopack publish input is incomplete. Missing '$requiredPath'."
+    }
 }
 
 if (!$PreserveExistingReleases -and (Test-Path $output)) {
     Remove-Item $output -Recurse -Force
 }
 
-New-Item -ItemType Directory -Force -Path $appOut | Out-Null
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
 if (!(Test-Path -LiteralPath $packageIcon -PathType Leaf)) {
@@ -101,39 +192,9 @@ if (!(Test-Path -LiteralPath $packageIcon -PathType Leaf)) {
 }
 
 dotnet tool restore --tool-manifest (Join-Path $repo "dotnet-tools.json")
-
-dotnet publish (Join-Path $repo "src\Custodian.App\Custodian.App.csproj") `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -p:PublishSingleFile=false `
-    -p:Version=$Version `
-    -p:AssemblyVersion=$numericVersion `
-    -p:FileVersion=$numericVersion `
-    -p:InformationalVersion=$Version `
-    -o $appOut
-
-dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -p:PublishSingleFile=false `
-    -p:Version=$Version `
-    -p:AssemblyVersion=$numericVersion `
-    -p:FileVersion=$numericVersion `
-    -p:InformationalVersion=$Version `
-    -o (Join-Path $appOut "cli")
-
-dotnet publish (Join-Path $repo "src\Custodian.Tui\Custodian.Tui.csproj") `
-    -c $Configuration `
-    -r $Runtime `
-    --self-contained true `
-    -p:PublishSingleFile=false `
-    -p:Version=$Version `
-    -p:AssemblyVersion=$numericVersion `
-    -p:FileVersion=$numericVersion `
-    -p:InformationalVersion=$Version `
-    -o (Join-Path $appOut "tui")
+if ($LASTEXITCODE -ne 0) {
+    throw "The pinned Velopack tool restore failed."
+}
 
 $vpkArgs = @(
     "vpk",
@@ -156,6 +217,14 @@ if ($Sign) {
 }
 
 dotnet @vpkArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "Velopack packaging failed with exit code $LASTEXITCODE."
+}
+
+$internalAssetIndex = Join-Path $output "assets.$Channel.json"
+if (Test-Path -LiteralPath $internalAssetIndex -PathType Leaf) {
+    Remove-Item -LiteralPath $internalAssetIndex -Force
+}
 
 Write-Host "Velopack publish input: $appOut"
 Write-Host "Velopack release output: $output"

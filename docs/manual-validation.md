@@ -30,14 +30,16 @@
 - Export CSV and JSON from GUI, TUI, and CLI.
 - In a dev/raw run, confirm startup auto-update does not show a modal, then use Help > Check for Updates and confirm it reports that updates require the installed Custodian app.
 - In each desktop theme, hover an ordinary control, the summary-panel collapse button, and the pie-zoom reset button; confirm tooltip text remains readable against its background.
-- Build an update package with `scripts\publish-velopack.ps1 -Version 1.5.4` and confirm Velopack emits release assets under `artifacts\velopack`.
-- Build a signed update package with `scripts\publish-velopack.ps1 -Version 1.5.4 -Sign` after setting Azure Artifact Signing metadata, then confirm the script verifies the generated signatures.
+- Run `scripts\publish-velopack.ps1 -Version 1.5.5 -PrepareOnly`, sign only unsigned PEs, then run `scripts\publish-velopack.ps1 -Version 1.5.5 -PackOnly`; confirm the prepared tree is unchanged during packing and Velopack emits exactly five base assets.
+- Confirm the protected release workflow preserves valid Microsoft and JetBrains signatures, signs unsigned PEs and Setup.exe as C-Tech Solutions LLC, and validates the final package with Custodian's production publisher policy.
 - Validate a signed update package containing framework dependencies such as `Accessibility.dll`; confirm whole-package checksum validation succeeds, every PE passes Windows trust verification, and Custodian-owned binaries are signed specifically by C-Tech Solutions LLC.
 - Offer a package with an unsigned or incorrectly signed `Custodian.*` binary, choose Restart now, and confirm Custodian displays an update error and remains usable instead of closing or entering a stuck shutdown state.
-- On a machine running Custodian 1.5.1 or 1.5.2, run the signed 1.5.4 Setup executable once, confirm the installed version is 1.5.4, and then validate a later local-feed update applies and relaunches without another prompt.
-- From installed Custodian 1.5.3, accept the 1.5.4 restart prompt and confirm the themed update shield keeps Targets and Folder Map dark, shows verification/install progress, and blocks mouse, keyboard shortcuts, drag/drop, Alt+F4, and title-bar close until handoff completes.
+- On a disposable Windows machine running Custodian 1.4, accept the normal 1.5.5 update, confirm the installed version is 1.5.5, and confirm GUI, CLI, and TUI relaunch correctly.
+- Offer genuine and modified 1.5.5 packages; confirm the genuine package is accepted and the signer-bypass and oversized packages are rejected before installation or extraction.
+- Load an imported `.custodian-scan`; confirm Copy, Move, Recycle, and Permanent Delete are disabled and direct invocation is blocked while Copy Path, Copy Rows, CSV/JSON export, and guarded Open/Reveal still work.
+- Make certificate revocation unavailable; confirm only the update is blocked with retry guidance and the installed application remains usable.
 - Force update preparation and scheduling failures and confirm the shield closes, prior focus and normal input return, settings persistence resumes, and the update error dialog remains visible.
-- Open Help > About Custodian, confirm it reports version 1.5.4, and confirm Open GitHub launches `https://github.com/ctech1313/custodian`.
+- Open Help > About Custodian, confirm it reports version 1.5.5, and confirm Open GitHub launches `https://github.com/ctech1313/custodian`.
 - For unsigned local update validation, run `scripts\prepare-local-update-test.ps1`, install the preserved baseline setup, set `CUSTODIAN_UPDATE_SOURCE` to the local release folder, and confirm Help > Check for Updates prompts for the update.
 - Enable Help > Automatically download updates on startup, relaunch, and confirm the available update downloads without a download prompt but still asks before restart/install.
 - Disable Help > Automatically download updates on startup, relaunch, and confirm no automatic update check/download starts; manual Help > Check for Updates still works.
