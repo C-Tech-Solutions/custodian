@@ -11,6 +11,7 @@ param(
     [string]$SignToolPath,
     [string]$DlibPath,
     [string]$TimestampUrl,
+    [switch]$PreserveValidSignature,
     [switch]$SkipVerify,
     [switch]$DebugSigning
 )
@@ -98,6 +99,17 @@ function Find-SignTool {
         }
     }
 
+    $artifactSigningCache = Join-Path $env:LOCALAPPDATA "ArtifactSigning\Microsoft.Windows.SDK.BuildTools"
+    if (Test-Path -LiteralPath $artifactSigningCache -PathType Container) {
+        $cachedTool = Get-ChildItem -LiteralPath $artifactSigningCache -Recurse -Filter "signtool.exe" -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object -Property FullName -Descending |
+            Select-Object -First 1
+        if ($null -ne $cachedTool) {
+            return $cachedTool.FullName
+        }
+    }
+
     throw "SignTool was not found. Install Microsoft.Azure.ArtifactSigningClientTools or Windows SDK Build Tools, or set CUSTODIAN_SIGNTOOL_PATH."
 }
 
@@ -116,12 +128,22 @@ function Find-AzureSigningDlib {
         (Join-Path ${env:ProgramFiles(x86)} "Microsoft\ArtifactSigningClientTools\bin\x64\Azure.CodeSigning.Dlib.dll"),
         (Join-Path $env:ProgramFiles "Microsoft\ArtifactSigningClientTools\bin\Azure.CodeSigning.Dlib.dll"),
         (Join-Path $env:ProgramFiles "Microsoft\ArtifactSigningClientTools\bin\x64\Azure.CodeSigning.Dlib.dll"),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\MicrosoftArtifactSigningClientTools\Azure.CodeSigning.Dlib.dll")
+        (Join-Path $env:LOCALAPPDATA "Microsoft\MicrosoftArtifactSigningClientTools\Azure.CodeSigning.Dlib.dll"),
+        (Join-Path $env:LOCALAPPDATA "ArtifactSigning\Microsoft.ArtifactSigning.Client")
     )
 
     foreach ($candidatePath in $candidatePaths) {
         if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidatePath).Path
+        }
+        if (Test-Path -LiteralPath $candidatePath -PathType Container) {
+            $cachedDlib = Get-ChildItem -LiteralPath $candidatePath -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\Azure\.CodeSigning\.Dlib\.dll$' } |
+                Sort-Object -Property FullName -Descending |
+                Select-Object -First 1
+            if ($null -ne $cachedDlib) {
+                return $cachedDlib.FullName
+            }
         }
     }
 
@@ -221,6 +243,26 @@ function New-SigningMetadataFile {
     }
 }
 
+$resolvedPaths = @()
+foreach ($inputPath in $Path) {
+    $resolvedPath = (Resolve-Path -LiteralPath $inputPath).Path
+    if ($PreserveValidSignature) {
+        $existingSignature = Get-AuthenticodeSignature -LiteralPath $resolvedPath
+        if ($existingSignature.Status -eq [Management.Automation.SignatureStatus]::Valid) {
+            Write-Host "Preserving valid Authenticode signature on $resolvedPath"
+            continue
+        }
+        if ($existingSignature.Status -ne [Management.Automation.SignatureStatus]::NotSigned) {
+            throw "Refusing to replace the invalid Authenticode signature on '$resolvedPath': $($existingSignature.StatusMessage)"
+        }
+    }
+    $resolvedPaths += $resolvedPath
+}
+
+if ($resolvedPaths.Count -eq 0) {
+    return
+}
+
 $resolvedTimestampUrl = Get-FirstConfiguredValue `
     -ExplicitValue $TimestampUrl `
     -EnvironmentNames @("CUSTODIAN_SIGNING_TIMESTAMP_URL")
@@ -239,10 +281,6 @@ $metadataFile = New-SigningMetadataFile `
     -ExcludeCredentials $ExcludeCredentials
 
 try {
-    $resolvedPaths = @()
-    foreach ($inputPath in $Path) {
-        $resolvedPaths += (Resolve-Path -LiteralPath $inputPath).Path
-    }
 
     foreach ($resolvedPath in $resolvedPaths) {
         Write-Host "Signing $resolvedPath"

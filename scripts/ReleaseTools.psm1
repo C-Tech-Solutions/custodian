@@ -13,8 +13,8 @@ function Assert-CustodianPublishPhase {
         throw "-PrepareOnly and -PackOnly cannot be used together."
     }
 
-    if (($PrepareOnly -or $PackOnly) -and ($Sign -or $HasSigningOptions)) {
-        throw "Phase-only publishing cannot use Velopack signing options. Prepare the tree, sign only unsigned PEs, then pack the prepared tree."
+    if ($PrepareOnly -and ($Sign -or $HasSigningOptions)) {
+        throw "Prepare-only publishing cannot use Velopack signing options. Prepare the tree first, then sign generated Velopack PEs while packing."
     }
 
     if (!$Sign -and $HasSigningOptions) {

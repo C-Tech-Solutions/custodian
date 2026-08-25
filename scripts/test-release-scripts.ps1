@@ -80,8 +80,8 @@ Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $false -Sign $false -
 Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $false -Sign $false -HasSigningOptions $false
 Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $true -Sign $false -HasSigningOptions $false
 Assert-Throws { Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $true -Sign $false -HasSigningOptions $false } "cannot be used together"
-Assert-Throws { Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $false -Sign $true -HasSigningOptions $false } "Phase-only publishing"
-Assert-Throws { Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $true -Sign $false -HasSigningOptions $true } "Phase-only publishing"
+Assert-Throws { Assert-CustodianPublishPhase -PrepareOnly $true -PackOnly $false -Sign $true -HasSigningOptions $false } "Prepare-only publishing"
+Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $true -Sign $true -HasSigningOptions $true
 Assert-Throws { Assert-CustodianPublishPhase -PrepareOnly $false -PackOnly $false -Sign $false -HasSigningOptions $true } "without -Sign"
 
 $expectedVelopack = @(
@@ -153,11 +153,7 @@ foreach ($pin in $requiredActionPins) {
     }
 }
 $releaseStepOrder = @(
-    "- name: Pack signed tree with Velopack",
-    "- name: Select only unsigned portable PEs",
-    "- name: Sign unsigned portable PEs",
-    "- name: Repack signed portable archive",
-    "- name: Sign generated Setup executable",
+    "- name: Pack signed tree and sign generated Velopack PEs",
     "- name: Verify final Velopack assets and signatures"
 )
 $previousStepIndex = -1
@@ -168,14 +164,61 @@ foreach ($step in $releaseStepOrder) {
     }
     $previousStepIndex = $stepIndex
 }
-foreach ($scriptName in @("prepare-portable-signing-catalog.ps1", "complete-portable-signing.ps1")) {
+foreach ($scriptName in @("prepare-portable-signing-catalog.ps1", "complete-portable-signing.ps1", "sign-azure-artifact.ps1")) {
     $scriptPath = Join-Path $PSScriptRoot $scriptName
     $tokens = $null
     $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
     if ($errors.Count -ne 0) {
-        throw "Portable signing script '$scriptName' has PowerShell parse errors."
+        throw "Release signing script '$scriptName' has PowerShell parse errors."
     }
+}
+foreach ($generatedSigningContract in @(
+    "-PackOnly -Sign",
+    "CUSTODIAN_AZURE_SIGNING_ENDPOINT",
+    "CUSTODIAN_AZURE_SIGNING_ACCOUNT",
+    "CUSTODIAN_AZURE_SIGNING_PROFILE"
+)) {
+    if (!$releaseWorkflow.Contains($generatedSigningContract, [StringComparison]::Ordinal)) {
+        throw "Release workflow is missing generated-PE signing contract '$generatedSigningContract'."
+    }
+}
+
+$publishVelopackScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "publish-velopack.ps1")
+if (!$publishVelopackScript.Contains("-PreserveValidSignature", [StringComparison]::Ordinal)) {
+    throw "Velopack's signing template must preserve valid Authenticode signatures."
+}
+
+$signScriptPath = Join-Path $PSScriptRoot "sign-azure-artifact.ps1"
+$knownSignedFile = (Get-Command pwsh -ErrorAction Stop).Source
+$knownSignature = Get-AuthenticodeSignature -LiteralPath $knownSignedFile
+if ($knownSignature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+    throw "The release contract test requires a validly signed PowerShell host."
+}
+$knownHashBefore = (Get-FileHash -LiteralPath $knownSignedFile -Algorithm SHA256).Hash
+& $signScriptPath -Path $knownSignedFile -PreserveValidSignature
+$knownHashAfter = (Get-FileHash -LiteralPath $knownSignedFile -Algorithm SHA256).Hash
+if ($knownHashAfter -cne $knownHashBefore) {
+    throw "Preserving a valid Authenticode signature changed the signed file."
+}
+
+$tamperedSignedFile = [IO.Path]::GetTempFileName()
+try {
+    Copy-Item -LiteralPath $knownSignedFile -Destination $tamperedSignedFile -Force
+    $stream = [IO.File]::Open($tamperedSignedFile, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        $stream.Position = [Math]::Min(1024, $stream.Length - 1)
+        $originalByte = $stream.ReadByte()
+        $stream.Position--
+        $stream.WriteByte($originalByte -bxor 1)
+    }
+    finally {
+        $stream.Dispose()
+    }
+    Assert-Throws { & $signScriptPath -Path $tamperedSignedFile -PreserveValidSignature } "Refusing to replace the invalid Authenticode signature"
+}
+finally {
+    Remove-Item -LiteralPath $tamperedSignedFile -Force
 }
 if ($releaseWorkflow -match '(?i)(client-secret|azure-client-secret|--token)') {
     throw "Release workflow contains a stored-secret or command-line token path."
