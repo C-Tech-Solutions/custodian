@@ -47,6 +47,30 @@ function Get-WorkflowJobLines {
     return @($WorkflowLines[$start..($end - 1)])
 }
 
+function Get-WorkflowStepLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines,
+        [Parameter(Mandatory = $true)]
+        [string]$StepName
+    )
+
+    $start = [Array]::IndexOf($JobLines, "      - name: $StepName")
+    if ($start -lt 0) {
+        throw "Workflow step '$StepName' was not found."
+    }
+
+    $end = $JobLines.Count
+    for ($index = $start + 1; $index -lt $JobLines.Count; $index++) {
+        if ($JobLines[$index] -match '^      -\s') {
+            $end = $index
+            break
+        }
+    }
+    return @($JobLines[$start..($end - 1)])
+}
+
 function Get-CheckoutPersistCredentials {
     param(
         [Parameter(Mandatory = $true)]
@@ -611,18 +635,9 @@ if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: rea
     throw "The pre-environment validation job must not have release-write permission."
 }
 $recoveryValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery")
-$recoveryCheckoutStart = [Array]::IndexOf($recoveryValidationJobLines, "      - name: Checkout exact workflow SHA")
-if ($recoveryCheckoutStart -lt 0) {
-    throw "Recovery validation is missing its trusted workflow checkout."
-}
-$recoveryCheckoutEnd = $recoveryValidationJobLines.Count
-for ($index = $recoveryCheckoutStart + 1; $index -lt $recoveryValidationJobLines.Count; $index++) {
-    if ($recoveryValidationJobLines[$index] -match '^      -\s') {
-        $recoveryCheckoutEnd = $index
-        break
-    }
-}
-$recoveryCheckoutLines = @($recoveryValidationJobLines[$recoveryCheckoutStart..($recoveryCheckoutEnd - 1)])
+$recoveryCheckoutLines = @(Get-WorkflowStepLines `
+    -JobLines $recoveryValidationJobLines `
+    -StepName "Checkout exact workflow SHA")
 if (!($recoveryCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
     !($recoveryCheckoutLines -contains '          ref: ${{ github.sha }}') -or
     !($recoveryCheckoutLines -contains "          persist-credentials: false") -or
@@ -637,18 +652,9 @@ if ($recoveryPermissionsStart -lt 0 -or
 if ($recoveryValidationJobLines -contains '      GH_TOKEN: ${{ github.token }}') {
     throw "Recovery validation must not expose the write-capable token at job scope."
 }
-$draftInspectionStart = [Array]::IndexOf($recoveryValidationJobLines, "      - name: Verify exact empty draft and annotated source tag")
-if ($draftInspectionStart -lt 0) {
-    throw "Recovery validation is missing its exact draft-inspection step."
-}
-$draftInspectionEnd = $recoveryValidationJobLines.Count
-for ($index = $draftInspectionStart + 1; $index -lt $recoveryValidationJobLines.Count; $index++) {
-    if ($recoveryValidationJobLines[$index] -match '^      -\s') {
-        $draftInspectionEnd = $index
-        break
-    }
-}
-$draftInspectionLines = @($recoveryValidationJobLines[$draftInspectionStart..($draftInspectionEnd - 1)])
+$draftInspectionLines = @(Get-WorkflowStepLines `
+    -JobLines $recoveryValidationJobLines `
+    -StepName "Verify exact empty draft and annotated source tag")
 $recoveryTokenAssignments = @($recoveryValidationJobLines | Where-Object { $_ -match '^\s+GH_TOKEN:' })
 if ($recoveryTokenAssignments.Count -ne 1 -or
     !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
@@ -677,6 +683,20 @@ if ($recoverySourcePermissionsStart -lt 0 -or
     throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
 }
 $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
+$validatedSourceCheckoutLines = @(Get-WorkflowStepLines `
+    -JobLines $recoverySourceValidationJobLines `
+    -StepName "Checkout exact release source")
+$signingSourceCheckoutLines = @(Get-WorkflowStepLines `
+    -JobLines $recoverDraftJobLines `
+    -StepName "Checkout exact release source")
+foreach ($sourceCheckoutLines in @($validatedSourceCheckoutLines, $signingSourceCheckoutLines)) {
+    if (!($sourceCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
+        !($sourceCheckoutLines -contains '          ref: ${{ inputs.recovery_source_sha }}') -or
+        !($sourceCheckoutLines -contains "          path: release-source") -or
+        !($sourceCheckoutLines -contains "          persist-credentials: false")) {
+        throw "Recovery source validation and signing must use the same exact source checkout."
+    }
+}
 $publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
 if (!($recoverySourceValidationJobLines -contains "    needs: validate-recovery") -or
     !($recoverDraftJobLines -contains "    needs: validate-recovery-source") -or
