@@ -25,22 +25,22 @@ if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
 $sourceRepo = (Resolve-Path -LiteralPath $SourceRepositoryRoot).Path
 $output = (Resolve-Path -LiteralPath (Join-Path $sourceRepo $OutputRoot)).Path
 $normalizedCommit = $ExpectedCommit.ToLowerInvariant()
-$tagRef = "refs/tags/$Version"
-
-if ((git -C $sourceRepo cat-file -t $tagRef).Trim() -ne "tag" -or
-    (git -C $sourceRepo rev-list -n 1 $tagRef).Trim().ToLowerInvariant() -ne $normalizedCommit) {
-    throw "Verified local annotated tag '$Version' at '$normalizedCommit' is required."
-}
-$remoteTarget = @(git -C $sourceRepo ls-remote --tags origin "$tagRef^{}")
-if ($remoteTarget.Count -ne 1 -or ($remoteTarget[0] -split '\s+')[0].ToLowerInvariant() -ne $normalizedCommit) {
-    throw "Remote annotated tag '$Version' does not resolve to '$normalizedCommit'."
-}
+Assert-CustodianRemoteReleaseTagIdentity `
+    -RepositoryRoot $sourceRepo `
+    -Version $Version `
+    -ExpectedCommit $normalizedCommit
 
 $release = gh api "repos/$Repository/releases/$DraftId" | ConvertFrom-Json -Depth 50
 if ($LASTEXITCODE -ne 0 -or $null -eq $release) {
     throw "Unable to retrieve draft release '$DraftId'."
 }
-Assert-CustodianEmptyDraftRelease -Release $release -DraftId $DraftId -Version $Version
+$notes = Get-Content -Raw -LiteralPath (Join-Path $sourceRepo "docs\releases\$Version.md")
+Assert-CustodianEmptyDraftRelease `
+    -Release $release `
+    -DraftId $DraftId `
+    -Version $Version `
+    -ExpectedTitle "Custodian $Version" `
+    -ExpectedBody $notes
 
 $tagMatches = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
 if ($tagMatches.Count -ne 1 -or [Int64]$tagMatches[0].id -ne $DraftId) {
@@ -56,22 +56,25 @@ $assetPaths = foreach ($assetName in Get-CustodianReleaseAssetNames -Version $Ve
 }
 
 $uploadedAssetIds = [Collections.Generic.List[Int64]]::new()
-$attemptedAssetNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 try {
     foreach ($assetPath in $assetPaths) {
         $assetName = [IO.Path]::GetFileName($assetPath)
-        [void]$attemptedAssetNames.Add($assetName)
-        gh release upload $Version --repo $Repository -- $assetPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to upload '$assetName'."
+        $escapedName = [Uri]::EscapeDataString($assetName)
+        $uploadUrl = "https://uploads.github.com/repos/$Repository/releases/$DraftId/assets?name=$escapedName"
+        $uploadedJson = (gh api `
+            --method POST `
+            -H "Content-Type: application/octet-stream" `
+            --input $assetPath `
+            $uploadUrl | Out-String)
+        $uploadExitCode = $LASTEXITCODE
+        if ($uploadExitCode -ne 0) {
+            throw "Upload outcome for '$assetName' was not confirmed. No unknown asset will be deleted automatically."
         }
-
-        $afterUpload = gh api "repos/$Repository/releases/$DraftId" | ConvertFrom-Json -Depth 50
-        $uploadedMatches = @($afterUpload.assets | Where-Object { $_.name -ceq $assetName })
-        if ($LASTEXITCODE -ne 0 -or $uploadedMatches.Count -ne 1) {
-            throw "Uploaded asset '$assetName' was not uniquely visible on draft '$DraftId'."
+        $uploaded = ConvertFrom-Json -InputObject $uploadedJson -Depth 20
+        if ($null -eq $uploaded -or [Int64]$uploaded.id -le 0 -or $uploaded.name -cne $assetName) {
+            throw "Upload response for '$assetName' did not prove ownership of the created asset."
         }
-        $uploadedAssetIds.Add([Int64]$uploadedMatches[0].id)
+        $uploadedAssetIds.Add([Int64]$uploaded.id)
     }
 
     $completed = gh api "repos/$Repository/releases/$DraftId" | ConvertFrom-Json -Depth 50
@@ -99,19 +102,7 @@ try {
 catch {
     $originalFailure = $_.Exception.Message
     $cleanupFailures = [Collections.Generic.List[string]]::new()
-    $cleanupIds = [Collections.Generic.HashSet[Int64]]::new()
     foreach ($assetId in $uploadedAssetIds) {
-        [void]$cleanupIds.Add($assetId)
-    }
-    $cleanupDraft = gh api "repos/$Repository/releases/$DraftId" | ConvertFrom-Json -Depth 50
-    if ($LASTEXITCODE -eq 0 -and $cleanupDraft.draft -and [Int64]$cleanupDraft.id -eq $DraftId) {
-        foreach ($asset in $cleanupDraft.assets) {
-            if ($attemptedAssetNames.Contains([string]$asset.name)) {
-                [void]$cleanupIds.Add([Int64]$asset.id)
-            }
-        }
-    }
-    foreach ($assetId in $cleanupIds) {
         gh api --method DELETE "repos/$Repository/releases/assets/$assetId"
         if ($LASTEXITCODE -ne 0) {
             $cleanupFailures.Add($assetId.ToString())

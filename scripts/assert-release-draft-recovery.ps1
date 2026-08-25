@@ -40,24 +40,22 @@ if (@(git -C $repo status --porcelain).Count -ne 0) {
     throw "Release recovery checkout is not clean."
 }
 
-$tagRef = "refs/tags/$Version"
-$remoteTag = @(git -C $repo ls-remote --tags origin $tagRef "$tagRef^{}" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
-if ($LASTEXITCODE -ne 0) {
-    throw "Unable to inspect remote tag state."
-}
-$directTag = @($remoteTag | Where-Object { ($_ -split '\s+')[1] -ceq $tagRef })
-$peeledTag = @($remoteTag | Where-Object { ($_ -split '\s+')[1] -ceq "$tagRef^{}" })
-if ($directTag.Count -ne 1 -or
-    $peeledTag.Count -ne 1 -or
-    ($peeledTag[0] -split '\s+')[0].ToLowerInvariant() -ne $normalizedSourceCommit) {
-    throw "Existing tag '$Version' is not an annotated tag at '$normalizedSourceCommit'. It will not be moved or replaced."
-}
+Assert-CustodianRemoteReleaseTagIdentity `
+    -RepositoryRoot $repo `
+    -Version $Version `
+    -ExpectedCommit $normalizedSourceCommit
 
 $release = gh api "repos/$Repository/releases/$DraftId" | ConvertFrom-Json -Depth 50
 if ($LASTEXITCODE -ne 0 -or $null -eq $release) {
     throw "Unable to retrieve draft release '$DraftId'."
 }
-Assert-CustodianEmptyDraftRelease -Release $release -DraftId $DraftId -Version $Version
+$notes = Get-Content -Raw -LiteralPath (Join-Path $repo "docs\releases\$Version.md")
+Assert-CustodianEmptyDraftRelease `
+    -Release $release `
+    -DraftId $DraftId `
+    -Version $Version `
+    -ExpectedTitle "Custodian $Version" `
+    -ExpectedBody $notes
 
 $tagMatches = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
 if ($tagMatches.Count -ne 1 -or [Int64]$tagMatches[0].id -ne $DraftId) {

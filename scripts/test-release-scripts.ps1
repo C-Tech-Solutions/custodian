@@ -110,21 +110,46 @@ $emptyDraft = [pscustomobject]@{
     tag_name = "1.5.5"
     draft = $true
     immutable = $false
+    prerelease = $false
+    name = "Custodian 1.5.5"
+    body = "Approved notes`n"
     assets = @()
 }
-Assert-CustodianEmptyDraftRelease -Release $emptyDraft -DraftId 376286670 -Version "1.5.5"
-Assert-Throws { Assert-CustodianEmptyDraftRelease -Release $emptyDraft -DraftId 376286671 -Version "1.5.5" } "does not match"
-Assert-Throws { Assert-CustodianEmptyDraftRelease -Release $emptyDraft -DraftId 376286670 -Version "1.5.6" } "does not match"
+$emptyDraftArguments = @{
+    Release = $emptyDraft
+    DraftId = 376286670
+    Version = "1.5.5"
+    ExpectedTitle = "Custodian 1.5.5"
+    ExpectedBody = "Approved notes`r`n"
+}
+Assert-CustodianEmptyDraftRelease @emptyDraftArguments
+$wrongDraftIdArguments = $emptyDraftArguments.Clone()
+$wrongDraftIdArguments.DraftId = 376286671
+Assert-Throws { Assert-CustodianEmptyDraftRelease @wrongDraftIdArguments } "does not match"
+$wrongVersionArguments = $emptyDraftArguments.Clone()
+$wrongVersionArguments.Version = "1.5.6"
+Assert-Throws { Assert-CustodianEmptyDraftRelease @wrongVersionArguments } "does not match"
 Assert-Throws {
     Assert-CustodianEmptyDraftRelease -Release ([pscustomobject]@{
-        id = 376286670; tag_name = "1.5.5"; draft = $false; immutable = $true; assets = @()
-    }) -DraftId 376286670 -Version "1.5.5"
+        id = 376286670; tag_name = "1.5.5"; draft = $false; immutable = $true; prerelease = $false
+        name = "Custodian 1.5.5"; body = "Approved notes"; assets = @()
+    }) -DraftId 376286670 -Version "1.5.5" -ExpectedTitle "Custodian 1.5.5" -ExpectedBody "Approved notes"
 } "not a mutable draft"
 Assert-Throws {
     Assert-CustodianEmptyDraftRelease -Release ([pscustomobject]@{
-        id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; assets = @([pscustomobject]@{ name = "existing.exe" })
-    }) -DraftId 376286670 -Version "1.5.5"
+        id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $false
+        name = "Custodian 1.5.5"; body = "Approved notes"; assets = @([pscustomobject]@{ name = "existing.exe" })
+    }) -DraftId 376286670 -Version "1.5.5" -ExpectedTitle "Custodian 1.5.5" -ExpectedBody "Approved notes"
 } "not empty"
+foreach ($invalidMetadata in @(
+    [pscustomobject]@{ id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $true; name = "Custodian 1.5.5"; body = "Approved notes"; assets = @() },
+    [pscustomobject]@{ id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $false; name = "Wrong title"; body = "Approved notes"; assets = @() },
+    [pscustomobject]@{ id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $false; name = "Custodian 1.5.5"; body = "Wrong notes"; assets = @() }
+)) {
+    Assert-Throws {
+        Assert-CustodianEmptyDraftRelease -Release $invalidMetadata -DraftId 376286670 -Version "1.5.5" -ExpectedTitle "Custodian 1.5.5" -ExpectedBody "Approved notes"
+    } "metadata does not match"
+}
 
 $secretMarker = "must-not-appear-in-process-arguments"
 $arguments = New-CustodianDraftReleaseArguments `
@@ -165,6 +190,21 @@ foreach ($recoveryScriptName in @("assert-release-draft-recovery.ps1", "resume-e
     }
     if ($recoveryScript -match '(?i)--token') {
         throw "Recovery script '$recoveryScriptName' exposes a command-line token path."
+    }
+}
+$resumeDraftScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "resume-empty-release-draft.ps1")
+foreach ($ownedUploadContract in @(
+    "https://uploads.github.com/",
+    "`$uploadedAssetIds.Add([Int64]`$uploaded.id)",
+    "No unknown asset will be deleted automatically"
+)) {
+    if (!$resumeDraftScript.Contains($ownedUploadContract, [StringComparison]::Ordinal)) {
+        throw "Empty-draft recovery is missing exact asset-ownership contract '$ownedUploadContract'."
+    }
+}
+foreach ($unsafeCleanupContract in @("attemptedAssetNames", "cleanupDraft.assets")) {
+    if ($resumeDraftScript.Contains($unsafeCleanupContract, [StringComparison]::Ordinal)) {
+        throw "Empty-draft recovery may delete a concurrent asset through unsafe contract '$unsafeCleanupContract'."
     }
 }
 
