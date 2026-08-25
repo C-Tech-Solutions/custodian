@@ -218,8 +218,9 @@ if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: rea
 }
 
 foreach ($auditContract in @("--no-restore", "NU1900", "NU1905")) {
-    if (!$releaseWorkflow.Contains($auditContract, [StringComparison]::Ordinal)) {
-        throw "Release vulnerability audit is missing fail-closed contract '$auditContract'."
+    if (!$releaseWorkflow.Contains($auditContract, [StringComparison]::Ordinal) -or
+        !$ciWorkflow.Contains($auditContract, [StringComparison]::Ordinal)) {
+        throw "CI or release vulnerability audit is missing fail-closed contract '$auditContract'."
     }
 }
 
