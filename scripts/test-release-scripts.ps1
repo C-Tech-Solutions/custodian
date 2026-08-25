@@ -1685,6 +1685,60 @@ Assert-RecoveryTokenScope `
     -EffectiveJobLines @($releaseWorkflowEnvironmentLines + $recoveryValidationJobLines) `
     -DraftInspectionLines $draftInspectionLines
 $recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
+Assert-ExactWorkflowLines `
+    -ActualLines $recoverySourceValidationJobLines `
+    -ExpectedLines @(
+        "  validate-recovery-source:",
+        "    name: Validate exact recovery source",
+        "    needs: validate-recovery",
+        "    if: needs.validate-recovery.result == 'success'",
+        "    runs-on: windows-latest",
+        "    permissions:",
+        "      contents: read",
+        "    steps:",
+        "      - name: Checkout exact release source",
+        "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        '          ref: ${{ inputs.recovery_source_sha }}',
+        "          path: release-source",
+        "          fetch-depth: 0",
+        "          persist-credentials: false",
+        "",
+        "      - name: Setup .NET",
+        "        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
+        "        with:",
+        "          global-json-file: release-source/global.json",
+        "",
+        "      - name: Restore locked release-source dependencies",
+        "        working-directory: release-source",
+        "        run: dotnet restore Custodian.slnx --locked-mode",
+        "",
+        "      - name: Build exact release source",
+        "        working-directory: release-source",
+        "        run: dotnet build Custodian.slnx --configuration Release --no-restore",
+        "",
+        "      - name: Test exact release source",
+        "        working-directory: release-source",
+        "        run: dotnet test Custodian.slnx --configuration Release --no-build",
+        "",
+        "      - name: Scan exact release-source dependencies",
+        "        working-directory: release-source",
+        "        shell: pwsh",
+        "        run: |",
+        '          $scan = & dotnet list Custodian.slnx package --vulnerable --include-transitive --no-restore 2>&1',
+        '          $exitCode = $LASTEXITCODE',
+        '          $scan | Write-Host',
+        '          if ($exitCode -ne 0) {',
+        '            throw "NuGet vulnerability scan failed with exit code $exitCode."',
+        "          }",
+        '          if ($scan -match "has the following vulnerable packages") {',
+        '            throw "Vulnerable NuGet packages were detected."',
+        "          }",
+        '          if ($scan -match "\bNU1900\b|\bNU1905\b") {',
+        '            throw "NuGet audit data was incomplete or unavailable."',
+        "          }"
+    ) `
+    -FailureMessage "The read-only recovery source validation job must match its exact trusted contract."
 $recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recoverySourceValidationJobLines)
 Assert-NoGitHubOrSecretsContextReferences `
     -WorkflowLines @($releaseWorkflowEnvironmentLines + $recoverySourceValidationJobLines)
