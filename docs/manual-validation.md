@@ -30,7 +30,7 @@
 - Export CSV and JSON from GUI, TUI, and CLI.
 - In a dev/raw run, confirm startup auto-update does not show a modal, then use Help > Check for Updates and confirm it reports that updates require the installed Custodian app.
 - In each desktop theme, hover an ordinary control, the summary-panel collapse button, and the pie-zoom reset button; confirm tooltip text remains readable against its background.
-- Run `scripts\publish-velopack.ps1 -Version 1.5.5 -PrepareOnly`, sign only unsigned PEs, then run `scripts\publish-velopack.ps1 -Version 1.5.5 -PackOnly`; confirm the prepared tree is unchanged during packing and Velopack emits exactly five base assets.
+- Run `scripts\publish-velopack.ps1 -Version 1.5.5 -PrepareOnly`, sign only unsigned PEs, then run `scripts\publish-velopack.ps1 -Version 1.5.5 -PackOnly -Sign`; confirm the prepared tree is unchanged, valid third-party signatures are preserved, generated Velopack PEs are signed before packaging, and exactly five base assets are emitted.
 - Confirm the protected release workflow preserves valid Microsoft and JetBrains signatures, signs unsigned PEs and Setup.exe as C-Tech Solutions LLC, and validates the final package with Custodian's production publisher policy.
 - Validate a signed update package containing framework dependencies such as `Accessibility.dll`; confirm whole-package checksum validation succeeds, every PE passes Windows trust verification, and Custodian-owned binaries are signed specifically by C-Tech Solutions LLC.
 - Offer a package with an unsigned or incorrectly signed `Custodian.*` binary, choose Restart now, and confirm Custodian displays an update error and remains usable instead of closing or entering a stuck shutdown state.

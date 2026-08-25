@@ -140,42 +140,13 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-package-publisher-policy.ps1 -PublishRoot artifacts/velopack-publish/Custodian
 
-      - name: Pack signed tree with Velopack
+      - name: Pack signed tree and sign generated Velopack PEs
         shell: pwsh
-        run: ./scripts/publish-velopack.ps1 -Version $env:RELEASE_VERSION -PackOnly
-
-      - name: Select only unsigned portable PEs
-        id: portable-signing-catalog
-        shell: pwsh
-        run: ./scripts/prepare-portable-signing-catalog.ps1 -Version $env:RELEASE_VERSION
-
-      - name: Sign unsigned portable PEs
-        if: steps.portable-signing-catalog.outputs.unsigned_count != '0'
-        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
-        with:
-          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files-catalog: ${{ steps.portable-signing-catalog.outputs.catalog_path }}
-          file-digest: SHA256
-          timestamp-digest: SHA256
-          exclude-azure-cli-credential: false
-          batch-size: 30000
-
-      - name: Repack signed portable archive
-        shell: pwsh
-        run: ./scripts/complete-portable-signing.ps1 -Version $env:RELEASE_VERSION
-
-      - name: Sign generated Setup executable
-        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
-        with:
-          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files: ${{ github.workspace }}\artifacts\velopack\Custodian.DiskAnalyzer-win-Setup.exe
-          file-digest: SHA256
-          timestamp-digest: SHA256
-          exclude-azure-cli-credential: false
+        env:
+          CUSTODIAN_AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          CUSTODIAN_AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          CUSTODIAN_AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: ./scripts/publish-velopack.ps1 -Version $env:RELEASE_VERSION -PackOnly -Sign
 
       - name: Verify final Velopack assets and signatures
         shell: pwsh

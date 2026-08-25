@@ -11,6 +11,7 @@ param(
     [string]$SignToolPath,
     [string]$DlibPath,
     [string]$TimestampUrl,
+    [switch]$PreserveValidSignature,
     [switch]$SkipVerify,
     [switch]$DebugSigning
 )
@@ -56,6 +57,50 @@ function Resolve-RequiredFile {
     return (Resolve-Path -LiteralPath $CandidatePath).Path
 }
 
+function Find-NewestArtifactSigningCacheFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CacheRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$PackageName,
+        [Parameter(Mandatory = $true)]
+        [string]$Filter,
+        [Parameter(Mandatory = $true)]
+        [string]$RequiredPathPattern
+    )
+
+    if (!(Test-Path -LiteralPath $CacheRoot -PathType Container)) {
+        return $null
+    }
+
+    $packagePrefix = "$PackageName."
+    return Get-ChildItem -LiteralPath $CacheRoot -Recurse -Filter $Filter -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match $RequiredPathPattern } |
+        Sort-Object -Property @{
+            Expression = {
+                $relativePath = [IO.Path]::GetRelativePath($CacheRoot, $_.FullName)
+                $packageDirectory = ($relativePath -split '[\\/]', 2)[0]
+                $versionText = if ($packageDirectory.StartsWith($packagePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    $packageDirectory.Substring($packagePrefix.Length)
+                }
+                else {
+                    "0.0"
+                }
+                try {
+                    [version]$versionText
+                }
+                catch {
+                    [version]"0.0"
+                }
+            }
+            Descending = $true
+        }, @{
+            Expression = { $_.FullName }
+            Descending = $true
+        } |
+        Select-Object -First 1
+}
+
 function Find-SignTool {
     param([string]$ExplicitPath)
 
@@ -98,6 +143,16 @@ function Find-SignTool {
         }
     }
 
+    $artifactSigningCache = Join-Path $env:LOCALAPPDATA "ArtifactSigning\Microsoft.Windows.SDK.BuildTools"
+    $cachedTool = Find-NewestArtifactSigningCacheFile `
+        -CacheRoot $artifactSigningCache `
+        -PackageName "Microsoft.Windows.SDK.BuildTools" `
+        -Filter "signtool.exe" `
+        -RequiredPathPattern '\\x64\\signtool\.exe$'
+    if ($null -ne $cachedTool) {
+        return $cachedTool.FullName
+    }
+
     throw "SignTool was not found. Install Microsoft.Azure.ArtifactSigningClientTools or Windows SDK Build Tools, or set CUSTODIAN_SIGNTOOL_PATH."
 }
 
@@ -116,12 +171,23 @@ function Find-AzureSigningDlib {
         (Join-Path ${env:ProgramFiles(x86)} "Microsoft\ArtifactSigningClientTools\bin\x64\Azure.CodeSigning.Dlib.dll"),
         (Join-Path $env:ProgramFiles "Microsoft\ArtifactSigningClientTools\bin\Azure.CodeSigning.Dlib.dll"),
         (Join-Path $env:ProgramFiles "Microsoft\ArtifactSigningClientTools\bin\x64\Azure.CodeSigning.Dlib.dll"),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\MicrosoftArtifactSigningClientTools\Azure.CodeSigning.Dlib.dll")
+        (Join-Path $env:LOCALAPPDATA "Microsoft\MicrosoftArtifactSigningClientTools\Azure.CodeSigning.Dlib.dll"),
+        (Join-Path $env:LOCALAPPDATA "ArtifactSigning\Microsoft.ArtifactSigning.Client")
     )
 
     foreach ($candidatePath in $candidatePaths) {
         if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
             return (Resolve-Path -LiteralPath $candidatePath).Path
+        }
+        if (Test-Path -LiteralPath $candidatePath -PathType Container) {
+            $cachedDlib = Find-NewestArtifactSigningCacheFile `
+                -CacheRoot $candidatePath `
+                -PackageName "Microsoft.ArtifactSigning.Client" `
+                -Filter "Azure.CodeSigning.Dlib.dll" `
+                -RequiredPathPattern '\\x64\\Azure\.CodeSigning\.Dlib\.dll$'
+            if ($null -ne $cachedDlib) {
+                return $cachedDlib.FullName
+            }
         }
     }
 
@@ -221,6 +287,26 @@ function New-SigningMetadataFile {
     }
 }
 
+$resolvedPaths = @()
+foreach ($inputPath in $Path) {
+    $resolvedPath = (Resolve-Path -LiteralPath $inputPath).Path
+    if ($PreserveValidSignature) {
+        $existingSignature = Get-AuthenticodeSignature -LiteralPath $resolvedPath
+        if ($existingSignature.Status -eq [Management.Automation.SignatureStatus]::Valid) {
+            Write-Host "Preserving valid Authenticode signature on $resolvedPath"
+            continue
+        }
+        if ($existingSignature.Status -ne [Management.Automation.SignatureStatus]::NotSigned) {
+            throw "Refusing to replace the invalid Authenticode signature on '$resolvedPath': $($existingSignature.StatusMessage)"
+        }
+    }
+    $resolvedPaths += $resolvedPath
+}
+
+if ($resolvedPaths.Count -eq 0) {
+    return
+}
+
 $resolvedTimestampUrl = Get-FirstConfiguredValue `
     -ExplicitValue $TimestampUrl `
     -EnvironmentNames @("CUSTODIAN_SIGNING_TIMESTAMP_URL")
@@ -239,10 +325,6 @@ $metadataFile = New-SigningMetadataFile `
     -ExcludeCredentials $ExcludeCredentials
 
 try {
-    $resolvedPaths = @()
-    foreach ($inputPath in $Path) {
-        $resolvedPaths += (Resolve-Path -LiteralPath $inputPath).Path
-    }
 
     foreach ($resolvedPath in $resolvedPaths) {
         Write-Host "Signing $resolvedPath"
