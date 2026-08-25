@@ -608,6 +608,12 @@ for ($index = $permissionsStart + 1; $index -lt $validateJobLines.Count; $index+
 if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: read") {
     throw "The pre-environment validation job must not have release-write permission."
 }
+$recoveryValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery")
+$recoveryPermissionsStart = [Array]::IndexOf($recoveryValidationJobLines, "    permissions:")
+if ($recoveryPermissionsStart -lt 0 -or
+    !($recoveryValidationJobLines -contains "      contents: write")) {
+    throw "Recovery validation requires contents write permission to retrieve an existing draft release."
+}
 
 foreach ($auditContract in @("--no-restore", "NU1900", "NU1905")) {
     if (!$releaseWorkflow.Contains($auditContract, [StringComparison]::Ordinal) -or
