@@ -230,6 +230,26 @@ function Assert-RecoveryTokenScope {
         !($DraftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
         throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
     }
+
+    $actualInspectionLines = [Collections.Generic.List[string]]::new()
+    foreach ($line in $DraftInspectionLines) {
+        $actualInspectionLines.Add($line)
+    }
+    while ($actualInspectionLines.Count -gt 0 -and
+        $actualInspectionLines[$actualInspectionLines.Count - 1] -ceq "") {
+        $actualInspectionLines.RemoveAt($actualInspectionLines.Count - 1)
+    }
+    $expectedInspectionLines = @(
+        "      - name: Verify exact empty draft and annotated source tag",
+        "        shell: pwsh",
+        "        env:",
+        '          GH_TOKEN: ${{ github.token }}',
+        '        run: ./scripts/assert-release-draft-recovery.ps1 -Version $env:RELEASE_VERSION -WorkflowCommitSha $env:WORKFLOW_SHA -SourceCommitSha $env:RELEASE_SHA -DraftId $env:RECOVERY_DRAFT_ID'
+    )
+    if ([string]::Join("`n", $actualInspectionLines) -cne
+        [string]::Join("`n", $expectedInspectionLines)) {
+        throw "Recovery validation must use the exact credential-bearing draft-inspection command."
+    }
 }
 
 function Get-CheckoutActionLines {
@@ -544,6 +564,19 @@ Assert-Throws {
         -EffectiveJobLines @($inlineInheritedTokenEnvironmentFixture + $inlineInheritedTokenJobFixture) `
         -DraftInspectionLines $inlineInheritedTokenStepFixture
 } "only to the draft-inspection step"
+
+$untrustedDraftInspectionFixture = @(
+    "      - name: Verify exact empty draft and annotated source tag",
+    "        shell: pwsh",
+    "        env:",
+    '          GH_TOKEN: ${{ github.token }}',
+    "        run: ./scripts/untrusted-command.ps1"
+)
+Assert-Throws {
+    Assert-RecoveryTokenScope `
+        -EffectiveJobLines $untrustedDraftInspectionFixture `
+        -DraftInspectionLines $untrustedDraftInspectionFixture
+} "exact credential-bearing draft-inspection command"
 
 $structuralEnvironmentFixture = @(
     "name: Fixture",
