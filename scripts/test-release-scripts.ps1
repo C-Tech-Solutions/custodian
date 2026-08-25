@@ -119,6 +119,64 @@ function Get-WorkflowPermissionEntries {
     return @($permissionEntries)
 }
 
+function Get-GitHubCliTokenAssignments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$WorkflowLines
+    )
+
+    return @($WorkflowLines | Where-Object {
+        $_ -match '(?<![A-Za-z0-9_])[''"]?(?:GH_TOKEN|GITHUB_TOKEN)[''"]?\s*:'
+    })
+}
+
+function Assert-SingleTrustedWorkflowCheckout {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$TrustedStepLines
+    )
+
+    $checkoutActions = @($JobLines | Where-Object {
+        $_ -match '^\s+(?:-\s+)?uses:\s+[''"]?actions/checkout@'
+    })
+    if ($checkoutActions.Count -ne 1 -or
+        !($TrustedStepLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")) {
+        throw "Recovery validation must contain exactly one trusted checkout action."
+    }
+}
+
+foreach ($tokenAlias in @("GH_TOKEN", "GITHUB_TOKEN")) {
+    foreach ($indent in @("    ", "        ")) {
+        $flowStyleTokenFixture = @(("{0}env: {{ {1}: token }}" -f $indent, $tokenAlias))
+        if (@(Get-GitHubCliTokenAssignments -WorkflowLines $flowStyleTokenFixture).Count -ne 1) {
+            throw "Flow-style $tokenAlias assignments must be detected."
+        }
+    }
+}
+
+$trustedCheckoutFixture = @(
+    "      - name: Checkout exact workflow SHA",
+    "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+)
+Assert-Throws {
+    Assert-SingleTrustedWorkflowCheckout -JobLines @(
+        $trustedCheckoutFixture
+        "      - name: Renamed source checkout"
+        "        uses: actions/checkout@untrusted"
+    ) -TrustedStepLines $trustedCheckoutFixture
+} "exactly one trusted checkout"
+Assert-Throws {
+    Assert-SingleTrustedWorkflowCheckout -JobLines @(
+        $trustedCheckoutFixture
+        "      - uses: actions/checkout@untrusted"
+    ) -TrustedStepLines $trustedCheckoutFixture
+} "exactly one trusted checkout"
+
 function Get-CheckoutPersistCredentials {
     param(
         [Parameter(Mandatory = $true)]
@@ -679,30 +737,27 @@ if (!($recoveryCheckoutLines -contains "        uses: actions/checkout@3d3c42e5a
     ($recoveryCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}')) {
     throw "Recovery validation must load write-token inspection code from the trusted workflow revision."
 }
+Assert-SingleTrustedWorkflowCheckout `
+    -JobLines $recoveryValidationJobLines `
+    -TrustedStepLines $recoveryCheckoutLines
 $recoveryPermissions = @(Get-WorkflowPermissionEntries -JobLines $recoveryValidationJobLines)
 if ($recoveryPermissions.Count -ne 1 -or $recoveryPermissions[0] -cne "contents: write") {
     throw "Recovery validation requires contents write permission to retrieve an existing draft release."
 }
-if (@($recoveryValidationJobLines | Where-Object { $_ -match '^      (?:GH_TOKEN|GITHUB_TOKEN):' }).Count -ne 0) {
-    throw "Recovery validation must not expose the write-capable token at job scope."
-}
 $draftInspectionLines = @(Get-WorkflowStepLines `
     -JobLines $recoveryValidationJobLines `
     -StepName "Verify exact empty draft and annotated source tag")
-$recoveryTokenAssignments = @($recoveryValidationJobLines | Where-Object { $_ -match '^\s+(?:GH_TOKEN|GITHUB_TOKEN):' })
+$recoveryTokenAssignments = @(Get-GitHubCliTokenAssignments -WorkflowLines $recoveryValidationJobLines)
 if ($recoveryTokenAssignments.Count -ne 1 -or
     !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
     throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
-}
-if ($recoveryValidationJobLines -contains "      - name: Checkout exact release source") {
-    throw "The write-capable recovery job must not check out or execute the historical release source."
 }
 $recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
 $recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recoverySourceValidationJobLines)
 if ($recoverySourcePermissions.Count -ne 1 -or
     $recoverySourcePermissions[0] -cne "contents: read" -or
     !($recoverySourceValidationJobLines -contains "      - name: Checkout exact release source") -or
-    @($recoverySourceValidationJobLines | Where-Object { $_ -match '^\s+(?:GH_TOKEN|GITHUB_TOKEN):' }).Count -ne 0) {
+    @(Get-GitHubCliTokenAssignments -WorkflowLines $recoverySourceValidationJobLines).Count -ne 0) {
     throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
 }
 $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
