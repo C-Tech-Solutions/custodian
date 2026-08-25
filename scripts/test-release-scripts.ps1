@@ -332,14 +332,17 @@ function Assert-SupportedRecoveryWorkflowSyntax {
         $_ -notmatch '^\s*#' -and (
             $_ -match '^\s*(?:-\s+)?(?:"[^"]*"|''[^'']*'')\s*:' -or
             $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*"(?:[^"\\]|\\.)*$' -or
-            $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*''(?:[^'']|'''')*$'
+            $_ -match '^\s*(?:-\s+)?[^\r\n]+:\s*''(?:[^'']|'''')*$' -or
+            $_ -match '^\s*(?:-\s+)?"(?:[^"\\]|\\.)*$' -or
+            $_ -match '^\s*(?:-\s+)?''(?:[^'']|'''')*$'
         )
     }).Count -ne 0) {
         throw "Release workflow must not use quoted YAML mapping keys or values."
     }
     if (@($WorkflowLines | Where-Object {
-        $_ -match ':\s*[>|][0-9+-]*\s*(?:#.*)?$' -and
-        $_ -cne "        run: |"
+        ($_ -match ':\s*[>|][0-9+-]*\s*(?:#.*)?$' -and
+            $_ -cne "        run: |") -or
+        $_ -match '^\s*[>|][0-9+-]*\s*(?:#.*)?$'
     }).Count -ne 0) {
         throw "Release workflow block scalars are allowed only for canonical run steps."
     }
@@ -684,6 +687,24 @@ foreach ($multilineQuotedScalarFixture in @(
             -RecoveryJobLines $multilineQuotedScalarFixture
     } "must not use quoted YAML mapping keys or values"
 }
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @(
+            "    name:",
+            '      "',
+            "      - name: Fake trusted action",
+            "        uses: actions/checkout@trusted",
+            '      "'
+        )
+} "must not use quoted YAML mapping keys or values"
+Assert-Throws {
+    Assert-SupportedRecoveryWorkflowSyntax `
+        -WorkflowLines @("name: Fixture", "  hidden:", "    |", "      ignored") `
+        -RootEnvironmentLines @() `
+        -RecoveryJobLines @()
+} "allowed only for canonical run steps"
 Assert-Throws {
     Assert-SupportedRecoveryWorkflowSyntax `
         -WorkflowLines @("name: Fixture") `
