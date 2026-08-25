@@ -129,6 +129,9 @@ if ($shouldPrepare) {
         -p:FileVersion=$numericVersion `
         -p:InformationalVersion=$Version `
         -o $appOut
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custodian.App publish failed with exit code $LASTEXITCODE."
+    }
 
     dotnet publish (Join-Path $repo "src\Custodian.Cli\Custodian.Cli.csproj") `
         -c $Configuration `
@@ -141,6 +144,9 @@ if ($shouldPrepare) {
         -p:FileVersion=$numericVersion `
         -p:InformationalVersion=$Version `
         -o (Join-Path $appOut "cli")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custodian.Cli publish failed with exit code $LASTEXITCODE."
+    }
 
     dotnet publish (Join-Path $repo "src\Custodian.Tui\Custodian.Tui.csproj") `
         -c $Configuration `
@@ -153,6 +159,9 @@ if ($shouldPrepare) {
         -p:FileVersion=$numericVersion `
         -p:InformationalVersion=$Version `
         -o (Join-Path $appOut "tui")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Custodian.Tui publish failed with exit code $LASTEXITCODE."
+    }
 
     Write-Host "Velopack publish input prepared: $appOut"
 }

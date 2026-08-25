@@ -9,6 +9,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+$releaseTools = Join-Path $PSScriptRoot "ReleaseTools.psm1"
+Import-Module $releaseTools -Force
 $expectedVersion = "1.5.5"
 $normalizedCommit = $CommitSha.ToLowerInvariant()
 
@@ -48,16 +50,23 @@ if ($lockFailures.Count -gt 0) {
     throw "Projects with package dependencies are missing lock files: $($lockFailures -join ', ')"
 }
 
-$remoteTag = @(git -C $repo ls-remote --tags origin "refs/tags/$Version" "refs/tags/$Version^{}")
+$tagRef = "refs/tags/$Version"
+$remoteTag = @(git -C $repo ls-remote --tags origin $tagRef "$tagRef^{}" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to inspect remote tag state."
 }
 if ($remoteTag.Count -ne 0) {
-    throw "Tag '$Version' already exists. Release tags are never moved or replaced."
+    $directTag = @($remoteTag | Where-Object { ($_ -split '\s+')[1] -ceq $tagRef })
+    $peeledTag = @($remoteTag | Where-Object { ($_ -split '\s+')[1] -ceq "$tagRef^{}" })
+    if ($directTag.Count -ne 1 -or
+        $peeledTag.Count -ne 1 -or
+        ($peeledTag[0] -split '\s+')[0].ToLowerInvariant() -ne $normalizedCommit) {
+        throw "Existing tag '$Version' is not an annotated tag at '$normalizedCommit'. Release tags are never moved or replaced."
+    }
 }
 
-gh release view $Version --repo $Repository --json tagName 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {
+$existingReleases = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
+if ($existingReleases.Count -ne 0) {
     throw "GitHub release '$Version' already exists. Releases and assets are never overwritten."
 }
 

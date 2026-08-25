@@ -33,6 +33,7 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
@@ -195,6 +196,7 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
@@ -223,8 +225,9 @@ jobs:
       - name: Require immutable-release acceptance
         shell: pwsh
         run: |
-          if ("${{ vars.IMMUTABLE_RELEASES_ENABLED }}" -ne "true") {
-            throw "The protected release-publish environment has not recorded immutable-release acceptance."
+          $expectedAcceptance = "$env:RELEASE_VERSION`:$env:RELEASE_SHA"
+          if ("${{ vars.IMMUTABLE_RELEASES_ACCEPTED_FOR }}" -ne $expectedAcceptance) {
+            throw "The protected release-publish environment has not recorded immutable-release acceptance for '$expectedAcceptance'."
           }
 
       - name: Publish as Latest

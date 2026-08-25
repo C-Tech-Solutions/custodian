@@ -55,11 +55,13 @@ $secretMarker = "must-not-appear-in-process-arguments"
 $arguments = New-CustodianDraftReleaseArguments `
     -Repository "C-Tech-Solutions/custodian" `
     -Version "1.5.5" `
-    -NotesPath "notes.md" `
-    -AssetPaths @("one.nupkg", "two.exe")
+    -NotesPath "notes.md"
 $argumentText = $arguments -join ' '
 if ($argumentText -match '(?i)(--token|github_token|gh_token)' -or $argumentText.Contains($secretMarker)) {
     throw "Draft release arguments contain credential material."
+}
+if ($argumentText -match '(?:one\.nupkg|two\.exe)' -or "--draft" -notin $arguments) {
+    throw "Draft creation must create an empty draft before separate asset uploads."
 }
 
 $uploadScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "upload-velopack-github.ps1")
@@ -89,6 +91,30 @@ foreach ($pin in $requiredActionPins) {
 }
 if ($releaseWorkflow -match '(?i)(client-secret|azure-client-secret|--token)') {
     throw "Release workflow contains a stored-secret or command-line token path."
+}
+if ($releaseWorkflow -notmatch 'IMMUTABLE_RELEASES_ACCEPTED_FOR' -or
+    $releaseWorkflow -notmatch '\$env:RELEASE_VERSION`:\$env:RELEASE_SHA') {
+    throw "Release workflow does not bind immutable-release acceptance to the exact version and commit."
+}
+
+$verifyGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "verify-github-release.ps1")
+foreach ($requiredAttestationArgument in @("--signer-workflow", "--source-digest", "--source-ref")) {
+    if (!$verifyGitHubScript.Contains($requiredAttestationArgument, [StringComparison]::Ordinal)) {
+        throw "GitHub release verification is missing '$requiredAttestationArgument'."
+    }
+}
+
+$verifyAssetsScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "verify-release-assets.ps1")
+foreach ($requiredIndexField in @("PackageId", "FileName", "SHA1", "SHA256", "Size")) {
+    if (!$verifyAssetsScript.Contains($requiredIndexField, [StringComparison]::Ordinal)) {
+        throw "Release index verification is missing '$requiredIndexField'."
+    }
+}
+
+$ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
+if ([regex]::Matches($ciWorkflow, 'persist-credentials:\s*false').Count -ne 2 -or
+    [regex]::Matches($releaseWorkflow, 'persist-credentials:\s*false').Count -ne 2) {
+    throw "Non-pushing checkout steps must disable persisted GitHub credentials."
 }
 
 Write-Host "Release script contract tests passed."

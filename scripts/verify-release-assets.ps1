@@ -33,15 +33,36 @@ foreach ($file in $actualFiles) {
 }
 
 $packageName = "Custodian.DiskAnalyzer-$Version-full.nupkg"
-$releasesText = Get-Content -Raw -LiteralPath (Join-Path $output "RELEASES")
-if (!$releasesText.Contains($packageName, [StringComparison]::Ordinal)) {
-    throw "RELEASES does not reference '$packageName'."
+$packagePath = Join-Path $output $packageName
+$packageInfo = Get-Item -LiteralPath $packagePath
+$packageSha1 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA1).Hash.ToUpperInvariant()
+$packageSha256 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToUpperInvariant()
+
+$releaseLines = @(Get-Content -LiteralPath (Join-Path $output "RELEASES") | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+if ($releaseLines.Count -ne 1 -or
+    $releaseLines[0] -notmatch '^(?<sha1>[0-9A-Fa-f]{40})\s+(?<file>\S+)\s+(?<size>\d+)$') {
+    throw "RELEASES must contain exactly one valid package record."
+}
+if ($Matches.sha1.ToUpperInvariant() -ne $packageSha1 -or
+    $Matches.file -cne $packageName -or
+    [UInt64]$Matches.size -ne [UInt64]$packageInfo.Length) {
+    throw "RELEASES package identity, digest, or size does not match '$packageName'."
 }
 
 $releaseIndex = Get-Content -Raw -LiteralPath (Join-Path $output "releases.win.json") | ConvertFrom-Json -Depth 20
-$releaseIndexText = $releaseIndex | ConvertTo-Json -Depth 20 -Compress
-if (!$releaseIndexText.Contains($Version, [StringComparison]::Ordinal)) {
-    throw "releases.win.json does not reference version '$Version'."
+$indexAssets = @($releaseIndex.Assets)
+if ($indexAssets.Count -ne 1) {
+    throw "releases.win.json must contain exactly one asset."
+}
+$indexAsset = $indexAssets[0]
+if ($indexAsset.PackageId -cne "Custodian.DiskAnalyzer" -or
+    $indexAsset.Version -cne $Version -or
+    $indexAsset.Type -cne "Full" -or
+    $indexAsset.FileName -cne $packageName -or
+    $indexAsset.SHA1.ToUpperInvariant() -ne $packageSha1 -or
+    $indexAsset.SHA256.ToUpperInvariant() -ne $packageSha256 -or
+    [UInt64]$indexAsset.Size -ne [UInt64]$packageInfo.Length) {
+    throw "releases.win.json package identity, digests, or size do not match '$packageName'."
 }
 
 $setupPath = Join-Path $output "Custodian.DiskAnalyzer-win-Setup.exe"

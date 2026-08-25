@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
+    [ValidatePattern('^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$')]
     [string]$Version,
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9a-fA-F]{40}$')]
@@ -27,7 +28,11 @@ if ($remoteTarget.Count -ne 1 -or ($remoteTarget[0] -split '\s+')[0].ToLowerInva
     throw "Remote annotated tag '$Version' does not resolve to '$normalizedCommit'."
 }
 
-$release = gh api "repos/$Repository/releases/tags/$Version" | ConvertFrom-Json -Depth 50
+$releaseMatches = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
+if ($releaseMatches.Count -ne 1) {
+    throw "Expected exactly one GitHub release tagged '$Version'; found $($releaseMatches.Count)."
+}
+$release = $releaseMatches[0]
 if ($RequireDraft -and !$release.draft) {
     throw "Release '$Version' is not a draft."
 }
@@ -85,7 +90,11 @@ foreach ($asset in $release.assets) {
     }
 
     if ($VerifyAttestations) {
-        gh attestation verify $localPath --repo $Repository | Out-Null
+        gh attestation verify $localPath `
+            --repo $Repository `
+            --signer-workflow "$Repository/.github/workflows/release.yml" `
+            --source-digest $normalizedCommit `
+            --source-ref "refs/heads/master" | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Artifact attestation verification failed for '$($asset.name)'."
         }

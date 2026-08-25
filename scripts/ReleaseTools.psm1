@@ -75,9 +75,7 @@ function New-CustodianDraftReleaseArguments {
         [Parameter(Mandatory = $true)]
         [string]$Version,
         [Parameter(Mandatory = $true)]
-        [string]$NotesPath,
-        [Parameter(Mandatory = $true)]
-        [string[]]$AssetPaths
+        [string]$NotesPath
     )
 
     return @(
@@ -86,9 +84,35 @@ function New-CustodianDraftReleaseArguments {
         "--verify-tag",
         "--draft",
         "--title", "Custodian $Version",
-        "--notes-file", $NotesPath,
-        "--"
-    ) + $AssetPaths
+        "--notes-file", $NotesPath
+    )
+}
+
+function Get-CustodianGitHubReleasesByTag {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Repository,
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    $rawPages = (& gh api "repos/$Repository/releases?per_page=100" --paginate --slurp | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to enumerate GitHub releases for '$Repository'."
+    }
+
+    $pages = ConvertFrom-Json -InputObject $rawPages -Depth 50
+    $matches = [Collections.Generic.List[object]]::new()
+    foreach ($page in $pages) {
+        foreach ($release in $page) {
+            if ($release.tag_name -ceq $Version) {
+                $matches.Add($release)
+            }
+        }
+    }
+
+    return $matches.ToArray()
 }
 
 Export-ModuleMember -Function @(
@@ -96,5 +120,6 @@ Export-ModuleMember -Function @(
     "Get-CustodianVelopackAssetNames",
     "Get-CustodianReleaseAssetNames",
     "Assert-CustodianReleaseAbsent",
-    "New-CustodianDraftReleaseArguments"
+    "New-CustodianDraftReleaseArguments",
+    "Get-CustodianGitHubReleasesByTag"
 )
