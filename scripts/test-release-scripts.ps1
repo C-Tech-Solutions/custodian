@@ -175,6 +175,19 @@ function Get-ExplicitGitHubTokenReferences {
     })
 }
 
+function Assert-NoGitHubOrSecretsContextReferences {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$WorkflowLines
+    )
+
+    $workflowText = [string]::Join("`n", $WorkflowLines)
+    if ($workflowText -match '(?s)\$\{\{.*?(?<![A-Za-z0-9_])(?:github|secrets)(?![A-Za-z0-9_]).*?\}\}') {
+        throw "Historical release-source validation must not reference the GitHub or secrets contexts."
+    }
+}
+
 function Assert-RecoveryTokenScope {
     param(
         [Parameter(Mandatory = $true)]
@@ -351,6 +364,14 @@ foreach ($compoundTokenReferenceFixture in @(
     if (@(Get-ExplicitGitHubTokenReferences -WorkflowLines @($compoundTokenReferenceFixture)).Count -ne 1) {
         throw "Compound GitHub token reference fixture was not detected: $compoundTokenReferenceFixture"
     }
+}
+foreach ($serializedContextFixture in @(
+    '        run: echo "${{ toJSON(github) }}"',
+    '        run: echo "${{ toJSON(secrets) }}"'
+)) {
+    Assert-Throws {
+        Assert-NoGitHubOrSecretsContextReferences -WorkflowLines @($serializedContextFixture)
+    } "must not reference the GitHub or secrets contexts"
 }
 
 $inheritedTokenWorkflowFixture = @(
@@ -1171,6 +1192,8 @@ Assert-RecoveryTokenScope `
     -DraftInspectionLines $draftInspectionLines
 $recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
 $recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recoverySourceValidationJobLines)
+Assert-NoGitHubOrSecretsContextReferences `
+    -WorkflowLines @($releaseWorkflowEnvironmentLines + $recoverySourceValidationJobLines)
 if ($recoverySourcePermissions.Count -ne 1 -or
     $recoverySourcePermissions[0] -cne "contents: read" -or
     !($recoverySourceValidationJobLines -contains "      - name: Checkout exact release source") -or
