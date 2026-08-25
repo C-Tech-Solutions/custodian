@@ -67,11 +67,11 @@ try {
         throw "GitHub CLI failed to create the empty draft release."
     }
 
-    $createdMatches = @(Get-CustodianGitHubReleasesByTag -Repository $Repository -Version $Version)
-    if ($createdMatches.Count -ne 1 -or !$createdMatches[0].draft) {
+    $createdRelease = Wait-CustodianGitHubReleaseByTag -Repository $Repository -Version $Version
+    if ($null -eq $createdRelease -or !$createdRelease.draft) {
         throw "GitHub release '$Version' was not uniquely created as a draft."
     }
-    $createdReleaseId = [Int64]$createdMatches[0].id
+    $createdReleaseId = [Int64]$createdRelease.id
 
     foreach ($assetPath in $assetPaths) {
         $uploaded = $false

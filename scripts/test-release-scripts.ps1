@@ -105,6 +105,52 @@ if ([string]::Join('|', $actualRelease) -ne [string]::Join('|', $expectedRelease
 Assert-CustodianReleaseAbsent -ReleaseExists $false -Version "1.5.5"
 Assert-Throws { Assert-CustodianReleaseAbsent -ReleaseExists $true -Version "1.5.5" } "never overwritten"
 
+$emptyDraft = [pscustomobject]@{
+    id = 376286670
+    tag_name = "1.5.5"
+    draft = $true
+    immutable = $false
+    prerelease = $false
+    name = "Custodian 1.5.5"
+    body = "Approved notes`n"
+    assets = @()
+}
+$emptyDraftArguments = @{
+    Release = $emptyDraft
+    DraftId = 376286670
+    Version = "1.5.5"
+    ExpectedTitle = "Custodian 1.5.5"
+    ExpectedBody = "Approved notes`r`n"
+}
+Assert-CustodianEmptyDraftRelease @emptyDraftArguments
+$wrongDraftIdArguments = $emptyDraftArguments.Clone()
+$wrongDraftIdArguments.DraftId = 376286671
+Assert-Throws { Assert-CustodianEmptyDraftRelease @wrongDraftIdArguments } "does not match"
+$wrongVersionArguments = $emptyDraftArguments.Clone()
+$wrongVersionArguments.Version = "1.5.6"
+Assert-Throws { Assert-CustodianEmptyDraftRelease @wrongVersionArguments } "does not match"
+Assert-Throws {
+    Assert-CustodianEmptyDraftRelease -Release ([pscustomobject]@{
+        id = 376286670; tag_name = "1.5.5"; draft = $false; immutable = $true; prerelease = $false
+        name = "Custodian 1.5.5"; body = "Approved notes"; assets = @()
+    }) -DraftId 376286670 -Version "1.5.5" -ExpectedTitle "Custodian 1.5.5" -ExpectedBody "Approved notes"
+} "not a mutable draft"
+Assert-Throws {
+    Assert-CustodianEmptyDraftRelease -Release ([pscustomobject]@{
+        id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $false
+        name = "Custodian 1.5.5"; body = "Approved notes"; assets = @([pscustomobject]@{ name = "existing.exe" })
+    }) -DraftId 376286670 -Version "1.5.5" -ExpectedTitle "Custodian 1.5.5" -ExpectedBody "Approved notes"
+} "not empty"
+foreach ($invalidMetadata in @(
+    [pscustomobject]@{ id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $true; name = "Custodian 1.5.5"; body = "Approved notes"; assets = @() },
+    [pscustomobject]@{ id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $false; name = "Wrong title"; body = "Approved notes"; assets = @() },
+    [pscustomobject]@{ id = 376286670; tag_name = "1.5.5"; draft = $true; immutable = $false; prerelease = $false; name = "Custodian 1.5.5"; body = "Wrong notes"; assets = @() }
+)) {
+    Assert-Throws {
+        Assert-CustodianEmptyDraftRelease -Release $invalidMetadata -DraftId 376286670 -Version "1.5.5" -ExpectedTitle "Custodian 1.5.5" -ExpectedBody "Approved notes"
+    } "metadata does not match"
+}
+
 $secretMarker = "must-not-appear-in-process-arguments"
 $arguments = New-CustodianDraftReleaseArguments `
     -Repository "C-Tech-Solutions/custodian" `
@@ -128,6 +174,164 @@ if ($errors.Count -ne 0) {
 $parameterNames = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath)
 if ($parameterNames -contains "Token" -or $uploadScript -match '(?i)--token') {
     throw "Upload script exposes credentials through parameters or command arguments."
+}
+if (!$uploadScript.Contains("Wait-CustodianGitHubReleaseByTag", [StringComparison]::Ordinal)) {
+    throw "Draft creation does not tolerate GitHub release-list eventual consistency."
+}
+
+foreach ($recoveryScriptName in @("assert-release-draft-recovery.ps1", "resume-empty-release-draft.ps1")) {
+    $recoveryScriptPath = Join-Path $PSScriptRoot $recoveryScriptName
+    $recoveryTokens = $null
+    $recoveryErrors = $null
+    $recoveryScript = Get-Content -Raw -LiteralPath $recoveryScriptPath
+    [void][Management.Automation.Language.Parser]::ParseInput($recoveryScript, [ref]$recoveryTokens, [ref]$recoveryErrors)
+    if ($recoveryErrors.Count -ne 0) {
+        throw "Recovery script '$recoveryScriptName' has PowerShell parse errors: $($recoveryErrors.Message -join '; ')"
+    }
+    if ($recoveryScript -match '(?i)--token') {
+        throw "Recovery script '$recoveryScriptName' exposes a command-line token path."
+    }
+}
+$resumeDraftScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "resume-empty-release-draft.ps1")
+foreach ($ownedUploadContract in @(
+    "https://uploads.github.com/",
+    "`$uploadedAssetIds.Add([Int64]`$uploaded.id)",
+    "No unknown asset will be deleted automatically"
+)) {
+    if (!$resumeDraftScript.Contains($ownedUploadContract, [StringComparison]::Ordinal)) {
+        throw "Empty-draft recovery is missing exact asset-ownership contract '$ownedUploadContract'."
+    }
+}
+foreach ($unsafeCleanupContract in @("attemptedAssetNames", "cleanupDraft.assets")) {
+    if ($resumeDraftScript.Contains($unsafeCleanupContract, [StringComparison]::Ordinal)) {
+        throw "Empty-draft recovery may delete a concurrent asset through unsafe contract '$unsafeCleanupContract'."
+    }
+}
+
+$recoveryTestRoot = Join-Path ([IO.Path]::GetTempPath()) "custodian-release-recovery-$([Guid]::NewGuid())"
+$recoveryOutput = Join-Path $recoveryTestRoot "artifacts\velopack"
+$recoveryNotes = Join-Path $recoveryTestRoot "docs\releases\1.5.5.md"
+$previousGhToken = $env:GH_TOKEN
+try {
+    New-Item -ItemType Directory -Force -Path $recoveryOutput, (Split-Path -Parent $recoveryNotes) | Out-Null
+    [IO.File]::WriteAllText($recoveryNotes, "Approved notes`n", [Text.UTF8Encoding]::new($false))
+    foreach ($assetName in $expectedRelease) {
+        [IO.File]::WriteAllText((Join-Path $recoveryOutput $assetName), "fixture-$assetName", [Text.UTF8Encoding]::new($false))
+    }
+
+    $global:recoveryMockUploadCount = 0
+    $global:recoveryMockConcurrentVisible = $false
+    $global:recoveryMockDeletedAssetIds = [Collections.Generic.List[Int64]]::new()
+    $sourceCommit = "54a5b4ce032c852f03db66e9802f92366cd22f1b"
+    $tagObject = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    $concurrentAssetId = [Int64]9001
+    $ownedAssetId = [Int64]1001
+    $concurrentAssetName = $expectedRelease[1]
+
+    function global:git {
+        $invocation = [string]::Join(' ', $args)
+        $global:LASTEXITCODE = 0
+        if ($invocation -like "*-C * ls-remote --tags origin refs/tags/1.5.5 refs/tags/1.5.5^{}") {
+            "$tagObject`trefs/tags/1.5.5"
+            "$sourceCommit`trefs/tags/1.5.5^{}"
+            return
+        }
+        if ($invocation -like "*-C * fetch --no-tags origin refs/tags/1.5.5") {
+            return
+        }
+        if ($invocation -like "*-C * cat-file -t $tagObject") {
+            "tag"
+            return
+        }
+        if ($invocation -like "*-C * cat-file -p $tagObject") {
+            "object $sourceCommit"
+            "type commit"
+            "tag 1.5.5"
+            "tagger github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> 1787650000 -0400"
+            return
+        }
+        throw "Unexpected mocked git invocation: $invocation"
+    }
+
+    function global:gh {
+        $invocation = [string]::Join(' ', $args)
+        $global:LASTEXITCODE = 0
+        [object[]]$releaseAssets = @()
+        if ($global:recoveryMockConcurrentVisible) {
+            $releaseAssets = @([ordered]@{ id = $concurrentAssetId; name = $concurrentAssetName })
+        }
+        $release = [ordered]@{
+            id = 376286670
+            tag_name = "1.5.5"
+            draft = $true
+            immutable = $false
+            prerelease = $false
+            name = "Custodian 1.5.5"
+            body = "Approved notes`n"
+            assets = $releaseAssets
+        }
+
+        if ($invocation -eq "api repos/C-Tech-Solutions/custodian/releases/376286670") {
+            ConvertTo-Json -InputObject $release -Depth 10 -Compress
+            return
+        }
+        if ($invocation -like "api repos/C-Tech-Solutions/custodian/releases?per_page=100 --paginate --slurp") {
+            $releaseJson = ConvertTo-Json -InputObject $release -Depth 10 -Compress
+            "[[$releaseJson]]"
+            return
+        }
+        if ($invocation -like "api --method POST *https://uploads.github.com/*") {
+            $global:recoveryMockUploadCount++
+            if ($global:recoveryMockUploadCount -eq 1) {
+                ConvertTo-Json -InputObject ([ordered]@{ id = $ownedAssetId; name = $expectedRelease[0] }) -Compress
+                return
+            }
+            $global:recoveryMockConcurrentVisible = $true
+            $global:LASTEXITCODE = 1
+            return
+        }
+        if ($invocation -like "api --method DELETE repos/C-Tech-Solutions/custodian/releases/assets/*") {
+            $assetId = [Int64]($invocation -replace '^.*releases/assets/', '')
+            $global:recoveryMockDeletedAssetIds.Add($assetId)
+            return
+        }
+        throw "Unexpected mocked gh invocation: $invocation"
+    }
+
+    $env:GH_TOKEN = "test-only-token"
+    $recoveryFailure = $null
+    try {
+        & (Join-Path $PSScriptRoot "resume-empty-release-draft.ps1") `
+            -Version "1.5.5" `
+            -ExpectedCommit $sourceCommit `
+            -DraftId 376286670 `
+            -SourceRepositoryRoot $recoveryTestRoot
+    }
+    catch {
+        $recoveryFailure = $_.Exception.Message
+    }
+    if ($recoveryFailure -notlike "*Upload outcome for '$concurrentAssetName' was not confirmed*") {
+        throw "Mocked concurrent upload did not fail through the expected path: '$recoveryFailure'."
+    }
+    if (!$global:recoveryMockConcurrentVisible -or
+        $global:recoveryMockDeletedAssetIds.Count -ne 1 -or
+        $global:recoveryMockDeletedAssetIds[0] -ne $ownedAssetId -or
+        $global:recoveryMockDeletedAssetIds.Contains($concurrentAssetId)) {
+        throw "Recovery cleanup did not preserve the concurrent same-named asset while deleting only its owned asset ID."
+    }
+}
+finally {
+    $env:GH_TOKEN = $previousGhToken
+    Remove-Item Function:\global:gh -ErrorAction SilentlyContinue
+    Remove-Item Function:\global:git -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $recoveryTestRoot) {
+        $resolvedRecoveryTestRoot = (Resolve-Path -LiteralPath $recoveryTestRoot).Path
+        $resolvedSystemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if (!$resolvedRecoveryTestRoot.StartsWith($resolvedSystemTemp + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe recovery test cleanup path: '$resolvedRecoveryTestRoot'."
+        }
+        Remove-Item -LiteralPath $resolvedRecoveryTestRoot -Recurse -Force
+    }
 }
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml")
@@ -280,6 +484,20 @@ foreach ($resumeContract in @("resume_published", "RequireDraftOrPublishedImmuta
         throw "Release workflow is missing resumable publication contract '$resumeContract'."
     }
 }
+foreach ($recoveryContract in @(
+    "recovery_source_sha",
+    "recovery_draft_id",
+    "validate-recovery:",
+    "recover-draft:",
+    "publish-recovered:",
+    "assert-release-draft-recovery.ps1",
+    "resume-empty-release-draft.ps1",
+    "-AttestationSourceDigest `$env:WORKFLOW_SHA"
+)) {
+    if (!$releaseWorkflow.Contains($recoveryContract, [StringComparison]::Ordinal)) {
+        throw "Release workflow is missing protected empty-draft recovery contract '$recoveryContract'."
+    }
+}
 
 $publishGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "publish-github-release.ps1")
 if ($publishGitHubScript -notmatch '\$release\.draft' -or
@@ -360,7 +578,10 @@ $checkoutContracts = @(
     @{ Lines = $ciWorkflowLines; Job = "vulnerability-scan"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "validate"; Expected = "false" },
     @{ Lines = $releaseWorkflowLines; Job = "sign-and-draft"; Expected = "true" },
-    @{ Lines = $releaseWorkflowLines; Job = "publish"; Expected = "false" }
+    @{ Lines = $releaseWorkflowLines; Job = "publish"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "validate-recovery"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "recover-draft"; Expected = "false" },
+    @{ Lines = $releaseWorkflowLines; Job = "publish-recovered"; Expected = "false" }
 )
 foreach ($contract in $checkoutContracts) {
     $jobLines = @(Get-WorkflowJobLines -WorkflowLines $contract.Lines -JobName $contract.Job)

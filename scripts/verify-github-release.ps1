@@ -11,7 +11,10 @@ param(
     [switch]$RequireDraft,
     [switch]$RequireDraftOrPublishedImmutable,
     [switch]$RequirePublishedImmutable,
-    [switch]$VerifyAttestations
+    [switch]$VerifyAttestations,
+    [ValidatePattern('^[0-9a-fA-F]{40}$')]
+    [string]$AttestationSourceDigest,
+    [string]$AttestationSignerWorkflow
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +33,18 @@ if ($requiredStateCount -gt 1) {
 }
 
 $normalizedCommit = $ExpectedCommit.ToLowerInvariant()
+$normalizedAttestationSource = if ([string]::IsNullOrWhiteSpace($AttestationSourceDigest)) {
+    $normalizedCommit
+}
+else {
+    $AttestationSourceDigest.ToLowerInvariant()
+}
+$attestationSigner = if ([string]::IsNullOrWhiteSpace($AttestationSignerWorkflow)) {
+    "$Repository/.github/workflows/release.yml"
+}
+else {
+    $AttestationSignerWorkflow
+}
 $remoteTarget = @(git -C $repo ls-remote --tags origin "refs/tags/$Version^{}")
 if ($remoteTarget.Count -ne 1 -or ($remoteTarget[0] -split '\s+')[0].ToLowerInvariant() -ne $normalizedCommit) {
     throw "Remote annotated tag '$Version' does not resolve to '$normalizedCommit'."
@@ -102,8 +117,8 @@ foreach ($asset in $release.assets) {
     if ($VerifyAttestations) {
         gh attestation verify $localPath `
             --repo $Repository `
-            --signer-workflow "$Repository/.github/workflows/release.yml" `
-            --source-digest $normalizedCommit `
+            --signer-workflow $attestationSigner `
+            --source-digest $normalizedAttestationSource `
             --source-ref "refs/heads/master" | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Artifact attestation verification failed for '$($asset.name)'."
