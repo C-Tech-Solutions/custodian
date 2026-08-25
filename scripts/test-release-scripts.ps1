@@ -132,5 +132,8 @@ if ([regex]::Matches($ciWorkflow, 'persist-credentials:\s*false').Count -ne 2 -o
     [regex]::Matches($releaseWorkflow, 'persist-credentials:\s*false').Count -ne 2) {
     throw "Non-pushing checkout steps must disable persisted GitHub credentials."
 }
+if ($releaseWorkflow -notmatch '(?s)\n  validate:.*?permissions:\s*\n\s*contents:\s*read.*?\n  sign-and-draft:') {
+    throw "The pre-environment validation job must not have release-write permission."
+}
 
 Write-Host "Release script contract tests passed."

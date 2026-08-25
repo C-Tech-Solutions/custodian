@@ -22,7 +22,7 @@ jobs:
     name: Validate exact source
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     outputs:
       resume_published: ${{ steps.release-preflight.outputs.resume_published }}
     env:
