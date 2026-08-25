@@ -6,6 +6,17 @@ All notable changes to Custodian are tracked here.
 
 _No unreleased changes._
 
+## 1.5.6 - 2026-08-25
+
+### Security
+
+- Added an independent online certificate-chain revocation check after Windows trust verification so an update is rejected when revocation status cannot be established.
+- Scoped successful chain results to one package verification and reused them only for files carrying the exact same signer certificate, avoiding redundant network checks without carrying trust decisions across updates.
+
+### Release note
+
+- This corrective release supersedes the unpublished 1.5.5 draft. No evidence of compromise was identified during the security review.
+
 ## 1.5.5 - 2026-08-25
 
 ### Security

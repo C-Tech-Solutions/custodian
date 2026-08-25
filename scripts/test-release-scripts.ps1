@@ -1363,6 +1363,15 @@ $releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\
 $releaseWorkflowEnvironmentLines = @(Get-WorkflowRootEnvironmentLines -WorkflowLines $releaseWorkflowLines)
 $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
 $ciWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml"))
+$releasePreflight = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "assert-release-preflight.ps1")
+$recoveryPreflight = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "assert-release-draft-recovery.ps1")
+if ($releaseWorkflow -notmatch '(?m)^\s{8}default: 1\.5\.6\s*$' -or
+    $releasePreflight -notmatch '(?m)^\$expectedVersion = "1\.5\.6"\s*$') {
+    throw "The regular protected release path must be pinned to Custodian 1.5.6."
+}
+if ($recoveryPreflight -notmatch '(?m)^\$expectedVersion = "1\.5\.5"\s*$') {
+    throw "The preserved empty-draft recovery path must remain pinned to Custodian 1.5.5."
+}
 foreach ($lineEnding in @("`n", "`r`n")) {
     $changelog = "# Changelog${lineEnding}${lineEnding}## 1.5.5 - 2026-08-25${lineEnding}"
     if (!(Test-CustodianDatedChangelogEntry -ChangelogText $changelog -Version "1.5.5")) {

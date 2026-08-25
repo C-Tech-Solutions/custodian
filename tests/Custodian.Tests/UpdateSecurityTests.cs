@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Custodian.Platform.Windows.Services;
 using Velopack;
 
@@ -387,6 +389,80 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
+    public void IndependentCertificateChainPolicyChecksOnlineRevocationExcludingRoot()
+    {
+        var policy = WindowsCertificateChainVerifier.VerificationPolicy;
+
+        Assert.Equal(X509RevocationMode.Online, policy.RevocationMode);
+        Assert.Equal(X509RevocationFlag.ExcludeRoot, policy.RevocationFlag);
+        Assert.Equal(X509VerificationFlags.IgnoreNotTimeValid, policy.VerificationFlags);
+        Assert.Equal(policy, WindowsCertificateChainVerifier.NativePolicyForTesting());
+    }
+
+    [Fact]
+    public void WindowsAuthenticodeVerifierRejectsUnavailableIndependentRevocationStatusAfterWinTrustSuccess()
+    {
+        using var signer = CreateTestSignerCertificate();
+        var signerBytes = signer.Export(X509ContentType.Cert);
+        var verifier = new WindowsAuthenticodeSignatureVerifier(
+            _ => 0,
+            _ => X509CertificateLoader.LoadCertificate(signerBytes),
+            new FixedCertificateChainVerifier(new CertificateChainVerificationResult(
+                false,
+                "certificate chain validation failed: RevocationStatusUnknown, OfflineRevocation")));
+
+        var result = verifier.Verify(Environment.ProcessPath!);
+
+        Assert.False(result.IsTrusted);
+        Assert.Contains("RevocationStatusUnknown", result.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("OfflineRevocation", result.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsAuthenticodeVerifierAcceptsIndependentChainSuccessAfterWinTrustSuccess()
+    {
+        using var signer = CreateTestSignerCertificate();
+        var signerBytes = signer.Export(X509ContentType.Cert);
+        var verifier = new WindowsAuthenticodeSignatureVerifier(
+            _ => 0,
+            _ => X509CertificateLoader.LoadCertificate(signerBytes),
+            new FixedCertificateChainVerifier(new CertificateChainVerificationResult(true)));
+
+        var result = verifier.Verify(Environment.ProcessPath!);
+
+        Assert.True(result.IsTrusted, result.FailureReason);
+        Assert.Contains("C-Tech Solutions LLC", result.SignerSubject, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageVerificationChecksIndependentChainOncePerSignerPerPackage()
+    {
+        var packagePath = CreatePackage(
+            "lib/app/Custodian.App.exe",
+            "lib/app/Custodian.Core.dll");
+        using var signer = CreateTestSignerCertificate();
+        var signerBytes = signer.Export(X509ContentType.Cert);
+        var chainVerifier = new CountingCertificateChainVerifier();
+        var verifier = new WindowsAuthenticodeSignatureVerifier(
+            _ => 0,
+            _ => X509CertificateLoader.LoadCertificate(signerBytes),
+            chainVerifier);
+        try
+        {
+            var result = UpdatePackageSignatureVerifier.VerifyPackage(packagePath, verifier);
+            var secondResult = UpdatePackageSignatureVerifier.VerifyPackage(packagePath, verifier);
+
+            Assert.Equal(2, result.VerifiedFiles.Count);
+            Assert.Equal(2, secondResult.VerifiedFiles.Count);
+            Assert.Equal(2, chainVerifier.CallCount);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
     public void PackageVerifierRunsVelopackChecksumBeforeAuthenticodeInspection()
     {
         var packagePath = CreatePackage("lib/net10.0-windows/Custodian.App.exe");
@@ -532,6 +608,19 @@ public sealed class UpdateSecurityTests
             CompanyName: "Microsoft Corporation",
             OriginalFileName: originalFileName);
 
+    private static X509Certificate2 CreateTestSignerCertificate()
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=Code Signing, O=C-Tech Solutions LLC, C=US",
+            key,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        return request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(1));
+    }
+
     private static VelopackAsset CreateAsset() => new()
     {
         FileName = "Custodian.nupkg",
@@ -565,6 +654,22 @@ public sealed class UpdateSecurityTests
     private sealed class FixedAuthenticodeSignatureVerifier(AuthenticodeSignatureResult result) : IAuthenticodeSignatureVerifier
     {
         public AuthenticodeSignatureResult Verify(string filePath) => result;
+    }
+
+    private sealed class FixedCertificateChainVerifier(CertificateChainVerificationResult result) : ICertificateChainVerifier
+    {
+        public CertificateChainVerificationResult Verify(X509Certificate2 certificate) => result;
+    }
+
+    private sealed class CountingCertificateChainVerifier : ICertificateChainVerifier
+    {
+        public int CallCount { get; private set; }
+
+        public CertificateChainVerificationResult Verify(X509Certificate2 certificate)
+        {
+            CallCount++;
+            return new CertificateChainVerificationResult(true);
+        }
     }
 
     private sealed class MappingAuthenticodeSignatureVerifier(
