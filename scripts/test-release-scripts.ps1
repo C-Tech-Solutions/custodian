@@ -722,8 +722,11 @@ foreach ($sourceCheckoutLines in @($validatedSourceCheckoutLines, $signingSource
 }
 $publishRecoveredJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "publish-recovered")
 if (!($recoverySourceValidationJobLines -contains "    needs: validate-recovery") -or
+    !($recoverySourceValidationJobLines -contains "    if: needs.validate-recovery.result == 'success'") -or
     !($recoverDraftJobLines -contains "    needs: validate-recovery-source") -or
-    !($publishRecoveredJobLines -contains "    needs: [validate-recovery-source, recover-draft]")) {
+    !($recoverDraftJobLines -contains "    if: needs.validate-recovery-source.result == 'success'") -or
+    !($publishRecoveredJobLines -contains "    needs: [validate-recovery-source, recover-draft]") -or
+    !($publishRecoveredJobLines -contains "    if: needs.validate-recovery-source.result == 'success' && needs.recover-draft.result == 'success'")) {
     throw "Recovery signing and publication must depend on successful read-only source validation."
 }
 
