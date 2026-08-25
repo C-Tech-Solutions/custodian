@@ -15,6 +15,7 @@ internal enum DetailSelectionDeleteBlockReason
     None,
     Busy,
     PortableScan,
+    LoadedScan,
     InvalidSelection
 }
 
@@ -36,11 +37,19 @@ internal static class DetailSelectionDeleteCommandService
         DetailSelectionDeleteMode mode,
         IReadOnlyCollection<DetailRow> selectedRows,
         bool isPortableScan,
+        bool isLoadedFromScanFile,
         bool isBusy)
     {
         if (isBusy)
         {
             return Blocked(DetailSelectionDeleteBlockReason.Busy, "Wait for the current operation to finish first.");
+        }
+
+        if (isLoadedFromScanFile)
+        {
+            return Blocked(
+                DetailSelectionDeleteBlockReason.LoadedScan,
+                DetailSelectionActionService.ImportedScanFileOperationsMessage);
         }
 
         if (isPortableScan)

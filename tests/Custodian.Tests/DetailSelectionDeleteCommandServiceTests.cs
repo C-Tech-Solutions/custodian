@@ -15,6 +15,7 @@ public sealed class DetailSelectionDeleteCommandServiceTests
             DetailSelectionDeleteMode.PermanentDelete,
             [Row(@"C:\Temp\file.txt")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             isBusy: true);
 
         Assert.False(command.CanExecute);
@@ -29,6 +30,7 @@ public sealed class DetailSelectionDeleteCommandServiceTests
             DetailSelectionDeleteMode.Recycle,
             [Row("Pixel/Internal shared storage/DCIM/photo.jpg")],
             isPortableScan: true,
+            isLoadedFromScanFile: false,
             isBusy: false);
 
         Assert.False(command.CanExecute);
@@ -42,6 +44,7 @@ public sealed class DetailSelectionDeleteCommandServiceTests
             DetailSelectionDeleteMode.Recycle,
             [Row(@"C:\Temp\file.txt")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             isBusy: false);
 
         Assert.True(command.CanExecute);
@@ -57,6 +60,7 @@ public sealed class DetailSelectionDeleteCommandServiceTests
             DetailSelectionDeleteMode.PermanentDelete,
             [Row(@"C:\Temp\file.txt")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             isBusy: false);
 
         Assert.True(command.CanExecute);
@@ -72,11 +76,43 @@ public sealed class DetailSelectionDeleteCommandServiceTests
             DetailSelectionDeleteMode.PermanentDelete,
             [Row(".zip")],
             isPortableScan: false,
+            isLoadedFromScanFile: false,
             isBusy: false);
 
         Assert.False(command.CanExecute);
         Assert.Equal(DetailSelectionDeleteBlockReason.InvalidSelection, command.BlockReason);
         Assert.Contains("file or folder rows", command.ToastMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ImportedScansBlockDeleteCommandsBeforePathUse()
+    {
+        var command = DetailSelectionDeleteCommandService.Build(
+            DetailSelectionDeleteMode.PermanentDelete,
+            [Row(@"C:\Temp\file.txt")],
+            isPortableScan: false,
+            isLoadedFromScanFile: true,
+            isBusy: false);
+
+        Assert.False(command.CanExecute);
+        Assert.Empty(command.Paths);
+        Assert.Equal(DetailSelectionDeleteBlockReason.LoadedScan, command.BlockReason);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, command.ToastMessage);
+    }
+
+    [Fact]
+    public void ImportedPortableScansUseLoadedScanBlockReason()
+    {
+        var command = DetailSelectionDeleteCommandService.Build(
+            DetailSelectionDeleteMode.Recycle,
+            [Row("Pixel/Internal shared storage/DCIM/photo.jpg")],
+            isPortableScan: true,
+            isLoadedFromScanFile: true,
+            isBusy: false);
+
+        Assert.False(command.CanExecute);
+        Assert.Equal(DetailSelectionDeleteBlockReason.LoadedScan, command.BlockReason);
+        Assert.Equal(DetailSelectionActionService.ImportedScanFileOperationsMessage, command.ToastMessage);
     }
 
     private static DetailRow Row(string path)

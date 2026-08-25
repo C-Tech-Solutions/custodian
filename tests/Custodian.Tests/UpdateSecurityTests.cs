@@ -48,12 +48,14 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
-    public void PackageVerificationAcceptsTrustedCustodianAndFrameworkPeFiles()
+    public void PackageVerificationAcceptsAuthorizedCustodianMicrosoftAndJetBrainsFiles()
     {
         var packagePath = CreatePackage(
-            "lib/net10.0-windows/Custodian.App.exe",
-            "lib/net10.0-windows/Accessibility.dll",
-            "lib/net10.0-windows/Velopack.dll");
+            "lib/app/Custodian.App.exe",
+            "lib/app/Accessibility.dll",
+            "lib/app/DirectWriteForwarder.dll",
+            "lib/app/cli/mscordaccore_amd64_amd64_10.0.826.23019.dll",
+            "lib/app/tui/JetBrains.Annotations.dll");
         try
         {
             var result = UpdatePackageSignatureVerifier.VerifyPackage(
@@ -67,18 +69,39 @@ public sealed class UpdateSecurityTests
                     ["Accessibility.dll"] = new(
                         true,
                         "CN=.NET, O=Microsoft Corporation, C=US",
-                        ".NET"),
-                    ["Velopack.dll"] = new(
+                        ".NET",
+                        SignerOrganization: "Microsoft Corporation",
+                        CompanyName: "Microsoft Corporation",
+                        OriginalFileName: "Accessibility.dll"),
+                    ["DirectWriteForwarder.dll"] = new(
                         true,
-                        "CN=Velopack Publisher, O=Velopack Publisher",
-                        "Velopack Publisher")
+                        "CN=.NET, O=Microsoft Corporation, C=US",
+                        ".NET",
+                        SignerOrganization: "Microsoft Corporation",
+                        CompanyName: string.Empty,
+                        OriginalFileName: "DirectWriteForwarder"),
+                    ["mscordaccore_amd64_amd64_10.0.826.23019.dll"] = new(
+                        true,
+                        "CN=.NET DAC, O=Microsoft Corporation, C=US",
+                        ".NET DAC",
+                        SignerOrganization: "Microsoft Corporation",
+                        CompanyName: "Microsoft Corporation",
+                        OriginalFileName: "mscordaccore.dll"),
+                    ["JetBrains.Annotations.dll"] = new(
+                        true,
+                        "CN=JetBrains s.r.o., O=JetBrains s.r.o., C=CZ",
+                        "JetBrains s.r.o.",
+                        SignerOrganization: "JetBrains s.r.o.",
+                        OriginalFileName: "JetBrains.Annotations.dll")
                 }));
 
             Assert.Equal(
                 [
-                    "lib/net10.0-windows/Custodian.App.exe",
-                    "lib/net10.0-windows/Accessibility.dll",
-                    "lib/net10.0-windows/Velopack.dll"
+                    "lib/app/Custodian.App.exe",
+                    "lib/app/Accessibility.dll",
+                    "lib/app/DirectWriteForwarder.dll",
+                    "lib/app/cli/mscordaccore_amd64_amd64_10.0.826.23019.dll",
+                    "lib/app/tui/JetBrains.Annotations.dll"
                 ],
                 result.VerifiedFiles);
         }
@@ -91,7 +114,7 @@ public sealed class UpdateSecurityTests
     [Fact]
     public void PackageVerificationRejectsUnexpectedSigner()
     {
-        var packagePath = CreatePackage("lib/net10.0-windows/Custodian.App.exe");
+        var packagePath = CreatePackage("lib/app/Custodian.App.exe");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -102,7 +125,7 @@ public sealed class UpdateSecurityTests
                         "CN=Other Publisher, O=Other Publisher",
                         "Other Publisher"))));
 
-            Assert.Contains("not 'C-Tech Solutions LLC'", ex.Message);
+            Assert.Contains("not authorized", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -113,7 +136,7 @@ public sealed class UpdateSecurityTests
     [Fact]
     public void PackageVerificationRejectsUnsignedCustodianOwnedPe()
     {
-        var packagePath = CreatePackage("lib/net10.0-windows/Custodian.Core.dll");
+        var packagePath = CreatePackage("lib/app/Custodian.Core.dll");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -136,18 +159,15 @@ public sealed class UpdateSecurityTests
     public void PackageVerificationRequiresAtLeastOneCustodianOwnedExecutablePayload()
     {
         var packagePath = CreatePackage(
-            "lib/net10.0-windows/Accessibility.dll",
-            "lib/net10.0-windows/Velopack.dll",
-            "lib/net10.0-windows/readme.txt");
+            "lib/app/Accessibility.dll",
+            "lib/app/System.Text.Json.dll",
+            "lib/app/readme.txt");
         try
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
                 UpdatePackageSignatureVerifier.VerifyPackage(
                     packagePath,
-                    new FixedAuthenticodeSignatureVerifier(new AuthenticodeSignatureResult(
-                        true,
-                        "CN=C-Tech Solutions LLC",
-                        "C-Tech Solutions LLC"))));
+                    new OriginalFileNameAuthenticodeSignatureVerifier()));
 
             Assert.Contains("did not contain any Custodian-owned executable files", ex.Message);
         }
@@ -155,6 +175,206 @@ public sealed class UpdateSecurityTests
         {
             File.Delete(packagePath);
         }
+    }
+
+    [Fact]
+    public void PackageVerificationRejectsRenamedMicrosoftBinaryInPlaceOfCustodianDependency()
+    {
+        var packagePath = CreatePackage(
+            "lib/app/Custodian.App.exe",
+            "lib/app/e_sqlite3.dll");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                UpdatePackageSignatureVerifier.VerifyPackage(
+                    packagePath,
+                    new MappingAuthenticodeSignatureVerifier(new Dictionary<string, AuthenticodeSignatureResult>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["Custodian.App.exe"] = CustodianSignature(),
+                        ["e_sqlite3.dll"] = new(
+                            true,
+                            "CN=Microsoft Windows, O=Microsoft Corporation, C=US",
+                            "Microsoft Windows",
+                            SignerOrganization: "Microsoft Corporation",
+                            CompanyName: "Microsoft Corporation",
+                            OriginalFileName: "version.dll")
+                    })));
+
+            Assert.Contains("e_sqlite3.dll", ex.Message);
+            Assert.Contains("not authorized", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public void PackageVerificationRejectsMicrosoftBinaryOutsideApprovedApplicationRoot()
+    {
+        var packagePath = CreatePackage(
+            "lib/app/Custodian.App.exe",
+            "tools/Accessibility.dll");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                UpdatePackageSignatureVerifier.VerifyPackage(
+                    packagePath,
+                    new MappingAuthenticodeSignatureVerifier(new Dictionary<string, AuthenticodeSignatureResult>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["Custodian.App.exe"] = CustodianSignature(),
+                        ["Accessibility.dll"] = MicrosoftSignature("Accessibility.dll")
+                    })));
+
+            Assert.Contains("tools/Accessibility.dll", ex.Message);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public void PackageVerificationRejectsJetBrainsBinaryOutsideExactApprovedPath()
+    {
+        var packagePath = CreatePackage(
+            "lib/app/Custodian.App.exe",
+            "lib/app/JetBrains.Annotations.dll");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                UpdatePackageSignatureVerifier.VerifyPackage(
+                    packagePath,
+                    new MappingAuthenticodeSignatureVerifier(new Dictionary<string, AuthenticodeSignatureResult>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["Custodian.App.exe"] = CustodianSignature(),
+                        ["JetBrains.Annotations.dll"] = new(
+                            true,
+                            "CN=JetBrains s.r.o., O=JetBrains s.r.o., C=CZ",
+                            "JetBrains s.r.o.",
+                            SignerOrganization: "JetBrains s.r.o.",
+                            OriginalFileName: "JetBrains.Annotations.dll")
+                    })));
+
+            Assert.Contains("not authorized", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public void PackageVerificationRejectsMalformedSignerIdentity()
+    {
+        var packagePath = CreatePackage("lib/app/Custodian.App.exe");
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                UpdatePackageSignatureVerifier.VerifyPackage(
+                    packagePath,
+                    new FixedAuthenticodeSignatureVerifier(new AuthenticodeSignatureResult(
+                        true,
+                        "not a distinguished name",
+                        "Unknown"))));
+        }
+        finally
+        {
+            File.Delete(packagePath);
+        }
+    }
+
+    [Fact]
+    public void CustodianPublisherPolicyRequiresExactOrganizationAttribute()
+    {
+        Assert.True(UpdatePackageSignatureVerifier.IsTrustedSigner(
+            "CN=Code Signing, O=C-Tech Solutions LLC, C=US"));
+        Assert.False(UpdatePackageSignatureVerifier.IsTrustedSigner(
+            "CN=C-Tech Solutions LLC, O=Other Publisher, C=US"));
+        Assert.False(UpdatePackageSignatureVerifier.IsTrustedSigner("not a distinguished name"));
+    }
+
+    [Fact]
+    public void ArchivePreflightAcceptsExactSizeAndCountBoundaries()
+    {
+        var entries = Enumerable.Range(0, UpdatePackageSignatureVerifier.MaximumPeEntries)
+            .Select(index => new UpdatePackageArchiveEntryMetadata(
+                $"lib/app/file-{index}.dll",
+                index == 0 ? UpdatePackageSignatureVerifier.MaximumSingleEntryBytes : 0,
+                0))
+            .Concat(Enumerable.Range(0, UpdatePackageSignatureVerifier.MaximumArchiveEntries - UpdatePackageSignatureVerifier.MaximumPeEntries)
+                .Select(index => new UpdatePackageArchiveEntryMetadata($"content/file-{index}.txt", 0, 0)));
+
+        var result = UpdatePackageSignatureVerifier.ValidateArchiveMetadata(entries);
+
+        Assert.Equal(UpdatePackageSignatureVerifier.MaximumArchiveEntries, result.Entries.Count);
+        Assert.Equal(UpdatePackageSignatureVerifier.MaximumPeEntries, result.PeCount);
+        Assert.Equal(UpdatePackageSignatureVerifier.MaximumSingleEntryBytes, result.TotalUncompressedBytes);
+    }
+
+    [Theory]
+    [InlineData("../outside.dll")]
+    [InlineData("lib/./app.dll")]
+    [InlineData("C:/app.dll")]
+    [InlineData("/lib/app.dll")]
+    public void ArchivePreflightRejectsUnsafePaths(string path)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            UpdatePackageSignatureVerifier.ValidateArchiveMetadata(
+                [new UpdatePackageArchiveEntryMetadata(path, 1, 1)]));
+
+        Assert.Contains("unsafe archive path", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ArchivePreflightRejectsCaseInsensitiveNormalizedDuplicates()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            UpdatePackageSignatureVerifier.ValidateArchiveMetadata(
+                [
+                    new UpdatePackageArchiveEntryMetadata("lib/app/Example.dll", 1, 1),
+                    new UpdatePackageArchiveEntryMetadata("lib\\app\\example.dll", 1, 1)
+                ]));
+
+        Assert.Contains("duplicate normalized path", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ArchivePreflightRejectsSingleAndAggregateSizeOveragesWithoutAllocatingPayloads()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            UpdatePackageSignatureVerifier.ValidateArchiveMetadata(
+                [new UpdatePackageArchiveEntryMetadata("lib/app/large.dll", UpdatePackageSignatureVerifier.MaximumSingleEntryBytes + 1, 1)]));
+
+        var entries = Enumerable.Range(0, 13)
+            .Select(index => new UpdatePackageArchiveEntryMetadata(
+                $"content/file-{index}.bin",
+                UpdatePackageSignatureVerifier.MaximumSingleEntryBytes,
+                1));
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            UpdatePackageSignatureVerifier.ValidateArchiveMetadata(entries));
+        Assert.Contains("total uncompressed-size", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ArchivePreflightRejectsInvalidSizeMetadata()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            UpdatePackageSignatureVerifier.ValidateArchiveMetadata(
+                [new UpdatePackageArchiveEntryMetadata("lib/app/file.dll", -1, long.MaxValue)]));
+
+        Assert.Contains("invalid size metadata", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void WindowsTrustPolicyChecksWholeChainExcludingRootAndDoesNotUseSaferFlag()
+    {
+        var policy = WindowsAuthenticodeSignatureVerifier.VerificationPolicy;
+
+        Assert.Equal(1u, policy.RevocationChecks);
+        Assert.Equal(0x80u, policy.ProviderFlags);
+        Assert.Equal(0u, policy.ProviderFlags & 0x100u);
+        Assert.Equal(policy, WindowsAuthenticodeSignatureVerifier.NativeDataPolicyForTesting());
     }
 
     [Fact]
@@ -169,7 +389,7 @@ public sealed class UpdateSecurityTests
                 new RecordingChecksumVerifier(calls),
                 new RecordingAuthenticodeSignatureVerifier(
                     calls,
-                    new AuthenticodeSignatureResult(true, "CN=C-Tech Solutions LLC", "C-Tech Solutions LLC")));
+                    new AuthenticodeSignatureResult(true, "CN=C-Tech Solutions LLC, O=C-Tech Solutions LLC", "C-Tech Solutions LLC")));
 
             verifier.Verify(CreateAsset());
 
@@ -188,7 +408,7 @@ public sealed class UpdateSecurityTests
             new FixedPackagePathResolver("unused.nupkg"),
             new RecordingChecksumVerifier([]),
             new FixedAuthenticodeSignatureVerifier(
-                new AuthenticodeSignatureResult(true, "CN=C-Tech Solutions LLC", "C-Tech Solutions LLC")));
+                new AuthenticodeSignatureResult(true, "CN=C-Tech Solutions LLC, O=C-Tech Solutions LLC", "C-Tech Solutions LLC")));
 
         Assert.Throws<ArgumentNullException>(() => verifier.Verify(null!));
     }
@@ -234,7 +454,7 @@ public sealed class UpdateSecurityTests
                     {
                         ["Custodian.App.exe"] = new(
                             true,
-                            "CN=C-Tech Solutions LLC",
+                            "CN=C-Tech Solutions LLC, O=C-Tech Solutions LLC",
                             "C-Tech Solutions LLC"),
                         ["Accessibility.dll"] = new(false, FailureReason: "unsigned")
                     })));
@@ -261,7 +481,47 @@ public sealed class UpdateSecurityTests
 
         Assert.True(result.IsTrusted, result.FailureReason);
         Assert.Contains("Microsoft Corporation", result.SignerSubject, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Microsoft Corporation", result.SignerOrganization, ignoreCase: true);
+        Assert.Equal("Microsoft Corporation", result.CompanyName, ignoreCase: true);
+        Assert.False(string.IsNullOrWhiteSpace(result.OriginalFileName));
     }
+
+    [SignedReleasePackageFact]
+    public void ConfiguredSignedReleasePackagePassesFullPublisherPolicy()
+    {
+        var packagePath = Environment.GetEnvironmentVariable("CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE")!;
+
+        Assert.True(File.Exists(packagePath), $"Configured signed release package was not found: {packagePath}");
+
+        var result = UpdatePackageSignatureVerifier.VerifyPackage(
+            packagePath,
+            new WindowsAuthenticodeSignatureVerifier());
+
+        using var archive = ZipFile.OpenRead(packagePath);
+        var expectedPeCount = archive.Entries.Count(entry =>
+        {
+            var extension = Path.GetExtension(Path.GetFileName(entry.FullName));
+            return string.Equals(extension, ".dll", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, ".exe", StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Equal(expectedPeCount, result.VerifiedFiles.Count);
+    }
+
+    private static AuthenticodeSignatureResult CustodianSignature()
+        => new(
+            true,
+            "CN=Code Signing, O=C-Tech Solutions LLC, C=US",
+            "Code Signing",
+            SignerOrganization: "C-Tech Solutions LLC");
+
+    private static AuthenticodeSignatureResult MicrosoftSignature(string originalFileName)
+        => new(
+            true,
+            "CN=.NET, O=Microsoft Corporation, C=US",
+            ".NET",
+            SignerOrganization: "Microsoft Corporation",
+            CompanyName: "Microsoft Corporation",
+            OriginalFileName: originalFileName);
 
     private static VelopackAsset CreateAsset() => new()
     {
@@ -303,6 +563,23 @@ public sealed class UpdateSecurityTests
     {
         public AuthenticodeSignatureResult Verify(string filePath)
             => results[Path.GetFileName(filePath)];
+    }
+
+    private sealed class OriginalFileNameAuthenticodeSignatureVerifier : IAuthenticodeSignatureVerifier
+    {
+        public AuthenticodeSignatureResult Verify(string filePath)
+            => MicrosoftSignature(Path.GetFileName(filePath));
+    }
+
+    private sealed class SignedReleasePackageFactAttribute : FactAttribute
+    {
+        public SignedReleasePackageFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE")))
+            {
+                Skip = "Set CUSTODIAN_TEST_SIGNED_RELEASE_PACKAGE to run the signed package integration test.";
+            }
+        }
     }
 
     private sealed class RecordingAuthenticodeSignatureVerifier(

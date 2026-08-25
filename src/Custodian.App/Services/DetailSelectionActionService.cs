@@ -23,9 +23,13 @@ internal sealed record DetailSelectionActionState(
 
 internal static class DetailSelectionActionService
 {
+    internal const string ImportedScanFileOperationsMessage =
+        "File operations are unavailable for imported scans. Run a new live scan to enable them.";
+
     internal static DetailSelectionActionState Build(
         IReadOnlyCollection<DetailRow> selectedRows,
         bool isPortableScan,
+        bool isLoadedFromScanFile,
         bool allSelectedRowsUseFileSystemPaths,
         bool isBusy)
     {
@@ -36,8 +40,8 @@ internal static class DetailSelectionActionService
             (isPortableScan
                 ? AllRowsUsePortableObjectIdentity(selectedRows)
                 : allSelectedRowsUseFileSystemPaths);
-        var canModifyLocal = canUseSelection && !isBusy && !isPortableScan;
-        var canCopy = canUseSelection && !isBusy;
+        var canModifyLocal = canUseSelection && !isBusy && !isPortableScan && !isLoadedFromScanFile;
+        var canCopy = canUseSelection && !isBusy && !isLoadedFromScanFile;
 
         return new DetailSelectionActionState(
             selectedCount,
@@ -52,18 +56,26 @@ internal static class DetailSelectionActionService
             CanCopyRows: hasSelection,
             CanExport: hasSelection,
             CopyText: isPortableScan ? "Copy to PC" : "Copy",
-            CopyToolTip: CopyToolTip(isPortableScan, allSelectedRowsUseFileSystemPaths),
-            MoveToolTip: isPortableScan
+            CopyToolTip: isLoadedFromScanFile
+                ? ImportedScanFileOperationsMessage
+                : CopyToolTip(isPortableScan, allSelectedRowsUseFileSystemPaths),
+            MoveToolTip: isLoadedFromScanFile
+                ? ImportedScanFileOperationsMessage
+                : isPortableScan
                 ? "Move is not available for phone scans"
                 : allSelectedRowsUseFileSystemPaths
                     ? "Move selected files or folders to another folder"
                     : "Move requires real file or folder rows",
-            DeleteToolTip: isPortableScan
+            DeleteToolTip: isLoadedFromScanFile
+                ? ImportedScanFileOperationsMessage
+                : isPortableScan
                 ? "Delete is not available for phone scans"
                 : allSelectedRowsUseFileSystemPaths
                     ? "Move selected files or folders to the Recycle Bin"
                     : "Delete requires real file or folder rows",
-            PermanentDeleteToolTip: isPortableScan
+            PermanentDeleteToolTip: isLoadedFromScanFile
+                ? ImportedScanFileOperationsMessage
+                : isPortableScan
                 ? "Permanent delete is not available for phone scans"
                 : allSelectedRowsUseFileSystemPaths
                     ? "Permanently delete selected files or folders without using the Recycle Bin"
