@@ -22,6 +22,18 @@ function Assert-CustodianPublishPhase {
     }
 }
 
+function Test-CustodianDatedChangelogEntry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ChangelogText,
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    return $ChangelogText -match "(?m)^## $([regex]::Escape($Version)) - \d{4}-\d{2}-\d{2}\r?$"
+}
+
 function Get-CustodianVelopackAssetNames {
     [CmdletBinding()]
     param(
@@ -117,6 +129,7 @@ function Get-CustodianGitHubReleasesByTag {
 
 Export-ModuleMember -Function @(
     "Assert-CustodianPublishPhase",
+    "Test-CustodianDatedChangelogEntry",
     "Get-CustodianVelopackAssetNames",
     "Get-CustodianReleaseAssetNames",
     "Assert-CustodianReleaseAbsent",
