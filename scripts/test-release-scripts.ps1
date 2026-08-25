@@ -47,7 +47,7 @@ function Get-WorkflowJobLines {
     $inheritedEnvironmentLines = [Collections.Generic.List[string]]::new()
     $rootEnvironmentIndexes = [Collections.Generic.List[int]]::new()
     for ($index = 0; $index -lt $WorkflowLines.Count; $index++) {
-        if ($WorkflowLines[$index] -ceq "env:") {
+        if ($WorkflowLines[$index] -match '^[''"]?env[''"]?\s*:') {
             $rootEnvironmentIndexes.Add($index)
         }
     }
@@ -244,6 +244,28 @@ Assert-Throws {
     Assert-RecoveryTokenScope `
         -EffectiveJobLines $inheritedTokenJobFixture `
         -DraftInspectionLines $inheritedTokenStepFixture
+} "only to the draft-inspection step"
+
+$inlineInheritedTokenWorkflowFixture = @(
+    "name: Fixture",
+    'env: { GH_TOKEN: "${{ github.token }}" }',
+    "jobs:",
+    "  validate-recovery:",
+    "    steps:",
+    "      - name: Verify exact empty draft and annotated source tag",
+    "        env:",
+    '          GH_TOKEN: ${{ github.token }}'
+)
+$inlineInheritedTokenJobFixture = @(Get-WorkflowJobLines `
+    -WorkflowLines $inlineInheritedTokenWorkflowFixture `
+    -JobName "validate-recovery")
+$inlineInheritedTokenStepFixture = @(Get-WorkflowStepLines `
+    -JobLines $inlineInheritedTokenJobFixture `
+    -StepName "Verify exact empty draft and annotated source tag")
+Assert-Throws {
+    Assert-RecoveryTokenScope `
+        -EffectiveJobLines $inlineInheritedTokenJobFixture `
+        -DraftInspectionLines $inlineInheritedTokenStepFixture
 } "only to the draft-inspection step"
 
 $trustedCheckoutFixture = @(
