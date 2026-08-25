@@ -89,6 +89,36 @@ Assert-Throws {
     ) -StepName "Checkout exact release source"
 } "must occur exactly once"
 
+function Get-WorkflowPermissionEntries {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$JobLines
+    )
+
+    $permissionBlockIndexes = [Collections.Generic.List[int]]::new()
+    for ($index = 0; $index -lt $JobLines.Count; $index++) {
+        if ($JobLines[$index] -ceq "    permissions:") {
+            $permissionBlockIndexes.Add($index)
+        }
+    }
+    if ($permissionBlockIndexes.Count -ne 1) {
+        throw "Workflow job must contain exactly one permissions block."
+    }
+
+    $permissionEntries = [Collections.Generic.List[string]]::new()
+    for ($index = $permissionBlockIndexes[0] + 1; $index -lt $JobLines.Count; $index++) {
+        $line = $JobLines[$index]
+        if ($line -match '^    \S') {
+            break
+        }
+        if ($line -match '^      (?<entry>[^#].*\S)\s*$') {
+            $permissionEntries.Add($Matches.entry.Trim())
+        }
+    }
+    return @($permissionEntries)
+}
+
 function Get-CheckoutPersistCredentials {
     param(
         [Parameter(Mandatory = $true)]
@@ -635,20 +665,7 @@ foreach ($contract in $checkoutContracts) {
     }
 }
 $validateJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate")
-$permissionsStart = [Array]::IndexOf($validateJobLines, "    permissions:")
-if ($permissionsStart -lt 0) {
-    throw "The pre-environment validation job must not have release-write permission."
-}
-$permissionEntries = [Collections.Generic.List[string]]::new()
-for ($index = $permissionsStart + 1; $index -lt $validateJobLines.Count; $index++) {
-    $line = $validateJobLines[$index]
-    if ($line -match '^    \S') {
-        break
-    }
-    if ($line -match '^      (?<entry>[^#].*\S)\s*$') {
-        $permissionEntries.Add($Matches.entry.Trim())
-    }
-}
+$permissionEntries = @(Get-WorkflowPermissionEntries -JobLines $validateJobLines)
 if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: read") {
     throw "The pre-environment validation job must not have release-write permission."
 }
@@ -662,18 +679,17 @@ if (!($recoveryCheckoutLines -contains "        uses: actions/checkout@3d3c42e5a
     ($recoveryCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}')) {
     throw "Recovery validation must load write-token inspection code from the trusted workflow revision."
 }
-$recoveryPermissionsStart = [Array]::IndexOf($recoveryValidationJobLines, "    permissions:")
-if ($recoveryPermissionsStart -lt 0 -or
-    !($recoveryValidationJobLines -contains "      contents: write")) {
+$recoveryPermissions = @(Get-WorkflowPermissionEntries -JobLines $recoveryValidationJobLines)
+if ($recoveryPermissions.Count -ne 1 -or $recoveryPermissions[0] -cne "contents: write") {
     throw "Recovery validation requires contents write permission to retrieve an existing draft release."
 }
-if ($recoveryValidationJobLines -contains '      GH_TOKEN: ${{ github.token }}') {
+if (@($recoveryValidationJobLines | Where-Object { $_ -match '^      (?:GH_TOKEN|GITHUB_TOKEN):' }).Count -ne 0) {
     throw "Recovery validation must not expose the write-capable token at job scope."
 }
 $draftInspectionLines = @(Get-WorkflowStepLines `
     -JobLines $recoveryValidationJobLines `
     -StepName "Verify exact empty draft and annotated source tag")
-$recoveryTokenAssignments = @($recoveryValidationJobLines | Where-Object { $_ -match '^\s+GH_TOKEN:' })
+$recoveryTokenAssignments = @($recoveryValidationJobLines | Where-Object { $_ -match '^\s+(?:GH_TOKEN|GITHUB_TOKEN):' })
 if ($recoveryTokenAssignments.Count -ne 1 -or
     !($draftInspectionLines -contains '          GH_TOKEN: ${{ github.token }}')) {
     throw "Recovery validation must expose the write-capable token only to the draft-inspection step."
@@ -682,22 +698,11 @@ if ($recoveryValidationJobLines -contains "      - name: Checkout exact release 
     throw "The write-capable recovery job must not check out or execute the historical release source."
 }
 $recoverySourceValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery-source")
-$recoverySourcePermissionsStart = [Array]::IndexOf($recoverySourceValidationJobLines, "    permissions:")
-$recoverySourcePermissions = [Collections.Generic.List[string]]::new()
-for ($index = $recoverySourcePermissionsStart + 1; $index -lt $recoverySourceValidationJobLines.Count; $index++) {
-    $line = $recoverySourceValidationJobLines[$index]
-    if ($line -match '^    \S') {
-        break
-    }
-    if ($line -match '^      (?<entry>[^#].*\S)\s*$') {
-        $recoverySourcePermissions.Add($Matches.entry.Trim())
-    }
-}
-if ($recoverySourcePermissionsStart -lt 0 -or
-    $recoverySourcePermissions.Count -ne 1 -or
+$recoverySourcePermissions = @(Get-WorkflowPermissionEntries -JobLines $recoverySourceValidationJobLines)
+if ($recoverySourcePermissions.Count -ne 1 -or
     $recoverySourcePermissions[0] -cne "contents: read" -or
     !($recoverySourceValidationJobLines -contains "      - name: Checkout exact release source") -or
-    @($recoverySourceValidationJobLines | Where-Object { $_ -match '^\s+GH_TOKEN:' }).Count -ne 0) {
+    @($recoverySourceValidationJobLines | Where-Object { $_ -match '^\s+(?:GH_TOKEN|GITHUB_TOKEN):' }).Count -ne 0) {
     throw "Historical release-source validation must run in a separate read-only job without GH_TOKEN exposure."
 }
 $recoverDraftJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "recover-draft")
