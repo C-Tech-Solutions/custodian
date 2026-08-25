@@ -141,6 +141,9 @@ function Get-WorkflowPermissionEntries {
     $permissionEntries = [Collections.Generic.List[string]]::new()
     for ($index = $permissionBlockIndexes[0] + 1; $index -lt $JobLines.Count; $index++) {
         $line = $JobLines[$index]
+        if ($line -match '^\s*#') {
+            continue
+        }
         if ($line -match '^    \S') {
             break
         }
@@ -149,6 +152,20 @@ function Get-WorkflowPermissionEntries {
         }
     }
     return @($permissionEntries)
+}
+
+$commentedPermissionEntries = @(Get-WorkflowPermissionEntries -JobLines @(
+    "  fixture-job:",
+    "    permissions:",
+    "      contents: read",
+    "    # keep scanning the permissions mapping",
+    "      id-token: write",
+    "    steps:"
+))
+if ($commentedPermissionEntries.Count -ne 2 -or
+    $commentedPermissionEntries[0] -cne "contents: read" -or
+    $commentedPermissionEntries[1] -cne "id-token: write") {
+    throw "Workflow permission parsing must retain entries after comments."
 }
 
 function Get-GitHubCliTokenAssignments {
