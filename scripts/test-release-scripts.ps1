@@ -134,9 +134,11 @@ $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.g
 $releaseWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\release.yml"))
 $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml")
 $ciWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml"))
-$preflightScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "assert-release-preflight.ps1")
-if ($preflightScript -notmatch [regex]::Escape('\d{4}-\d{2}-\d{2}\r?$')) {
-    throw "Release preflight changelog validation must accept both LF and CRLF line endings."
+foreach ($lineEnding in @("`n", "`r`n")) {
+    $changelog = "# Changelog${lineEnding}${lineEnding}## 1.5.5 - 2026-08-25${lineEnding}"
+    if (!(Test-CustodianDatedChangelogEntry -ChangelogText $changelog -Version "1.5.5")) {
+        throw "Release preflight changelog validation rejected a valid heading with '$([BitConverter]::ToString([Text.Encoding]::UTF8.GetBytes($lineEnding)))' line endings."
+    }
 }
 $requiredActionPins = @(
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",

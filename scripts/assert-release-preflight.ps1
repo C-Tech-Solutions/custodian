@@ -33,7 +33,7 @@ if (@(git -C $repo status --porcelain).Count -ne 0) {
 }
 
 $changelog = Get-Content -Raw -LiteralPath (Join-Path $repo "CHANGELOG.md")
-if ($changelog -notmatch "(?m)^## $([regex]::Escape($Version)) - \d{4}-\d{2}-\d{2}\r?$") {
+if (!(Test-CustodianDatedChangelogEntry -ChangelogText $changelog -Version $Version)) {
     throw "CHANGELOG.md does not contain a dated $Version release entry."
 }
 
