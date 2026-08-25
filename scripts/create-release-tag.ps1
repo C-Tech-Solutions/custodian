@@ -29,6 +29,11 @@ function Assert-LocalTagIdentity {
     if ((git -C $repo rev-list -n 1 $tagRef).Trim().ToLowerInvariant() -ne $normalizedCommit) {
         throw "Local tag '$Version' does not resolve to '$normalizedCommit'."
     }
+    $taggerLine = @(git -C $repo cat-file -p $tagRef | Where-Object { $_ -like "tagger *" } | Select-Object -First 1)
+    if ($taggerLine.Count -ne 1 -or
+        !$taggerLine[0].StartsWith("tagger $taggerName <$taggerEmail> ", [StringComparison]::Ordinal)) {
+        throw "Local tag '$Version' does not use the expected release tagger identity."
+    }
 }
 
 function Get-RemoteTagState {
@@ -65,11 +70,22 @@ elseif ($remoteExists) {
     Assert-LocalTagIdentity
 }
 else {
-    git -C $repo `
-        -c "user.name=$taggerName" `
-        -c "user.email=$taggerEmail" `
-        tag --annotate $Version $normalizedCommit --message "Custodian $Version"
-    if ($LASTEXITCODE -ne 0) {
+    $previousCommitterName = [Environment]::GetEnvironmentVariable("GIT_COMMITTER_NAME", "Process")
+    $previousCommitterEmail = [Environment]::GetEnvironmentVariable("GIT_COMMITTER_EMAIL", "Process")
+    try {
+        [Environment]::SetEnvironmentVariable("GIT_COMMITTER_NAME", $taggerName, "Process")
+        [Environment]::SetEnvironmentVariable("GIT_COMMITTER_EMAIL", $taggerEmail, "Process")
+        git -C $repo `
+            -c "user.name=$taggerName" `
+            -c "user.email=$taggerEmail" `
+            tag --annotate $Version $normalizedCommit --message "Custodian $Version"
+        $tagExitCode = $LASTEXITCODE
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable("GIT_COMMITTER_NAME", $previousCommitterName, "Process")
+        [Environment]::SetEnvironmentVariable("GIT_COMMITTER_EMAIL", $previousCommitterEmail, "Process")
+    }
+    if ($tagExitCode -ne 0) {
         throw "Failed to create annotated tag '$Version'."
     }
     Assert-LocalTagIdentity

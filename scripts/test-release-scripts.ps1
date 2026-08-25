@@ -289,10 +289,20 @@ if ($publishGitHubScript -notmatch '\$release\.draft' -or
 }
 
 $createTagScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "create-release-tag.ps1")
-foreach ($taggerIdentityContract in @("user.name=", "user.email=", "github-actions[bot]")) {
+foreach ($taggerIdentityContract in @(
+    '$taggerName = "github-actions[bot]"',
+    '$taggerEmail = "41898282+github-actions[bot]@users.noreply.github.com"',
+    '[Environment]::SetEnvironmentVariable("GIT_COMMITTER_NAME", $taggerName, "Process")',
+    '[Environment]::SetEnvironmentVariable("GIT_COMMITTER_EMAIL", $taggerEmail, "Process")',
+    '-c "user.name=$taggerName"',
+    '-c "user.email=$taggerEmail"'
+)) {
     if (!$createTagScript.Contains($taggerIdentityContract, [StringComparison]::Ordinal)) {
         throw "Annotated tag creation is missing deterministic tagger identity contract '$taggerIdentityContract'."
     }
+}
+if (!$createTagScript.Contains('StartsWith("tagger $taggerName <$taggerEmail> "', [StringComparison]::Ordinal)) {
+    throw "Annotated tag verification does not enforce the exact release tagger identity."
 }
 
 $verifyGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "verify-github-release.ps1")
