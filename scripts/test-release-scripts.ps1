@@ -609,6 +609,22 @@ if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: rea
     throw "The pre-environment validation job must not have release-write permission."
 }
 $recoveryValidationJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate-recovery")
+$recoveryCheckoutStart = [Array]::IndexOf($recoveryValidationJobLines, "      - name: Checkout exact workflow SHA")
+if ($recoveryCheckoutStart -lt 0) {
+    throw "Recovery validation is missing its trusted workflow checkout."
+}
+$recoveryCheckoutEnd = $recoveryValidationJobLines.Count
+for ($index = $recoveryCheckoutStart + 1; $index -lt $recoveryValidationJobLines.Count; $index++) {
+    if ($recoveryValidationJobLines[$index] -match '^      -\s') {
+        $recoveryCheckoutEnd = $index
+        break
+    }
+}
+$recoveryCheckoutLines = @($recoveryValidationJobLines[$recoveryCheckoutStart..($recoveryCheckoutEnd - 1)])
+if (!($recoveryCheckoutLines -contains '          ref: ${{ github.sha }}') -or
+    ($recoveryCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}')) {
+    throw "Recovery validation must load write-token inspection code from the trusted workflow revision."
+}
 $recoveryPermissionsStart = [Array]::IndexOf($recoveryValidationJobLines, "    permissions:")
 if ($recoveryPermissionsStart -lt 0 -or
     !($recoveryValidationJobLines -contains "      contents: write")) {
