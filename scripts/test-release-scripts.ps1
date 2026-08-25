@@ -186,6 +186,11 @@ function Assert-NoGitHubOrSecretsContextReferences {
     if ($workflowText -match '(?s)\$\{\{.*?(?<![A-Za-z0-9_])(?:github|secrets)(?![A-Za-z0-9_]).*?\}\}') {
         throw "Historical release-source validation must not reference the GitHub or secrets contexts."
     }
+    if (@($WorkflowLines | Where-Object {
+        $_ -match '\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
+    }).Count -ne 0) {
+        throw "Historical release-source validation must not contain YAML Unicode escapes."
+    }
 }
 
 function Assert-RecoveryTokenScope {
@@ -322,6 +327,22 @@ function Assert-ExpectedCheckoutCount {
     }
 }
 
+function Assert-NoCheckoutInputKeys {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$StepLines,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ForbiddenKeys
+    )
+
+    $keyPattern = [string]::Join('|', @($ForbiddenKeys | ForEach-Object { [Regex]::Escape($_) }))
+    $mappingKeyPattern = '^\s+[''"]?(?:{0})[''"]?\s*:' -f $keyPattern
+    if (@($StepLines | Where-Object { $_ -match $mappingKeyPattern }).Count -ne 0) {
+        throw "Workflow checkout contains a forbidden input key."
+    }
+}
+
 function Assert-SingleTrustedWorkflowCheckout {
     param(
         [Parameter(Mandatory = $true)]
@@ -372,6 +393,14 @@ foreach ($serializedContextFixture in @(
     Assert-Throws {
         Assert-NoGitHubOrSecretsContextReferences -WorkflowLines @($serializedContextFixture)
     } "must not reference the GitHub or secrets contexts"
+}
+foreach ($escapedContextFixture in @(
+    '        env: { LEAK: "\u0024{{ toJSON(secrets) }}" }',
+    '        env: { LEAK: "${{ toJSON(gith\u0075b) }}" }'
+)) {
+    Assert-Throws {
+        Assert-NoGitHubOrSecretsContextReferences -WorkflowLines @($escapedContextFixture)
+    } "must not contain YAML Unicode escapes"
 }
 
 $inheritedTokenWorkflowFixture = @(
@@ -566,6 +595,16 @@ Assert-Throws {
         -JobLines $releaseSourceOverrideFixture `
         -ExpectedCount 1
 } "exactly 1 checkout action"
+foreach ($repositoryOverrideFixture in @(
+    '          "repository": attacker/repository',
+    '          repository : attacker/repository'
+)) {
+    Assert-Throws {
+        Assert-NoCheckoutInputKeys `
+            -StepLines @($trustedCheckoutFixture + $repositoryOverrideFixture) `
+            -ForbiddenKeys @("repository")
+    } "forbidden input key"
+}
 
 function Get-CheckoutPersistCredentials {
     param(
@@ -1246,10 +1285,12 @@ foreach ($workflowCheckoutLines in @(
     if (!($workflowCheckoutLines -contains $checkoutAction) -or
         !($workflowCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}') -or
         !($workflowCheckoutLines -contains "          fetch-depth: 0") -or
-        !($workflowCheckoutLines -contains "          persist-credentials: false") -or
-        @($workflowCheckoutLines | Where-Object { $_ -match '^          (?:path|repository):' }).Count -ne 0) {
+        !($workflowCheckoutLines -contains "          persist-credentials: false")) {
         throw "Recovery signing and publication must use the exact workflow checkout."
     }
+    Assert-NoCheckoutInputKeys `
+        -StepLines $workflowCheckoutLines `
+        -ForbiddenKeys @("path", "repository")
 }
 foreach ($sourceCheckoutLines in @(
     $validatedSourceCheckoutLines,
@@ -1259,10 +1300,12 @@ foreach ($sourceCheckoutLines in @(
     if (!($sourceCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
         !($sourceCheckoutLines -contains '          ref: ${{ inputs.recovery_source_sha }}') -or
         !($sourceCheckoutLines -contains "          path: release-source") -or
-        !($sourceCheckoutLines -contains "          persist-credentials: false") -or
-        @($sourceCheckoutLines | Where-Object { $_ -match '^          repository:' }).Count -ne 0) {
+        !($sourceCheckoutLines -contains "          persist-credentials: false")) {
         throw "Recovery source validation and signing must use the same exact source checkout."
     }
+    Assert-NoCheckoutInputKeys `
+        -StepLines $sourceCheckoutLines `
+        -ForbiddenKeys @("repository")
 }
 if (!($recoverySourceValidationJobLines -contains "    needs: validate-recovery") -or
     !($recoverySourceValidationJobLines -contains "    if: needs.validate-recovery.result == 'success'") -or
