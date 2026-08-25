@@ -301,8 +301,39 @@ foreach ($taggerIdentityContract in @(
         throw "Annotated tag creation is missing deterministic tagger identity contract '$taggerIdentityContract'."
     }
 }
-if (!$createTagScript.Contains('StartsWith("tagger $taggerName <$taggerEmail> "', [StringComparison]::Ordinal)) {
-    throw "Annotated tag verification does not enforce the exact release tagger identity."
+foreach ($remoteTagContract in @('$remoteTagObject', 'cat-file -p $remoteTagObject', 'Remote tag ''$Version'' does not use the expected release tagger identity')) {
+    if (!$createTagScript.Contains($remoteTagContract, [StringComparison]::Ordinal)) {
+        throw "Annotated tag verification is missing remote tag identity contract '$remoteTagContract'."
+    }
+}
+
+$tagTokens = $null
+$tagErrors = $null
+$tagAst = [Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $PSScriptRoot "create-release-tag.ps1"),
+    [ref]$tagTokens,
+    [ref]$tagErrors)
+$taggerLineFunction = $tagAst.Find({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq "Test-CustodianTaggerLine"
+}, $true)
+if ($null -eq $taggerLineFunction) {
+    throw "Annotated tag verification is missing its shared tagger identity check."
+}
+Invoke-Expression $taggerLineFunction.Extent.Text
+$exactTaggerLine = "tagger github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> 1787654321 +0000"
+if (!(Test-CustodianTaggerLine `
+    -TaggerLine $exactTaggerLine `
+    -ExpectedName "github-actions[bot]" `
+    -ExpectedEmail "41898282+github-actions[bot]@users.noreply.github.com")) {
+    throw "Exact release tagger identity was rejected."
+}
+if (Test-CustodianTaggerLine `
+    -TaggerLine $exactTaggerLine `
+    -ExpectedName "github-actions[bot]" `
+    -ExpectedEmail "unexpected@example.com") {
+    throw "A mismatched release tagger identity was accepted."
 }
 
 $verifyGitHubScript = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "verify-github-release.ps1")
