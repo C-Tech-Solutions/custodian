@@ -621,7 +621,9 @@ for ($index = $recoveryCheckoutStart + 1; $index -lt $recoveryValidationJobLines
     }
 }
 $recoveryCheckoutLines = @($recoveryValidationJobLines[$recoveryCheckoutStart..($recoveryCheckoutEnd - 1)])
-if (!($recoveryCheckoutLines -contains '          ref: ${{ github.sha }}') -or
+if (!($recoveryCheckoutLines -contains "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") -or
+    !($recoveryCheckoutLines -contains '          ref: ${{ github.sha }}') -or
+    !($recoveryCheckoutLines -contains "          persist-credentials: false") -or
     ($recoveryCheckoutLines -contains '          ref: ${{ inputs.commit_sha }}')) {
     throw "Recovery validation must load write-token inspection code from the trusted workflow revision."
 }
