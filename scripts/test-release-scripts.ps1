@@ -152,6 +152,31 @@ foreach ($pin in $requiredActionPins) {
         throw "Release workflow is missing required action pin '$pin'."
     }
 }
+$releaseStepOrder = @(
+    "- name: Pack signed tree with Velopack",
+    "- name: Select only unsigned portable PEs",
+    "- name: Sign unsigned portable PEs",
+    "- name: Repack signed portable archive",
+    "- name: Sign generated Setup executable",
+    "- name: Verify final Velopack assets and signatures"
+)
+$previousStepIndex = -1
+foreach ($step in $releaseStepOrder) {
+    $stepIndex = $releaseWorkflow.IndexOf($step, [StringComparison]::Ordinal)
+    if ($stepIndex -le $previousStepIndex) {
+        throw "Release workflow is missing or misorders required step '$step'."
+    }
+    $previousStepIndex = $stepIndex
+}
+foreach ($scriptName in @("prepare-portable-signing-catalog.ps1", "complete-portable-signing.ps1")) {
+    $scriptPath = Join-Path $PSScriptRoot $scriptName
+    $tokens = $null
+    $errors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -ne 0) {
+        throw "Portable signing script '$scriptName' has PowerShell parse errors."
+    }
+}
 if ($releaseWorkflow -match '(?i)(client-secret|azure-client-secret|--token)') {
     throw "Release workflow contains a stored-secret or command-line token path."
 }
