@@ -345,6 +345,11 @@ function Assert-SupportedRecoveryWorkflowSyntax {
     )
 
     $allWorkflowLines = @($WorkflowLines + $RootEnvironmentLines + $RecoveryJobLines)
+    if (@($WorkflowLines | Where-Object {
+        $_ -match '^defaults\s*:'
+    }).Count -ne 0) {
+        throw "Release workflow must not define root run defaults."
+    }
     if (@($allWorkflowLines | Where-Object {
         $_ -match '\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
     }).Count -ne 0 -or
@@ -911,6 +916,19 @@ foreach ($writeScopeEscapeFixture in @(
             -RootEnvironmentLines @() `
             -RecoveryJobLines $writeScopeEscapeFixture
     } "must not use YAML decoded escapes"
+}
+foreach ($rootDefaultsFixture in @("defaults:", "defaults :")) {
+    Assert-Throws {
+        Assert-SupportedRecoveryWorkflowSyntax `
+            -WorkflowLines @(
+                "name: Fixture",
+                $rootDefaultsFixture,
+                "  run:",
+                "    working-directory: attacker-controlled"
+            ) `
+            -RootEnvironmentLines @() `
+            -RecoveryJobLines @()
+    } "must not define root run defaults"
 }
 
 $trustedCheckoutFixture = @(
