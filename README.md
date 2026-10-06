@@ -152,6 +152,23 @@ custodian scan \\server\share --export share.csv --silent
 custodian export data.custodian-scan --format json --out data.json
 ```
 
+## Saved scan validation
+
+Opening a `.custodian-scan` validates the SQLite schema, `custodian-scan-v1`
+metadata, entry values, and the complete parent tree before building the tree
+and analysis index. Missing parents, cycles, disconnected entries, files used
+as parents, invalid counters, and unsupported versions produce an error.
+Legacy v1 files without the later source, cloud, or portable-device fields
+remain supported. Stored sizes are preserved rather than recomputed.
+
+Default load budgets are 1 GiB for the database and its existing WAL/SHM
+sidecars combined, 2,000,000 entries, 100,000 skipped entries, 128 metadata
+rows, 128 KiB per string, 256 MiB of total string data, and 1,024 levels
+(including the root). String budgets count UTF-8 bytes. Exceeding a budget
+rejects the whole load with an error; no rows are silently discarded and the
+saved file is not rewritten. Core library callers can explicitly set larger
+budgets with `new ScanStore(new ScanLoadLimits { ... })` when appropriate.
+
 ## TUI Examples
 
 ```powershell

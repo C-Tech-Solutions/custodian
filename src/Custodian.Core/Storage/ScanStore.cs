@@ -1,5 +1,4 @@
 using Custodian.Core.Model;
-using Custodian.Core.Analysis;
 using System.Data.Common;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
@@ -8,6 +7,19 @@ namespace Custodian.Core.Storage;
 
 public sealed class ScanStore
 {
+    private readonly ScanLoadLimits _loadLimits;
+
+    public ScanStore() : this(new ScanLoadLimits())
+    {
+    }
+
+    public ScanStore(ScanLoadLimits loadLimits)
+    {
+        ArgumentNullException.ThrowIfNull(loadLimits);
+        loadLimits.Validate();
+        _loadLimits = loadLimits;
+    }
+
     public async Task SaveAsync(ScanResult result, string path, CancellationToken cancellationToken = default)
     {
         var tempPath = CreateTemporarySavePath(path);
@@ -93,105 +105,28 @@ public sealed class ScanStore
 
     public async Task<ScanResult> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        // Keep the file open while reading so Windows cannot replace or grow it
+        // between the size check and SQLite's read transaction.
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var bytes = file.Length;
+        foreach (var suffix in new[] { "-wal", "-shm" })
+        {
+            var sidecar = new FileInfo(path + suffix);
+            if (sidecar.Exists)
+            {
+                bytes = checked(bytes + sidecar.Length);
+            }
+        }
+
+        if (bytes > _loadLimits.MaxFileBytes)
+        {
+            throw new InvalidDataException("Saved scan exceeds the configured file byte limit.");
+        }
+
         await using var connection = CreateConnection(path, SqliteOpenMode.ReadOnly);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        var metadata = await LoadMetadataAsync(connection, cancellationToken).ConfigureAwait(false);
-        var entryColumns = await LoadTableColumnsAsync(connection, "entries", cancellationToken).ConfigureAwait(false);
-        var portableObjectIdSelect = entryColumns.Contains("portable_object_id") ? "portable_object_id" : "''";
-        var portablePersistentIdSelect = entryColumns.Contains("portable_persistent_id") ? "portable_persistent_id" : "''";
-        var byId = new Dictionary<long, FileSystemEntry>();
-        var parentById = new Dictionary<long, long?>();
-        var indexBuilder = new ScanGlobalIndexBuilder();
-
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = $"""
-                SELECT id, parent_id, name, full_path, is_directory, logical_size_bytes, allocated_size_bytes, file_count, directory_count, extension, attributes, last_write_utc, {portableObjectIdSelect}, {portablePersistentIdSelect}
-                FROM entries
-                ORDER BY id
-                """;
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var id = reader.GetInt64(0);
-                long? parentId = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-                var entry = new FileSystemEntry
-                {
-                    Name = reader.GetString(2),
-                    FullPath = reader.GetString(3),
-                    IsDirectory = reader.GetInt32(4) != 0,
-                    LogicalSizeBytes = reader.GetInt64(5),
-                    AllocatedSizeBytes = reader.GetInt64(6),
-                    FileCount = reader.GetInt64(7),
-                    DirectoryCount = reader.GetInt64(8),
-                    Extension = reader.GetString(9),
-                    Attributes = reader.GetString(10),
-                    LastWriteTime = reader.IsDBNull(11) ? null : ParseRoundTripDateTimeOffset(reader.GetString(11)),
-                    PortableObjectId = reader.GetString(12),
-                    PortablePersistentId = reader.GetString(13)
-                };
-                byId[id] = entry;
-                parentById[id] = parentId;
-                indexBuilder.Observe(entry);
-            }
-        }
-
-        foreach (var (id, entry) in byId)
-        {
-            if (parentById[id] is { } parentId && byId.TryGetValue(parentId, out var parent))
-            {
-                parent.Children.Add(entry);
-            }
-        }
-
-        var rootIds = parentById.Where(pair => pair.Value is null).Select(pair => pair.Key).ToList();
-        if (rootIds.Count != 1)
-        {
-            throw new InvalidDataException(rootIds.Count == 0
-                ? "No root folder found in scan file."
-                : "Multiple root folders found in scan file.");
-        }
-
-        if (!byId.TryGetValue(rootIds[0], out var root))
-        {
-            throw new InvalidDataException("Root folder ID not found in scan file entries.");
-        }
-
-        var rootPath = metadata["root_path"];
-        var result = new ScanResult
-        {
-            RootPath = rootPath,
-            SourceKind = ParseSourceKind(metadata.GetValueOrDefault("source_kind")),
-            SourceId = metadata.GetValueOrDefault("source_id") ?? rootPath,
-            DisplayRootPath = metadata.GetValueOrDefault("display_root_path") ?? rootPath,
-            PortableDeviceId = metadata.GetValueOrDefault("portable_device_id") ?? string.Empty,
-            PortableStorageObjectId = metadata.GetValueOrDefault("portable_storage_object_id") ?? string.Empty,
-            PortableDeviceName = metadata.GetValueOrDefault("portable_device_name") ?? string.Empty,
-            PortableStorageName = metadata.GetValueOrDefault("portable_storage_name") ?? string.Empty,
-            CloudProvider = LoadCloudProviderMetadata(metadata),
-            Engine = metadata["engine"],
-            StartedAt = ParseRoundTripDateTimeOffset(metadata["started_at"]),
-            CompletedAt = ParseRoundTripDateTimeOffset(metadata["completed_at"]),
-            Root = root,
-            GlobalIndex = indexBuilder.Build(root)
-        };
-
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT path, reason FROM skipped_entries ORDER BY id";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                result.SkippedEntries.Add(new SkippedEntry(reader.GetString(0), reader.GetString(1)));
-            }
-        }
-
-        return result;
+        return await new SavedScanReader(connection, _loadLimits, cancellationToken).ReadAsync().ConfigureAwait(false);
     }
-
-    private static DateTimeOffset ParseRoundTripDateTimeOffset(string value)
-        => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
 
     private static string CreateTemporarySavePath(string path)
     {
@@ -229,32 +164,6 @@ public sealed class ScanStore
         {
             // Best-effort cleanup; a leftover temp file is safer than masking the save failure.
         }
-    }
-
-    private static ScanSourceKind ParseSourceKind(string? value)
-    {
-        return Enum.TryParse<ScanSourceKind>(value, ignoreCase: true, out var sourceKind)
-            ? sourceKind
-            : ScanSourceKind.FileSystem;
-    }
-
-    private static CloudProviderMetadata? LoadCloudProviderMetadata(IReadOnlyDictionary<string, string> metadata)
-    {
-        var providerId = metadata.GetValueOrDefault("cloud_provider_id") ?? string.Empty;
-        var providerName = metadata.GetValueOrDefault("cloud_provider_name") ?? string.Empty;
-        var rootPath = metadata.GetValueOrDefault("cloud_provider_root_path") ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(providerId) ||
-            string.IsNullOrWhiteSpace(providerName) ||
-            string.IsNullOrWhiteSpace(rootPath))
-        {
-            return null;
-        }
-
-        return new CloudProviderMetadata(
-            providerId,
-            providerName,
-            metadata.GetValueOrDefault("cloud_provider_account_label") ?? string.Empty,
-            rootPath);
     }
 
     // Build the connection through SqliteConnectionStringBuilder rather than string
@@ -377,34 +286,4 @@ public sealed class ScanStore
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<Dictionary<string, string>> LoadMetadataAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT key, value FROM metadata";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            metadata[reader.GetString(0)] = reader.GetString(1);
-        }
-
-        return metadata;
-    }
-
-    private static async Task<HashSet<string>> LoadTableColumnsAsync(
-        SqliteConnection connection,
-        string tableName,
-        CancellationToken cancellationToken)
-    {
-        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA table_info({tableName})";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            columns.Add(reader.GetString(1));
-        }
-
-        return columns;
-    }
 }
