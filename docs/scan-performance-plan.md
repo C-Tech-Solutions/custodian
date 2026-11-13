@@ -25,6 +25,8 @@ Until item 3 is fixed and checked, the MFT engine is the slower engine. After it
 ## Findings
 
 Test machine: 16 logical CPUs, 64 GB RAM, SSDs, Windows 11, Defender real-time protection on. The investigating session was **not elevated**; the MFT numbers in findings 3 and 6 come from one elevated run by Colten.
+
+The investigation and that elevated run used a checkout at `3a3c58c`, 112 commits behind `origin/master` (`19edf67`). In the scanning code the two differ only in `MftTreeBuilder.cs`, in the path checks for subfolder requests, so the measurements hold for current `master`.
 Test drive `C:\`: 7.97 million files, 1.60 million folders, 9.56 million entries, 871 GB logical size, 2,516 unreadable folders.
 
 ### 1. The recursive engine is the path most scans take, and it is single-threaded
@@ -107,7 +109,7 @@ Smaller costs in the same code, from reading it:
 
 - `NtfsRecordSizeResolver.TryResolveFromNtfsRecord` allocates a 64 KB output buffer and an 8-byte input array for each call. `NtfsFileRecordParser.TryReadDefaultDataSize` then copies the record again with `ToArray()`.
   Micro-benchmark of only those allocations: 1.23 s and 1,326 gen-0 collections per million files, against 0.012 s with reused buffers.
-- `MftTreeBuilder.IsInsideSelectedRoot` / `IsUnderRoot` call `Path.GetFullPath` about three times per file when the request is not a volume root. Each call costs 0.31 s per million files.
+- At `3a3c58c`, `MftTreeBuilder.IsInsideSelectedRoot` / `IsUnderRoot` called `Path.GetFullPath` about three times per file when the request is not a volume root. Current `master` already decides this once per folder, so nothing is left to do there.
 - `NtfsFileRecordParser` reads the allocated size at offset 0x28 of a non-resident `$DATA` attribute. For compressed and sparse files the on-disk size is the field at offset 0x40, so the MFT engine over-reports allocated size for those files.
 
 ### 4. Memory is about 530 bytes per entry
@@ -145,7 +147,7 @@ The runs were hours apart on a drive in use, but that does not explain 3.1 milli
 | On-disk size, base records only | 557 GB |
 | Used space on the volume | 783 GB of 930.5 GB |
 
-- **Reparse-point files.** `MftTreeBuilder` skips every file that has the reparse-point attribute (line 120): 468,329 files holding 551 GB logical. It also leaves out 431,612 folders (2,061,710 enumerated, 1,630,098 reported). The recursive engine applies its reparse check to directories only; on the same drive it skipped 52,612 reparse-point directories and counted everything else. Most of these files are probably cloud placeholders, which Windows shows to ordinary programs as plain files. That last sentence is an inference, not a measurement.
+- **Reparse-point files.** `MftTreeBuilder` skips every file that has the reparse-point attribute: 468,329 files holding 551 GB logical. It also leaves out 431,612 folders (2,061,710 enumerated, 1,630,098 reported). The recursive engine applies its reparse check to directories only; on the same drive it skipped 52,612 reparse-point directories and counted everything else. Most of these files are probably cloud placeholders, which Windows shows to ordinary programs as plain files. That last sentence is an inference, not a measurement.
 - **Hard links.** `FSCTL_ENUM_USN_DATA` returns one record per file. The drive's 5.35M files have 8.86M names. The MFT engine counts a file once; the recursive engine counts it once per name.
 
 Logical size is not disk use on this drive: 1,341 GB logical against 783 GB used.
@@ -250,8 +252,7 @@ The bug:
 The clean-up, in the same functions:
 
 - Allocate the `FSCTL_GET_NTFS_FILE_RECORD` input and output buffers once per resolver, and stop copying the record on every call.
-- Decide "inside the selected root" once per directory instead of per file, and normalise the selected root once.
-- Use the shared attribute-string cache from PR 1.
+- Use the shared attribute-string cache from PR 1, once that is on `master`.
 - Read the on-disk size from offset 0x40 for compressed and sparse `$DATA` attributes, with a parser test built from a synthetic record.
 
 **Acceptance (Colten, elevated).** `NTFS record sizes parsed` is about 97% of the files resolved, and "Size resolution" is under about 40 s, down from 416 s. Totals match the `master` run apart from files that changed in between and files that were skipped before only because the fallback failed.
