@@ -116,6 +116,55 @@ public sealed class MftTreeBuilderTests
                 new SkippedEntry("orphan.bin", MftTreeBuilder.ParentNotEnumeratedReason)
             ],
             skipped.OrderBy(entry => entry.Path, StringComparer.OrdinalIgnoreCase));
+
+        // Every record lands in one bucket: 7 files = 3 counted + 1 without a parent + 1 in the skipped
+        // OneDrive + 2 below a left-out folder (photo.jpg in Photos, lost.bin in Lost).
+        var statistics = result.Statistics;
+        Assert.Equal(7, statistics.FileRecords);
+        Assert.Equal(3, statistics.FilesCounted);
+        Assert.Equal(1, statistics.FilesWithoutParent);
+        Assert.Equal(1, statistics.MissingParentFolders);
+        Assert.Equal(0, statistics.FilesWithoutParentInNtfsRecords);
+        Assert.Equal(1, statistics.FilesInSkippedReparseFolder);
+        Assert.Equal(2, statistics.FilesNotReached);
+        Assert.Equal(0, statistics.ReparseFilesSkipped);
+
+        // 5 folders (+ the root) = 2 in the tree + OneDrive skipped and listed + Lost without a parent + Photos in OneDrive.
+        Assert.Equal(includeRootRecord ? 6 : 5, statistics.FolderRecords);
+        Assert.Equal(includeRootRecord ? 1 : 0, statistics.RootRecords);
+        Assert.Equal(2, statistics.FoldersAttached);
+        Assert.Equal(2, statistics.FoldersInTree);
+        Assert.Equal(1, statistics.ReparseFoldersSkipped);
+        Assert.Equal(1, statistics.ReparseFoldersListed);
+        Assert.Equal(1, statistics.FoldersWithoutParent);
+        Assert.Equal(1, statistics.FoldersInSkippedReparseFolder);
+        Assert.Collection(
+            statistics.GetDiagnostics(),
+            line => Assert.StartsWith("MFT tree files: ", line, StringComparison.Ordinal),
+            line => Assert.StartsWith("MFT tree folders: ", line, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildCountsSkippedReparseFilesAndFailedSizeLookups()
+    {
+        var records = SampleRecords();
+        records[20] = new(20, 10, FileAttributes.Archive | FileAttributes.ReparsePoint, "link.bin");
+        records[21] = new(21, 10, FileAttributes.Archive, "locked.bin");
+
+        var result = MftTreeBuilder.Build(
+            records.Values,
+            @"C:\",
+            new ScanOptions(@"C:\", ScanMode.Mft),
+            new ProgressThrottle(null),
+            [],
+            CancellationToken.None,
+            (path, record) => record.FileName == "locked.bin" ? throw new IOException("in use") : FakeSizeResolver(path, record));
+
+        Assert.Equal(4, result.Statistics.FileRecords);
+        Assert.Equal(2, result.Statistics.FilesCounted);
+        Assert.Equal(1, result.Statistics.ReparseFilesSkipped);
+        Assert.Equal(1, result.Statistics.FilesWithoutSize);
+        Assert.Equal(3, result.FilesSeen);
     }
 
     [Theory]
@@ -139,6 +188,13 @@ public sealed class MftTreeBuilderTests
         Assert.Equal(@"C:\Users", result.Root.FullPath);
         Assert.Equal(2, result.FilesSeen);
         Assert.Equal([new SkippedEntry(@"C:\Users\OneDrive", MftTreeBuilder.ReparsePointReason)], skipped);
+
+        // top.txt sits outside the request; it joins photo.jpg and lost.bin in the folders the scan root does not reach.
+        Assert.Equal(3, result.Statistics.FilesNotReached);
+        Assert.Equal(1, result.Statistics.FilesWithoutParent);
+        Assert.Equal(2, result.Statistics.FoldersInTree);
+        Assert.Equal(2, result.Statistics.ReparseFoldersSkipped);
+        Assert.Equal(1, result.Statistics.ReparseFoldersListed);
     }
 
     [Fact]

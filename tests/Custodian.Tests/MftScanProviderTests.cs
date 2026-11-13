@@ -131,6 +131,11 @@ public sealed class MftScanProviderTests
         Assert.Equal(
             enumerated.SkippedEntries.OrderBy(entry => entry.Path, StringComparer.Ordinal),
             direct.SkippedEntries.OrderBy(entry => entry.Path, StringComparer.Ordinal));
+
+        // Both sources print the tree builder's buckets, and on the same volume they match line for line.
+        var directTree = direct.Diagnostics.Where(line => line.StartsWith("MFT tree ", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, directTree.Count);
+        Assert.Equal(directTree, enumerated.Diagnostics.Where(line => line.StartsWith("MFT tree ", StringComparison.Ordinal)));
     }
 
     [Fact]

@@ -168,6 +168,8 @@ public sealed class MftScanProvider : IDiskScanProvider
             phases.Add(new ScanPhaseTiming("Size resolution", build.SizeResolutionDuration));
         }
 
+        // Printed by both sources so a direct and an enumeration scan of the same volume compare bucket by bucket.
+        diagnostics.AddRange(build.Statistics.GetDiagnostics());
         phases.Add(new ScanPhaseTiming("Folder aggregation", build.AggregationDuration));
 
         return new ScanResult
