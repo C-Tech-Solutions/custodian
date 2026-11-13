@@ -27,8 +27,8 @@ public sealed class MftRawRecordParserTests
         Assert.Equal(77u, parsed.StoredRecordNumber);
         Assert.Equal((uint)(FileAttributes.Archive | FileAttributes.ReadOnly), parsed.StandardAttributes);
         Assert.Equal(lastWrite.ToFileTimeUtc(), parsed.LastWriteFileTime);
-        Assert.Equal("report.docx", parsed.FirstName);
-        Assert.Equal(ParentReference, parsed.FirstNameParent);
+        Assert.Equal("report.docx", parsed.Name);
+        Assert.Equal(ParentReference, parsed.NameParent);
         Assert.Equal(1, parsed.NameCount);
         Assert.True(parsed.HasData);
         Assert.Equal(new NtfsRecordSize(123_456, 126_976), parsed.DataSize);
@@ -52,7 +52,7 @@ public sealed class MftRawRecordParserTests
         var parsed = new MftRawRecord();
 
         Assert.Equal(MftRawRecordStatus.InUse, MftRawRecordParser.Parse(record, parsed));
-        Assert.Equal(name, parsed.FirstName);
+        Assert.Equal(name, parsed.Name);
         Assert.Equal(new NtfsRecordSize(300, 300), parsed.DataSize);
     }
 
@@ -101,7 +101,7 @@ public sealed class MftRawRecordParserTests
         var parsed = new MftRawRecord();
 
         Assert.Equal(MftRawRecordStatus.NotInUse, MftRawRecordParser.Parse(record, parsed));
-        Assert.Null(parsed.FirstName);
+        Assert.Null(parsed.Name);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public sealed class MftRawRecordParserTests
         Assert.True(parsed.IsExtension);
         Assert.Equal(baseReference, parsed.BaseRecordReference);
         Assert.False(parsed.HasStandardInformation);
-        Assert.Equal("moved.bin", parsed.FirstName);
+        Assert.Equal("moved.bin", parsed.Name);
         Assert.Equal(new NtfsRecordSize(42_000, 45_056), parsed.DataSize);
     }
 
@@ -165,9 +165,54 @@ public sealed class MftRawRecordParserTests
         var parsed = new MftRawRecord();
         MftRawRecordParser.Parse(record, parsed);
 
-        Assert.Equal("long name.txt", parsed.FirstName);
-        Assert.Equal(ParentReference, parsed.FirstNameParent);
+        Assert.Equal("long name.txt", parsed.Name);
+        Assert.Equal(ParentReference, parsed.NameParent);
         Assert.Equal(2, parsed.NameCount);
+        Assert.True(parsed.HasWin32Name);
+        Assert.False(parsed.PassedOverFirstName);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public void ParsePrefersAWin32NameOverAnEarlierPosixName(byte win32NameSpace)
+    {
+        var record = new MftRecordBuilder(30)
+            .StandardInformation(FileAttributes.Archive)
+            .FileName((1UL << 48) | 50, "posix link.txt", nameSpace: 0)
+            .FileName(ParentReference, "WIN32.TXT", nameSpace: win32NameSpace)
+            .FileName((1UL << 48) | 51, "later link.txt", nameSpace: 1)
+            .ResidentData(1)
+            .Build();
+
+        var parsed = new MftRawRecord();
+        MftRawRecordParser.Parse(record, parsed);
+
+        Assert.Equal("WIN32.TXT", parsed.Name);
+        Assert.Equal(ParentReference, parsed.NameParent);
+        Assert.Equal(3, parsed.NameCount);
+        Assert.True(parsed.HasWin32Name);
+        Assert.True(parsed.PassedOverFirstName);
+    }
+
+    [Fact]
+    public void ParseKeepsTheFirstNameWhenNoNameIsWin32()
+    {
+        var record = new MftRecordBuilder(30)
+            .StandardInformation(FileAttributes.Archive)
+            .FileName(ParentReference, "first link.txt", nameSpace: 0)
+            .FileName((1UL << 48) | 50, "second link.txt", nameSpace: 0)
+            .ResidentData(1)
+            .Build();
+
+        var parsed = new MftRawRecord();
+        MftRawRecordParser.Parse(record, parsed);
+
+        Assert.Equal("first link.txt", parsed.Name);
+        Assert.Equal(ParentReference, parsed.NameParent);
+        Assert.Equal(2, parsed.NameCount);
+        Assert.False(parsed.HasWin32Name);
+        Assert.False(parsed.PassedOverFirstName);
     }
 
     [Fact]
@@ -255,7 +300,7 @@ public sealed class MftRawRecordParserTests
 
         Assert.Equal(MftRawRecordStatus.InUse, MftRawRecordParser.Parse(record, parsed));
         Assert.True(parsed.AttributesIncomplete);
-        Assert.Equal("a.bin", parsed.FirstName);
+        Assert.Equal("a.bin", parsed.Name);
         Assert.False(parsed.HasData);
     }
 
@@ -270,7 +315,7 @@ public sealed class MftRawRecordParserTests
         MftRawRecordParser.Parse(record, parsed);
 
         Assert.False(parsed.AttributesIncomplete);
-        Assert.Equal("a.bin", parsed.FirstName);
+        Assert.Equal("a.bin", parsed.Name);
     }
 
     [Fact]
@@ -283,7 +328,7 @@ public sealed class MftRawRecordParserTests
 
         MftRawRecordParser.Parse(new MftRecordBuilder(31).StandardInformation(FileAttributes.Archive).Build(), parsed);
 
-        Assert.Null(parsed.FirstName);
+        Assert.Null(parsed.Name);
         Assert.False(parsed.HasData);
         Assert.Equal(0, parsed.NameCount);
     }

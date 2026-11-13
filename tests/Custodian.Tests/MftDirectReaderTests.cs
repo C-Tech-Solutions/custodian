@@ -77,9 +77,60 @@ public sealed class MftDirectReaderTests
         Assert.Equal(1, statistics.NamesFromExtensions);
         Assert.Equal(2, statistics.DataFromExtensions);
         Assert.Equal(2, statistics.RecordsWithSeveralNames);
+        Assert.Equal(2, statistics.SeveralNamesWithWin32Name);
+        Assert.Equal(0, statistics.FirstNamePassedOver);
         Assert.Equal(0, statistics.RecordsWithoutName);
         Assert.Equal(0, statistics.FilesWithoutData);
         Assert.Contains(statistics.GetDiagnostics(), line => line.StartsWith("$MFT records: files 9; folders 4;", StringComparison.Ordinal));
+        Assert.Contains(
+            "$MFT names: files and folders with several names 2; of those, with a Win32 name 2; named by a later Win32 name instead of the first name 0",
+            statistics.GetDiagnostics());
+    }
+
+    [Fact]
+    public void ReadPrefersAWin32NameFromAnExtensionRecordOverAPosixNameInTheBaseRecord()
+    {
+        var mft = SyntheticMft.CreateStandard(Layout);
+        var usersReference = mft.Records[24].Reference;
+        var partial = mft.Add(34).StandardInformation(FileAttributes.Archive)
+            .AttributeList((NtfsFileRecordParser.AttributeTypeData, 35, 0))
+            .FileName(StrifeReference, "partial.bin", nameSpace: 0);
+        mft.Add(35).ExtensionOf(partial.Reference)
+            .FileName(usersReference, "partial-link.bin", nameSpace: 1)
+            .NonResidentData(1_234, 4_096, runs: MftRuns.Encode((1, 950)));
+        mft.Add(28).StandardInformation(FileAttributes.Archive)
+            .FileName(StrifeReference, "first.txt", nameSpace: 0)
+            .FileName(usersReference, "second.txt", nameSpace: 0)
+            .ResidentData(10);
+
+        var result = Read(mft.CreateVolume(4096, Layout, 64));
+
+        var renamed = result.Records.Single(record => record.FileName == "partial-link.bin");
+        Assert.Equal(usersReference, renamed.ParentFileReferenceNumber);
+        Assert.Equal(new NtfsRecordSize(1_234, 4_096), renamed.Size);
+        Assert.DoesNotContain(result.Records, record => record.FileName == "partial.bin");
+        Assert.Equal(StrifeReference, result.Records.Single(record => record.FileName == "first.txt").ParentFileReferenceNumber);
+
+        Assert.Equal(2, result.Statistics.RecordsWithSeveralNames);
+        Assert.Equal(1, result.Statistics.SeveralNamesWithWin32Name);
+        Assert.Equal(1, result.Statistics.FirstNamePassedOver);
+        Assert.Equal(2, result.Statistics.NamesFromExtensions);
+    }
+
+    [Fact]
+    public void ReadDropsAttributeFlagsTheEnumerationDoesNotReport()
+    {
+        var mft = SyntheticMft.CreateStandard(Layout);
+        mft.Add(27)
+            .StandardInformation(FileAttributes.Archive | (FileAttributes)0x00040000 | (FileAttributes)0x10000000)
+            .FileName(StrifeReference, "small.txt", nameSpace: 3)
+            .ResidentData(25);
+        mft.Add(31).StandardInformation((FileAttributes)0x00040000).FileName(mft.Records[30].Reference, "inside.txt").ResidentData(5);
+
+        var records = Read(mft.CreateVolume(4096, Layout, 64)).Records.ToDictionary(record => record.FileName);
+
+        Assert.Equal(FileAttributes.Archive, records["small.txt"].FileAttributes);
+        Assert.Equal(FileAttributes.Normal, records["inside.txt"].FileAttributes);
     }
 
     [Fact]

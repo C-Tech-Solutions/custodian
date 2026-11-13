@@ -242,7 +242,7 @@ internal static class MftDirectReader
                 break;
         }
 
-        if (slot == 0 && (!accepted || raw.IsExtension || raw.FirstName != MftFileName))
+        if (slot == 0 && (!accepted || raw.IsExtension || raw.Name != MftFileName))
         {
             throw new MftDirectReadException(
                 "the first record read is not the $MFT's own record, so the extents do not point at the $MFT",
@@ -398,6 +398,13 @@ internal sealed class MftDirectReadStatistics
     public long SystemBytesLeftOut { get; set; }
     public long RecordsWithoutName { get; set; }
     public long RecordsWithSeveralNames { get; set; }
+
+    /// <summary>Files and folders with several names, one of them Win32 (or Win32 and DOS).</summary>
+    public long SeveralNamesWithWin32Name { get; set; }
+
+    /// <summary>Files and folders named by a Win32 name that came after their first name.</summary>
+    public long FirstNamePassedOver { get; set; }
+
     public long ExtensionsAttached { get; set; }
     public long NamesFromExtensions { get; set; }
     public long DataFromExtensions { get; set; }
@@ -427,10 +434,13 @@ internal sealed class MftDirectReadStatistics
             $"attributes cut short {AttributesIncomplete:n0}");
         diagnostics.Add(
             $"$MFT merge: NTFS system records left out {SystemRecordsLeftOut:n0} ({SystemBytesLeftOut:n0} bytes); " +
-            $"in-use records without a name {RecordsWithoutName:n0}; files and folders with several names {RecordsWithSeveralNames:n0}; " +
+            $"in-use records without a name {RecordsWithoutName:n0}; " +
             $"extension records attached {ExtensionsAttached:n0}, with no matching base record {ExtensionsWithoutBase:n0}, " +
             $"from an older use of the base record {ExtensionSequenceMismatch:n0}; names from extension records {NamesFromExtensions:n0}; " +
             $"data sizes from extension records {DataFromExtensions:n0}; files without an unnamed $DATA {FilesWithoutData:n0}");
+        diagnostics.Add(
+            $"$MFT names: files and folders with several names {RecordsWithSeveralNames:n0}; of those, with a Win32 name " +
+            $"{SeveralNamesWithWin32Name:n0}; named by a later Win32 name instead of the first name {FirstNamePassedOver:n0}");
         return diagnostics;
     }
 }

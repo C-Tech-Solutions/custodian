@@ -46,10 +46,19 @@ internal sealed class MftRawRecord
 
     public long LastWriteFileTime { get; set; }
 
-    /// <summary>The first <c>$FILE_NAME</c> that is not a DOS 8.3 alias, in attribute order.</summary>
-    public string? FirstName { get; set; }
+    /// <summary>
+    /// The name this record gives the file, in attribute order: the first Win32 (or Win32 and DOS) <c>$FILE_NAME</c>,
+    /// or with none, the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias.
+    /// </summary>
+    public string? Name { get; set; }
 
-    public ulong FirstNameParent { get; set; }
+    public ulong NameParent { get; set; }
+
+    /// <summary><see cref="Name"/> is a Win32 or Win32-and-DOS name.</summary>
+    public bool HasWin32Name { get; set; }
+
+    /// <summary><see cref="Name"/> is a Win32 name that came after the record's first name, which was passed over.</summary>
+    public bool PassedOverFirstName { get; set; }
 
     /// <summary><c>$FILE_NAME</c> attributes other than DOS 8.3 aliases: one per hard link.</summary>
     public int NameCount { get; set; }
@@ -72,8 +81,10 @@ internal sealed class MftRawRecord
         HasStandardInformation = false;
         StandardAttributes = 0;
         LastWriteFileTime = 0;
-        FirstName = null;
-        FirstNameParent = 0;
+        Name = null;
+        NameParent = 0;
+        HasWin32Name = false;
+        PassedOverFirstName = false;
         NameCount = 0;
         HasData = false;
         DataSize = default;
@@ -100,7 +111,9 @@ internal static class MftRawRecordParser
     private const int HeaderFieldsLength = 0x28;
     private const int Ntfs31HeaderLength = 0x30;
 
+    private const byte Win32Namespace = 1;
     private const byte DosNamespace = 2;
+    private const byte Win32AndDosNamespace = 3;
     private const int StandardInformationMinimumLength = 0x24;
     private const int FileNameMinimumLength = 0x42;
 
@@ -245,17 +258,26 @@ internal static class MftRawRecordParser
         }
 
         // A DOS 8.3 alias is a second name for the same link, not a link of its own.
-        if (value[0x41] == DosNamespace || nameBytes == 0)
+        var nameSpace = value[0x41];
+        if (nameSpace == DosNamespace || nameBytes == 0)
         {
             return;
         }
 
         result.NameCount++;
-        if (result.FirstName is null)
+
+        // FSCTL_ENUM_USN_DATA names a hard-linked file by its Win32 link where it has one, so a Win32 name passes over
+        // an earlier POSIX name to give the same results.
+        var isWin32 = nameSpace is Win32Namespace or Win32AndDosNamespace;
+        if (result.Name is not null && (result.HasWin32Name || !isWin32))
         {
-            result.FirstName = Encoding.Unicode.GetString(value.Slice(FileNameMinimumLength, nameBytes));
-            result.FirstNameParent = BinaryPrimitives.ReadUInt64LittleEndian(value[..8]);
+            return;
         }
+
+        result.PassedOverFirstName = result.Name is not null;
+        result.Name = Encoding.Unicode.GetString(value.Slice(FileNameMinimumLength, nameBytes));
+        result.NameParent = BinaryPrimitives.ReadUInt64LittleEndian(value[..8]);
+        result.HasWin32Name = isWin32;
     }
 
     private static void ReadData(ReadOnlySpan<byte> attribute, MftRawRecord result)

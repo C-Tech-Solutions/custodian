@@ -5,11 +5,16 @@ namespace Custodian.Core.Scanning;
 /// order, and an extension record can come before or after its base record.
 /// </summary>
 /// <remarks>
-/// A file is counted once, under one name and parent: the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias,
-/// taken from the base record in attribute order, or else from its extension records in ascending record
-/// number. Its size is the first extent of the unnamed <c>$DATA</c> attribute, from the base record or else
-/// the lowest-numbered extension record that holds it. Extension records are tied to their file by the base
-/// record reference in their header, so no attribute list is read.
+/// A file is counted once, under one name and parent, looking at the base record in attribute order and then
+/// its extension records in ascending record number: the first Win32 (or Win32 and DOS) <c>$FILE_NAME</c>, or
+/// with none, the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias. That is the name
+/// <c>FSCTL_ENUM_USN_DATA</c> gives a hard-linked file with a Win32 link, and which link a file is counted under
+/// decides which folder holds it.
+/// <para>
+/// Its size is the first extent of the unnamed <c>$DATA</c> attribute, from the base record or else the
+/// lowest-numbered extension record that holds it. Extension records are tied to their file by the base record
+/// reference in their header, so no attribute list is read.
+/// </para>
 /// </remarks>
 internal sealed class MftRecordCollector
 {
@@ -18,8 +23,9 @@ internal sealed class MftRecordCollector
     private const long FirstUserSegment = 16;
     private const long RootDirectorySegment = 5;
 
-    // $STANDARD_INFORMATION can carry the $FILE_NAME index flags; they are not Win32 attributes.
-    private const uint NonWin32AttributeFlags = 0x10000000 | 0x20000000;
+    // $STANDARD_INFORMATION flags that FSCTL_ENUM_USN_DATA does not report: 0x40000, which NTFS sets on a file with
+    // extended attributes (winnt.h's FILE_ATTRIBUTE_EA), and the $FILE_NAME index flags 0x10000000 and 0x20000000.
+    private const uint NonWin32AttributeFlags = 0x00040000 | 0x10000000 | 0x20000000;
 
     private readonly MftDirectReadStatistics _statistics;
     private readonly List<NtfsFileRecord?> _records = [];
@@ -68,8 +74,10 @@ internal sealed class MftRecordCollector
             SequenceNumber = record.SequenceNumber,
             Attributes = attributes,
             LastWriteTime = ToLastWriteTime(record),
-            Name = record.FirstName,
-            Parent = record.FirstNameParent,
+            Name = record.Name,
+            Parent = record.NameParent,
+            HasWin32Name = record.HasWin32Name,
+            PassedOverFirstName = record.PassedOverFirstName,
             NameCount = record.NameCount,
             Size = record.HasData ? record.DataSize : null
         };
@@ -104,6 +112,7 @@ internal sealed class MftRecordCollector
             }
 
             // Records arrive in slot order, so the extension records are in ascending record number.
+            var nameFromExtension = false;
             foreach (var extension in file.Extensions ?? [])
             {
                 if (extension.BaseSequenceNumber != file.SequenceNumber)
@@ -114,11 +123,15 @@ internal sealed class MftRecordCollector
 
                 _statistics.ExtensionsAttached++;
                 file.NameCount += extension.NameCount;
-                if (file.Name is null && extension.Name is not null)
+
+                // Same rule as within one record: the first name, unless a Win32 name comes later.
+                if (extension.Name is not null && (file.Name is null || (!file.HasWin32Name && extension.HasWin32Name)))
                 {
+                    file.PassedOverFirstName = file.Name is not null || extension.PassedOverFirstName;
                     file.Name = extension.Name;
                     file.Parent = extension.Parent;
-                    _statistics.NamesFromExtensions++;
+                    file.HasWin32Name = extension.HasWin32Name;
+                    nameFromExtension = true;
                 }
 
                 if (file.Size is null && extension.Size is not null)
@@ -126,6 +139,11 @@ internal sealed class MftRecordCollector
                     file.Size = extension.Size;
                     _statistics.DataFromExtensions++;
                 }
+            }
+
+            if (nameFromExtension)
+            {
+                _statistics.NamesFromExtensions++;
             }
 
             _records[file.Index] = Complete(file);
@@ -164,8 +182,10 @@ internal sealed class MftRecordCollector
         file.Extensions.Add(new ExtensionPart(
             segment,
             (ushort)(record.BaseRecordReference >> 48),
-            record.FirstName,
-            record.FirstNameParent,
+            record.Name,
+            record.NameParent,
+            record.HasWin32Name,
+            record.PassedOverFirstName,
             record.NameCount,
             record.HasData ? record.DataSize : null));
     }
@@ -195,6 +215,15 @@ internal sealed class MftRecordCollector
         if (file.NameCount > 1)
         {
             _statistics.RecordsWithSeveralNames++;
+            if (file.HasWin32Name)
+            {
+                _statistics.SeveralNamesWithWin32Name++;
+            }
+
+            if (file.PassedOverFirstName)
+            {
+                _statistics.FirstNamePassedOver++;
+            }
         }
 
         return new NtfsFileRecord(
@@ -230,6 +259,8 @@ internal sealed class MftRecordCollector
         public DateTimeOffset? LastWriteTime { get; init; }
         public string? Name { get; set; }
         public ulong Parent { get; set; }
+        public bool HasWin32Name { get; set; }
+        public bool PassedOverFirstName { get; set; }
         public int NameCount { get; set; }
         public NtfsRecordSize? Size { get; set; }
         public List<ExtensionPart>? Extensions { get; set; }
@@ -240,6 +271,8 @@ internal sealed class MftRecordCollector
         ushort BaseSequenceNumber,
         string? Name,
         ulong Parent,
+        bool HasWin32Name,
+        bool PassedOverFirstName,
         int NameCount,
         NtfsRecordSize? Size);
 }
