@@ -144,6 +144,7 @@ internal static class PortableDeviceExplorerService
         public string Name => string.Empty;
         public string IdentityText => string.Empty;
         public bool IsFolder => true;
+        public bool IsFileSystem => false;
         public IReadOnlyList<IPortableExplorerNode> GetChildren()
         {
             var children = EnumerateFolderItems(_folder);
@@ -236,6 +237,30 @@ internal static class PortableDeviceExplorerService
                 catch (Exception ex) when (IsShellException(ex))
                 {
                     return false;
+                }
+            }
+        }
+
+        // Reports true when the item cannot be read, so an item of unknown kind is never
+        // treated as phone storage by the navigator.
+        public bool IsFileSystem
+        {
+            get
+            {
+                try
+                {
+                    var item = _item;
+                    if (item is null)
+                    {
+                        return true;
+                    }
+
+                    dynamic shellItem = item;
+                    return Convert.ToBoolean(shellItem.IsFileSystem);
+                }
+                catch (Exception ex) when (IsShellException(ex))
+                {
+                    return true;
                 }
             }
         }

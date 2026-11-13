@@ -814,6 +814,12 @@ internal static class TuiApplication
                 return;
             }
 
+            if (_currentScanLoadedFromScanFile)
+            {
+                SetStatus(FileLaunchSafety.ImportedScanFileOperationsMessage);
+                return;
+            }
+
             var line = SelectedDetail();
             if (line is null)
             {
@@ -882,6 +888,12 @@ internal static class TuiApplication
             if (_currentScan?.SourceKind != ScanSourceKind.PortableDevice)
             {
                 SetStatus("Copy to PC is only available for phone scans.");
+                return;
+            }
+
+            if (_currentScanLoadedFromScanFile)
+            {
+                SetStatus(FileLaunchSafety.ImportedScanFileOperationsMessage);
                 return;
             }
 
