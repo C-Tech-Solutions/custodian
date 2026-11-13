@@ -4,7 +4,9 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
-_No unreleased changes._
+### Changed
+
+- MFT scans read the `$MFT` directly from the volume device and build the scan from its records, which also gives MFT scans last-write times. When the direct read cannot run, the scan falls back to the previous enumeration and says why in its diagnostics. The CLI's `--mft-read enum` forces the previous path.
 
 ## 1.5.6 - 2026-08-25
 
