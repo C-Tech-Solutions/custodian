@@ -4,7 +4,9 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
-_No unreleased changes._
+### Fixed
+
+- Fixed white and gray panels that flashed in the Targets list, Folder map, Bars chart, results list and Recycle Bin list when you chose Relaunch as administrator, and briefly when Custodian closed. These lists now keep the current theme while the window waits.
 
 ## 1.5.6 - 2026-08-25
 

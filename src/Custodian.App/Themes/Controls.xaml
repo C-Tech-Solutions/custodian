@@ -948,12 +948,43 @@
     <!-- ============================================================ -->
     <!--  ListBox + ListBoxItem  -->
     <!-- ============================================================ -->
+    <!--
+        ListBox, ListView and TreeView carry their own templates because the stock
+        Windows (Aero2) templates swap in a hard-coded white (ListBox/ListView) or
+        system-gray (TreeView) background when the control is disabled. The main
+        window disables itself while it relaunches as administrator and while it
+        closes, so the stock templates flashed unthemed panels in every theme.
+        These mirror the stock structure without that disabled-state swap.
+    -->
+    <ControlTemplate x:Key="ThemedListBoxTemplate" TargetType="{x:Type ListBox}">
+        <Border x:Name="Bd"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                Padding="1"
+                SnapsToDevicePixels="True">
+            <ScrollViewer Focusable="False" Padding="{TemplateBinding Padding}">
+                <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+            </ScrollViewer>
+        </Border>
+        <ControlTemplate.Triggers>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="IsGrouping" Value="True"/>
+                    <Condition Property="VirtualizingPanel.IsVirtualizingWhenGrouping" Value="False"/>
+                </MultiTrigger.Conditions>
+                <Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
+            </MultiTrigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
     <Style TargetType="{x:Type ListBox}">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
         <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="Template" Value="{StaticResource ThemedListBoxTemplate}"/>
     </Style>
 
     <Style TargetType="{x:Type ListBoxItem}">
@@ -993,6 +1024,33 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <!-- See the ListBox note above: no disabled-state background swap. -->
+                <ControlTemplate TargetType="{x:Type TreeView}">
+                    <Border x:Name="Bd"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="_tv_scrollviewer_"
+                                      Background="{TemplateBinding Background}"
+                                      CanContentScroll="False"
+                                      Focusable="False"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                                      Padding="{TemplateBinding Padding}"
+                                      SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}">
+                            <ItemsPresenter/>
+                        </ScrollViewer>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="VirtualizingPanel.IsVirtualizing" Value="True">
+                            <Setter TargetName="_tv_scrollviewer_" Property="CanContentScroll" Value="True"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="TreeViewToggleStyle" TargetType="{x:Type ToggleButton}">
@@ -1094,6 +1152,9 @@
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="SelectionMode" Value="Extended"/>
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+        <!-- Shared with ListBox (see the note there). No ListView here uses a GridView,
+             which would need GridView's own template instead. -->
+        <Setter Property="Template" Value="{StaticResource ThemedListBoxTemplate}"/>
     </Style>
 
     <Style TargetType="{x:Type ListViewItem}">
