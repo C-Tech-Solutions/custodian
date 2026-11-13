@@ -4,7 +4,10 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
-_No unreleased changes._
+### Fixed
+
+- Fixed installing and launching with View > Always open as administrator turned on. The setting used to put a Windows "run as administrator" compatibility flag on `Custodian.App.exe`. That flag made the installer's setup step and its launch of Custodian fail with error 740, and the previous version stayed installed. Custodian now asks for elevation itself as it starts, after any installer or update step has been handled, and those steps never ask for elevation.
+- On first launch, an existing Always open as administrator setting is moved off the compatibility flag automatically, so the setting stays on and later installs and updates work. If you still use an older version with the setting on, update from inside Custodian (Help > Check for Updates), or turn the setting off before you run a new `Setup.exe`.
 
 ## 1.5.6 - 2026-08-25
 

@@ -121,8 +121,11 @@ Release assets include:
 
 Custodian warns when it is not running as administrator and can relaunch itself
 elevated when you need MFT scanning to reach protected NTFS metadata.
-Use View > Always open as administrator when you want Windows to request
-elevation before future launches instead of starting normally and relaunching.
+Use View > Always open as administrator when you want every launch to request
+elevation. Custodian asks for it as it starts, before any window opens; if you
+decline the prompt it opens without administrator rights and shows the warning
+banner. Installer and update steps never ask for elevation, so the installer and
+in-app updates work with the setting on.
 
 Drive targets show whether a scan is currently running or already cached for
 the session. Uncached drives show a Start Scan prompt instead of clearing the

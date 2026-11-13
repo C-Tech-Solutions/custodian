@@ -25,7 +25,10 @@
 - On a phone scan, confirm MFT and allocated-size controls are disabled, Open/Reveal opens the selected phone folder or reveals the selected file when possible, falls back cleanly to the nearest available folder or This PC, and Move to Recycle Bin stays blocked.
 - Copy one selected phone file, multiple selected files, and a selected folder to a PC folder; confirm selected folders copy recursively and filename conflicts are auto-renamed instead of overwritten.
 - Disconnect the phone or cancel mid-copy and confirm completed files remain, the current partial file is removed, and Custodian returns to a usable state.
-- Toggle View > Always open as administrator, close Custodian, and confirm the next launch requests elevation before opening.
+- Toggle View > Always open as administrator, close Custodian, and confirm the next launch requests elevation before opening; decline the prompt once and confirm Custodian opens without elevation and shows the warning banner.
+- With Always open as administrator on, run the new version's `Setup.exe` from a non-elevated session over an existing install; confirm there is no install-hook warning or error 740, the new version is installed, and the launch after install requests elevation.
+- With Always open as administrator on, accept an in-app update with Restart now and confirm the update applies and Custodian reopens elevated.
+- On a machine where an older Custodian set the `RUNASADMIN` compatibility layer, update in-app, then confirm the layer value for `current\Custodian.App.exe` is gone from `HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers`, `HKCU\Software\Custodian\RunAsAdministratorOnLaunch` has the setting, and the menu item is still checked.
 - Save a `.custodian-scan`, close the app, reopen it, and load the file.
 - Export CSV and JSON from GUI, TUI, and CLI.
 - In a dev/raw run, confirm startup auto-update does not show a modal, then use Help > Check for Updates and confirm it reports that updates require the installed Custodian app.

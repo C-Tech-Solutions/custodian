@@ -23,6 +23,11 @@ internal static class Program
                 .SetAutoApplyOnStartup(false)
                 .Run(null);
 
+            if (ElevationService.TryRelaunchElevatedAtStartup(args, launchPath, logger))
+            {
+                return;
+            }
+
             var options = TuiLaunchOptions.Parse(args, launchPath);
             TuiApplication.Run(options);
         }
