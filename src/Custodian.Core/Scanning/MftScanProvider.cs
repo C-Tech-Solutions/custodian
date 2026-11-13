@@ -118,10 +118,7 @@ public sealed class MftScanProvider : IDiskScanProvider
                 new ScanPhaseTiming("Size resolution", build.SizeResolutionDuration),
                 new ScanPhaseTiming("Folder aggregation", build.AggregationDuration)
             ],
-            Diagnostics =
-            [
-                $"NTFS record sizes parsed {sizeResolver.Parsed:n0}; fallbacks {sizeResolver.Fallbacks:n0}"
-            ]
+            Diagnostics = [.. sizeResolver.GetDiagnostics()]
         };
     }
 

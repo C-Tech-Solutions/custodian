@@ -2,64 +2,94 @@ using System.Buffers.Binary;
 
 namespace Custodian.Core.Scanning;
 
+internal enum NtfsDataSizeReadResult
+{
+    Found,
+    Malformed,
+    NotInBaseRecord
+}
+
 internal static class NtfsFileRecordParser
 {
     private const uint AttributeTypeData = 0x80;
     private const uint AttributeTypeEnd = 0xffffffff;
+    private const ushort AttributeFlagCompressed = 0x0001;
+    private const ushort AttributeFlagSparse = 0x8000;
+    private const int NonResidentHeaderLength = 0x40;
+    private const int NonResidentCompressedHeaderLength = 0x48;
 
-    public static bool TryReadDefaultDataSize(ReadOnlySpan<byte> fileRecord, out NtfsRecordSize size)
+    /// <summary>
+    /// Reads the size of the unnamed <c>$DATA</c> attribute from a file record in the form
+    /// <c>FSCTL_GET_NTFS_FILE_RECORD</c> returns it: update sequence fixups already applied,
+    /// so the last two bytes of each sector hold record data, not the update sequence number.
+    /// </summary>
+    public static NtfsDataSizeReadResult ReadDefaultDataSize(ReadOnlySpan<byte> record, out NtfsRecordSize size)
     {
         size = default;
 
-        if (fileRecord.Length < 48 ||
-            fileRecord[0] != (byte)'F' ||
-            fileRecord[1] != (byte)'I' ||
-            fileRecord[2] != (byte)'L' ||
-            fileRecord[3] != (byte)'E')
+        if (record.Length < 48 ||
+            record[0] != (byte)'F' ||
+            record[1] != (byte)'I' ||
+            record[2] != (byte)'L' ||
+            record[3] != (byte)'E')
         {
-            return false;
+            return NtfsDataSizeReadResult.Malformed;
         }
 
-        var record = fileRecord.ToArray();
-        if (!ApplyUpdateSequenceFixups(record))
-        {
-            return false;
-        }
-
-        var firstAttributeOffset = BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(20, 2));
+        var firstAttributeOffset = BinaryPrimitives.ReadUInt16LittleEndian(record[20..22]);
         if (firstAttributeOffset < 24 || firstAttributeOffset >= record.Length)
         {
-            return false;
+            return NtfsDataSizeReadResult.Malformed;
         }
 
         var offset = (int)firstAttributeOffset;
         while (offset + 16 <= record.Length)
         {
-            var attributeType = BinaryPrimitives.ReadUInt32LittleEndian(record.AsSpan(offset, 4));
+            var attributeType = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(offset, 4));
             if (attributeType == AttributeTypeEnd)
             {
-                break;
+                // The base record holds no first extent of the unnamed $DATA attribute; it lives in
+                // an extension record listed in $ATTRIBUTE_LIST.
+                return NtfsDataSizeReadResult.NotInBaseRecord;
             }
 
-            var attributeLength = BinaryPrimitives.ReadUInt32LittleEndian(record.AsSpan(offset + 4, 4));
-            if (attributeLength < 16 || offset + attributeLength > record.Length)
+            var attributeLength = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(offset + 4, 4));
+            if (attributeLength < 16 || attributeLength > record.Length - offset)
             {
-                return false;
+                return NtfsDataSizeReadResult.Malformed;
             }
 
-            var nonResident = record[offset + 8] != 0;
-            var nameLength = record[offset + 9];
+            var attribute = record.Slice(offset, (int)attributeLength);
+            var nonResident = attribute[8] != 0;
+            var nameLength = attribute[9];
             if (attributeType == AttributeTypeData && nameLength == 0)
             {
-                return nonResident
-                    ? TryReadNonResidentDataSize(record.AsSpan(offset, (int)attributeLength), out size)
-                    : TryReadResidentDataSize(record.AsSpan(offset, (int)attributeLength), out size);
+                if (!nonResident)
+                {
+                    return TryReadResidentDataSize(attribute, out size)
+                        ? NtfsDataSizeReadResult.Found
+                        : NtfsDataSizeReadResult.Malformed;
+                }
+
+                if (attribute.Length < NonResidentHeaderLength)
+                {
+                    return NtfsDataSizeReadResult.Malformed;
+                }
+
+                // Sizes are only valid in the first extent (lowest VCN 0). A later extent in the base
+                // record means the first one is in an extension record.
+                if (BinaryPrimitives.ReadInt64LittleEndian(attribute[0x10..0x18]) == 0)
+                {
+                    return TryReadNonResidentDataSize(attribute, out size)
+                        ? NtfsDataSizeReadResult.Found
+                        : NtfsDataSizeReadResult.Malformed;
+                }
             }
 
             offset += (int)attributeLength;
         }
 
-        return false;
+        return NtfsDataSizeReadResult.Malformed;
     }
 
     private static bool TryReadResidentDataSize(ReadOnlySpan<byte> attribute, out NtfsRecordSize size)
@@ -78,66 +108,24 @@ internal static class NtfsFileRecordParser
     private static bool TryReadNonResidentDataSize(ReadOnlySpan<byte> attribute, out NtfsRecordSize size)
     {
         size = default;
-        if (attribute.Length < 64)
+
+        var flags = BinaryPrimitives.ReadUInt16LittleEndian(attribute[0x0c..0x0e]);
+        var compressedOrSparse = (flags & (AttributeFlagCompressed | AttributeFlagSparse)) != 0;
+        if (compressedOrSparse && attribute.Length < NonResidentCompressedHeaderLength)
         {
             return false;
         }
 
-        var allocatedSize = BinaryPrimitives.ReadInt64LittleEndian(attribute[40..48]);
-        var fileSize = BinaryPrimitives.ReadInt64LittleEndian(attribute[48..56]);
+        // 0x28 is the space allocated for the whole stream. For compressed and sparse streams the
+        // clusters actually in use are at 0x40, which only exists in their longer header.
+        var allocatedSize = BinaryPrimitives.ReadInt64LittleEndian(compressedOrSparse ? attribute[0x40..0x48] : attribute[0x28..0x30]);
+        var fileSize = BinaryPrimitives.ReadInt64LittleEndian(attribute[0x30..0x38]);
         if (allocatedSize < 0 || fileSize < 0)
         {
             return false;
         }
 
         size = new NtfsRecordSize(fileSize, allocatedSize);
-        return true;
-    }
-
-    private static bool ApplyUpdateSequenceFixups(byte[] record)
-    {
-        var usaOffset = BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(4, 2));
-        var usaCount = BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(6, 2));
-        if (usaCount <= 1)
-        {
-            return true;
-        }
-
-        if (usaOffset + (usaCount * 2) > record.Length)
-        {
-            return false;
-        }
-
-        var sectors = usaCount - 1;
-        if (record.Length % sectors != 0)
-        {
-            return false;
-        }
-
-        var sectorSize = record.Length / sectors;
-        if (sectorSize < 2)
-        {
-            return false;
-        }
-
-        var sequenceNumber = record.AsSpan(usaOffset, 2);
-        for (var i = 1; i < usaCount; i++)
-        {
-            var sectorEnd = (i * sectorSize) - 2;
-            if (sectorEnd < 0 || sectorEnd + 2 > record.Length)
-            {
-                return false;
-            }
-
-            if (!record.AsSpan(sectorEnd, 2).SequenceEqual(sequenceNumber))
-            {
-                return false;
-            }
-
-            record[sectorEnd] = record[usaOffset + (i * 2)];
-            record[sectorEnd + 1] = record[usaOffset + (i * 2) + 1];
-        }
-
         return true;
     }
 }

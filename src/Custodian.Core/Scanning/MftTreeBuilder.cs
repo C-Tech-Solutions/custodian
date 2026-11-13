@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Custodian.Core.Analysis;
 using Custodian.Core.Model;
 
@@ -6,6 +7,15 @@ namespace Custodian.Core.Scanning;
 
 internal static class MftTreeBuilder
 {
+    internal const string ParentNotEnumeratedReason = "Parent folder not found in the MFT enumeration";
+    internal const string ReparsePointReason = "Skipped reparse point";
+
+    private const ulong FileReferenceSegmentMask = 0x0000ffffffffffff;
+
+    // MFT record 5 is the root directory on every NTFS volume. FSCTL_ENUM_USN_DATA can leave it out
+    // of the enumeration, so a parent reference to it is recognised by its segment number.
+    private const ulong RootDirectorySegment = 5;
+
     public static MftTreeBuildResult Build(
         IReadOnlyDictionary<ulong, NtfsFileRecord> records,
         string requestedRootPath,
@@ -18,10 +28,12 @@ internal static class MftTreeBuilder
         var treeWatch = Stopwatch.StartNew();
         var volumeRoot = Path.GetPathRoot(requestedRootPath) ?? requestedRootPath;
         var normalizedVolumeRoot = ScanPathUtility.NormalizeRoot(volumeRoot);
+        var requestedComparisonPath = ScanPathUtility.TrimForComparison(requestedRootPath);
+        var rootComparisonPath = ScanPathUtility.TrimForComparison(normalizedVolumeRoot);
+        var isVolumeRootRequest = string.Equals(requestedComparisonPath, rootComparisonPath, StringComparison.OrdinalIgnoreCase);
         var rootEntry = CreateRootEntry(normalizedVolumeRoot);
         var directoryNodes = new Dictionary<ulong, FileSystemEntry>();
-        var rootRecordIds = new HashSet<ulong>();
-        var missingParentMeansRoot = true;
+        var skippedReparseDirectories = new Dictionary<ulong, NtfsFileRecord>();
 
         foreach (var record in records.Values)
         {
@@ -35,13 +47,12 @@ internal static class MftTreeBuilder
             if (record.IsRootRecord)
             {
                 directoryNodes[record.FileReferenceNumber] = rootEntry;
-                rootRecordIds.Add(record.FileReferenceNumber);
-                missingParentMeansRoot = false;
                 continue;
             }
 
             if (!options.FollowReparsePoints && record.IsReparsePoint)
             {
+                skippedReparseDirectories[record.FileReferenceNumber] = record;
                 continue;
             }
 
@@ -62,31 +73,41 @@ internal static class MftTreeBuilder
                 continue;
             }
 
-            var parent = ResolveParentDirectory(record.ParentFileReferenceNumber, directoryNodes, rootEntry, missingParentMeansRoot);
-            if (parent is null)
+            if (TryResolveParent(record.ParentFileReferenceNumber, directoryNodes, rootEntry, out var parent))
             {
-                continue;
+                parent.Children.Add(directory);
             }
-
-            parent.Children.Add(directory);
+            else if (isVolumeRootRequest && !skippedReparseDirectories.ContainsKey(record.ParentFileReferenceNumber))
+            {
+                // The folder is left out together with everything below it.
+                skipped.Add(new SkippedEntry(record.FileName, ParentNotEnumeratedReason));
+            }
         }
 
         AssignPaths(rootEntry, normalizedVolumeRoot);
         treeWatch.Stop();
 
-        var requestedComparisonPath = ScanPathUtility.TrimForComparison(requestedRootPath);
-        var rootComparisonPath = ScanPathUtility.TrimForComparison(normalizedVolumeRoot);
-        var isVolumeRootRequest = string.Equals(requestedComparisonPath, rootComparisonPath, StringComparison.OrdinalIgnoreCase);
         var scanRoot = isVolumeRootRequest
             ? rootEntry
-            : FindDirectory(rootEntry, requestedComparisonPath);
+            : FindDirectory(rootEntry, Path.GetRelativePath(normalizedVolumeRoot, requestedComparisonPath));
 
         if (scanRoot is null)
         {
             throw new DirectoryNotFoundException($"MFT records did not include the requested root: {requestedRootPath}");
         }
 
-        var selectedDirectories = isVolumeRootRequest ? null : CollectDirectoryReferences(scanRoot);
+        // Folders that cannot be reached from the scan root are outside the request, or below a folder
+        // that was left out: a skipped reparse point, or a folder whose parent was not enumerated.
+        var selectedDirectories = CollectDirectoryReferences(scanRoot);
+        foreach (var record in skippedReparseDirectories.Values)
+        {
+            if (TryResolveParent(record.ParentFileReferenceNumber, directoryNodes, rootEntry, out var parent) &&
+                selectedDirectories.Contains(parent))
+            {
+                skipped.Add(new SkippedEntry(Path.Combine(parent.FullPath, record.FileName), ReparsePointReason));
+            }
+        }
+
         var sizeWatch = Stopwatch.StartNew();
         var filesSeen = 0L;
         var bytesSeen = 0L;
@@ -101,13 +122,17 @@ internal static class MftTreeBuilder
                 continue;
             }
 
-            var parent = ResolveParentDirectory(record.ParentFileReferenceNumber, directoryNodes, rootEntry, missingParentMeansRoot);
-            if (parent is null)
+            if (!TryResolveParent(record.ParentFileReferenceNumber, directoryNodes, rootEntry, out var parent))
             {
+                if (isVolumeRootRequest && !skippedReparseDirectories.ContainsKey(record.ParentFileReferenceNumber))
+                {
+                    skipped.Add(new SkippedEntry(record.FileName, ParentNotEnumeratedReason));
+                }
+
                 continue;
             }
 
-            if (selectedDirectories is not null && !selectedDirectories.Contains(parent))
+            if (!selectedDirectories.Contains(parent))
             {
                 continue;
             }
@@ -115,7 +140,7 @@ internal static class MftTreeBuilder
             var fullPath = Path.Combine(parent.FullPath, record.FileName);
             if (!options.FollowReparsePoints && record.IsReparsePoint)
             {
-                skipped.Add(new SkippedEntry(fullPath, "Skipped reparse point"));
+                skipped.Add(new SkippedEntry(fullPath, ReparsePointReason));
                 continue;
             }
 
@@ -177,18 +202,24 @@ internal static class MftTreeBuilder
         };
     }
 
-    private static FileSystemEntry? ResolveParentDirectory(
+    private static bool TryResolveParent(
         ulong parentReference,
         IReadOnlyDictionary<ulong, FileSystemEntry> directoryNodes,
         FileSystemEntry rootEntry,
-        bool missingParentMeansRoot)
+        [NotNullWhen(true)] out FileSystemEntry? parent)
     {
-        if (directoryNodes.TryGetValue(parentReference, out var parent))
+        if (directoryNodes.TryGetValue(parentReference, out parent))
         {
-            return parent;
+            return true;
         }
 
-        return missingParentMeansRoot ? rootEntry : null;
+        if ((parentReference & FileReferenceSegmentMask) == RootDirectorySegment)
+        {
+            parent = rootEntry;
+            return true;
+        }
+
+        return false;
     }
 
     private static void AssignPaths(FileSystemEntry directory, string fullPath)
@@ -204,33 +235,25 @@ internal static class MftTreeBuilder
         }
     }
 
-    private static FileSystemEntry? FindDirectory(FileSystemEntry directory, string comparisonPath)
+    private static FileSystemEntry? FindDirectory(FileSystemEntry root, string relativePath)
     {
-        if (string.Equals(ScanPathUtility.TrimForComparison(directory.FullPath), comparisonPath, StringComparison.OrdinalIgnoreCase))
+        var directory = root;
+        foreach (var segment in relativePath.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
-            return directory;
-        }
-
-        foreach (var child in directory.Children)
-        {
-            if (!child.IsDirectory)
+            directory = directory.Children.FirstOrDefault(child =>
+                child.IsDirectory && string.Equals(child.Name, segment, StringComparison.OrdinalIgnoreCase));
+            if (directory is null)
             {
-                continue;
-            }
-
-            var found = FindDirectory(child, comparisonPath);
-            if (found is not null)
-            {
-                return found;
+                return null;
             }
         }
 
-        return null;
+        return directory;
     }
 
     private static HashSet<FileSystemEntry> CollectDirectoryReferences(FileSystemEntry root)
     {
-        var directories = new HashSet<FileSystemEntry> { root };
+        var directories = new HashSet<FileSystemEntry>(ReferenceEqualityComparer.Instance) { root };
         var pending = new Stack<FileSystemEntry>();
         pending.Push(root);
 
