@@ -308,17 +308,18 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
 
         while (directories.Count > 0)
         {
-            if (++steps % AggregationCancellationInterval == 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
             var directory = directories.Peek();
             var children = directory.Children;
             var index = resumeAt.Pop();
             FileSystemEntry? descendInto = null;
             while (index < children.Count)
             {
+                // Counted per entry, so a few folders holding millions of files stay cancellable.
+                if (++steps % AggregationCancellationInterval == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 var child = children[index++];
                 if (child.IsDirectory)
                 {
@@ -351,6 +352,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return indexBuilder.Build(root);
     }
 
