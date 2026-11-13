@@ -101,6 +101,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _folderJumpDebounceTimer;
     private readonly DispatcherTimer _targetRefreshDebounceTimer;
     private BackgroundFolderJumpIndex _folderJumpIndex = BackgroundFolderJumpIndex.Empty;
+    private int _folderJumpSearchVersion;
     private IReadOnlyList<CloudProviderTarget> _cloudTargets = [];
     private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
@@ -4199,18 +4200,20 @@ public partial class MainWindow : Window
         RunUiAction(() => RefreshFolderJumpRowsAsync(query), "Failed to search folders");
     }
 
-    /// <returns>False when another index replaced this one while it was still building.</returns>
+    /// <returns>False when a newer search or a new index superseded this search while the index was building.</returns>
     private async Task<bool> RefreshFolderJumpRowsAsync(string query)
     {
         var index = _folderJumpIndex;
+        var version = ++_folderJumpSearchVersion;
         if (!index.IsBuilt)
         {
             // Rows still listed come from an earlier index and may point at removed entries.
             ShowFolderJumpRows([]);
         }
 
+        // Searches waiting on the same build resume together and can finish in any order.
         var rows = await index.SearchAsync(query);
-        if (!ReferenceEquals(index, _folderJumpIndex)) return false;
+        if (version != _folderJumpSearchVersion || !ReferenceEquals(index, _folderJumpIndex)) return false;
 
         ShowFolderJumpRows(rows);
         return true;
