@@ -283,6 +283,8 @@ Reasons to decide before building it:
 - None of it can be exercised without elevation, so every change needs an elevated run by Colten.
 - The existing path must stay as the automatic fallback, which is why PR 3 comes first either way.
 
+**Status (Colten, 2026-11-12):** decide after the elevated run on the PR 3 branch. That run gives the real post-fix scan time and the warm enumeration figure to weigh against the estimated 20–30 s.
+
 ### PR 6 — Decision for Colten: memory per entry
 
 - Intern extension strings per scan. Cheap and safe; can ride along with PR 1.
