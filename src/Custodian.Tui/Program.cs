@@ -23,6 +23,14 @@ internal static class Program
                 .SetAutoApplyOnStartup(false)
                 .Run(null);
 
+            // The elevated copy starts in a trusted working directory, so relative
+            // --open/--scan/positional paths are resolved against ours first.
+            var startupArgs = TuiLaunchOptions.ResolveRelativePaths(args);
+            if (ElevationService.TryRelaunchElevatedAtStartup(startupArgs, launchPath, logger))
+            {
+                return;
+            }
+
             var options = TuiLaunchOptions.Parse(args, launchPath);
             TuiApplication.Run(options);
         }
