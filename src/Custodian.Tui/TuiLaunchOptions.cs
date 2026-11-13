@@ -67,4 +67,55 @@ internal sealed record TuiLaunchOptions(
 
         return new TuiLaunchOptions(targetPath, scanFilePath, autoScan, mode, allocated);
     }
+
+    /// <summary>
+    /// Returns <paramref name="args"/> with relative scan and scan-file paths resolved
+    /// against <paramref name="baseDirectory"/>. The startup elevation relaunch runs in a
+    /// trusted working directory, not the caller's, so relative paths have to be resolved
+    /// before it.
+    /// </summary>
+    public static IReadOnlyList<string> ResolveRelativePaths(IReadOnlyList<string> args, string baseDirectory)
+    {
+        var resolved = new List<string>(args.Count);
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            resolved.Add(arg);
+
+            if (string.Equals(arg, "--custodian-path", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "--mode", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Count)
+                {
+                    resolved.Add(args[++i]);
+                }
+
+                continue;
+            }
+
+            if (string.Equals(arg, "--scan", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "--open", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Count)
+                {
+                    resolved.Add(ResolveRelativePath(args[++i], baseDirectory));
+                }
+
+                continue;
+            }
+
+            if (!arg.StartsWith("-", StringComparison.Ordinal))
+            {
+                resolved[^1] = ResolveRelativePath(arg, baseDirectory);
+            }
+        }
+
+        return resolved;
+    }
+
+    // Rooted values, including drive-only forms such as "C:", are left exactly as typed.
+    private static string ResolveRelativePath(string path, string baseDirectory)
+        => string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(path, baseDirectory);
 }
