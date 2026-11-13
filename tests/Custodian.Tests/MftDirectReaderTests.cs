@@ -373,6 +373,31 @@ public sealed class MftDirectReaderTests
     }
 
     [Fact]
+    public void ReadStopsBeforeAnAttributeListOutsideTheMftWhenCancelled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var mft = SyntheticMft.CreateStandard(Layout);
+        mft.Add(23).StandardInformation(FileAttributes.Archive)
+            .NonResidentAttributeList(4 * 0x20, MftRuns.Encode((1, 50)))
+            .FileName(StrifeReference, "volume-record-first.txt", nameSpace: 0)
+            .FileName(mft.Records[24].Reference, "volume-list-first.txt", nameSpace: 0)
+            .ResidentData(23);
+        var volume = mft.CreateVolume(4096, Layout, 64);
+
+        // One read per extent covers the $MFT; cancel during the last one, after the pass's final check.
+        volume.OnRead = () =>
+        {
+            if (volume.ReadCalls == Layout.Length)
+            {
+                cancellation.Cancel();
+            }
+        };
+
+        Assert.Throws<OperationCanceledException>(() => MftDirectReader.Read(volume, new ProgressThrottle(null), cancellation.Token));
+        Assert.Equal(Layout.Length, volume.ReadCalls);
+    }
+
+    [Fact]
     public void ReadSkipsRecordsStoredInTheWrongSlot()
     {
         var mft = SyntheticMft.CreateStandard(Layout);

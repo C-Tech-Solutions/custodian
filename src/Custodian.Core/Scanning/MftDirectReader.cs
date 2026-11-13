@@ -106,7 +106,7 @@ internal static class MftDirectReader
         }
 
         var parseWatch = Stopwatch.StartNew();
-        var records = collector.Complete(new AttributeListReader(volume, geometry).Read);
+        var records = collector.Complete(new AttributeListReader(volume, geometry, cancellationToken).Read);
         parseWatch.Stop();
         statistics.ParseDuration += parseWatch.Elapsed;
         return new MftDirectReadResult(records, statistics);
@@ -375,14 +375,15 @@ internal static class MftDirectReader
     /// <summary>
     /// Reads an attribute list stored outside the <c>$MFT</c> from the volume, one list at a time, after the
     /// <c>$MFT</c> pass. Returns null when the extents do not fit the volume or a read fails, so the caller keeps
-    /// the record-order name.
+    /// the record-order name. Cancellation is checked before each list, as it is before each chunk of the pass.
     /// </summary>
-    private sealed class AttributeListReader(INtfsVolume volume, NtfsVolumeData geometry)
+    private sealed class AttributeListReader(INtfsVolume volume, NtfsVolumeData geometry, CancellationToken cancellationToken)
     {
         private Memory<byte> _buffer;
 
         public byte[]? Read(IReadOnlyList<MftExtent> extents, long length)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (length <= 0 || length > MftAttributeList.MaximumLength)
             {
                 return null;
