@@ -1,21 +1,12 @@
-using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text;
 using Custodian.Core.Model;
-using Microsoft.Win32.SafeHandles;
 
 namespace Custodian.Core.Scanning;
 
 public sealed class MftScanProvider : IDiskScanProvider
 {
-    private const uint GenericRead = 0x80000000;
-    private const uint FileShareRead = 0x00000001;
-    private const uint FileShareWrite = 0x00000002;
-    private const uint FileShareDelete = 0x00000004;
-    private const uint OpenExisting = 3;
-    private const uint FsctlEnumUsnData = 0x000900b3;
-    private const int BufferSize = 1024 * 1024;
+    internal const string DirectSourceDiagnostic = "MFT source: direct $MFT read";
+    internal const string EnumerationSourceDiagnostic = "MFT source: FSCTL_ENUM_USN_DATA";
 
     public string Name => "NTFS MFT";
 
@@ -86,18 +77,81 @@ public sealed class MftScanProvider : IDiskScanProvider
         IProgress<ScanProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var started = DateTimeOffset.UtcNow;
-        var progressThrottle = new ProgressThrottle(progress);
         var rootPath = ScanPathUtility.NormalizeRoot(options.RootPath);
-        var driveRoot = Path.GetPathRoot(rootPath)!;
-        var volumePath = @"\\.\" + driveRoot.TrimEnd('\\');
-        using var volumeHandle = OpenVolume(volumePath);
-        var enumerationWatch = Stopwatch.StartNew();
-        var records = EnumerateRecords(volumeHandle, volumePath, progressThrottle, cancellationToken);
-        enumerationWatch.Stop();
+        using var volume = NtfsVolume.Open(Path.GetPathRoot(rootPath)!);
+        return Scan(options, volume, new ProgressThrottle(progress), cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the scan from a direct read of the <c>$MFT</c> when <see cref="ScanOptions.UseDirectMftRead"/> is on,
+    /// and from <c>FSCTL_ENUM_USN_DATA</c> plus per-file record reads when it is off or the direct read fails.
+    /// </summary>
+    internal static ScanResult Scan(
+        ScanOptions options,
+        INtfsVolume volume,
+        ProgressThrottle progress,
+        CancellationToken cancellationToken,
+        int directReadChunkBytes = MftDirectReader.DefaultChunkBytes)
+    {
+        var started = DateTimeOffset.UtcNow;
+        var rootPath = ScanPathUtility.NormalizeRoot(options.RootPath);
+        var diagnostics = new List<string>();
+        var phases = new List<ScanPhaseTiming>();
         var skipped = new List<SkippedEntry>();
-        var sizeResolver = new NtfsRecordSizeResolver(volumeHandle, options);
-        var build = MftTreeBuilder.Build(records, rootPath, options, progressThrottle, skipped, cancellationToken, sizeResolver.Resolve);
+        MftDirectReadResult? direct = null;
+
+        if (options.UseDirectMftRead)
+        {
+            var directWatch = Stopwatch.StartNew();
+            try
+            {
+                direct = MftDirectReader.Read(volume, progress, cancellationToken, directReadChunkBytes);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A scan never fails because the direct read did: it falls back to the enumeration.
+                directWatch.Stop();
+                diagnostics.Add(
+                    $"{EnumerationSourceDiagnostic}; the direct $MFT read failed after {directWatch.Elapsed.TotalSeconds:0.0} s: {ex.Message}");
+                phases.Add(new ScanPhaseTiming("Direct MFT read (abandoned)", directWatch.Elapsed));
+                if (ex is MftDirectReadException { Statistics: { } partial })
+                {
+                    diagnostics.AddRange(partial.GetDiagnostics());
+                }
+            }
+        }
+        else
+        {
+            diagnostics.Add($"{EnumerationSourceDiagnostic}; the direct $MFT read is turned off");
+        }
+
+        MftTreeBuildResult build;
+        if (direct is not null)
+        {
+            diagnostics.Add(DirectSourceDiagnostic);
+            diagnostics.AddRange(direct.Statistics.GetDiagnostics());
+            var sizes = new MftRecordSizeSource(options);
+            build = MftTreeBuilder.Build(direct.Records, rootPath, options, progress, skipped, cancellationToken, sizes.Resolve);
+            diagnostics.Add(sizes.GetDiagnostic());
+            phases.Add(new ScanPhaseTiming("MFT read", direct.Statistics.ReadDuration));
+            phases.Add(new ScanPhaseTiming("MFT parse", direct.Statistics.ParseDuration));
+            phases.Add(new ScanPhaseTiming("MFT tree construction", build.TreeConstructionDuration));
+            phases.Add(new ScanPhaseTiming("File entries", build.SizeResolutionDuration));
+        }
+        else
+        {
+            var enumerationWatch = Stopwatch.StartNew();
+            var records = volume.EnumerateUsnRecords(progress, cancellationToken);
+            enumerationWatch.Stop();
+            var sizeResolver = new NtfsRecordSizeResolver(options, volume.ReadFileRecord);
+            build = MftTreeBuilder.Build(records.Values, rootPath, options, progress, skipped, cancellationToken, sizeResolver.Resolve);
+            diagnostics.AddRange(sizeResolver.GetDiagnostics());
+            phases.Add(new ScanPhaseTiming("MFT enumeration", enumerationWatch.Elapsed));
+            phases.Add(new ScanPhaseTiming("MFT tree construction", build.TreeConstructionDuration));
+            phases.Add(new ScanPhaseTiming("Size resolution", build.SizeResolutionDuration));
+        }
+
+        phases.Add(new ScanPhaseTiming("Folder aggregation", build.AggregationDuration));
 
         return new ScanResult
         {
@@ -111,168 +165,8 @@ public sealed class MftScanProvider : IDiskScanProvider
             Root = build.Root,
             GlobalIndex = build.GlobalIndex,
             SkippedEntries = skipped,
-            PhaseTimings =
-            [
-                new ScanPhaseTiming("MFT enumeration", enumerationWatch.Elapsed),
-                new ScanPhaseTiming("MFT tree construction", build.TreeConstructionDuration),
-                new ScanPhaseTiming("Size resolution", build.SizeResolutionDuration),
-                new ScanPhaseTiming("Folder aggregation", build.AggregationDuration)
-            ],
-            Diagnostics = [.. sizeResolver.GetDiagnostics()]
+            PhaseTimings = phases,
+            Diagnostics = diagnostics
         };
     }
-
-    private static SafeFileHandle OpenVolume(string volumePath)
-    {
-        var handle = CreateFile(
-            volumePath,
-            GenericRead,
-            FileShareRead | FileShareWrite | FileShareDelete,
-            IntPtr.Zero,
-            OpenExisting,
-            0,
-            IntPtr.Zero);
-
-        if (handle.IsInvalid)
-        {
-            throw new IOException($"Could not open {volumePath} for MFT enumeration. Administrator rights may be required.");
-        }
-
-        return handle;
-    }
-
-    private static Dictionary<ulong, NtfsFileRecord> EnumerateRecords(
-        SafeFileHandle handle,
-        string volumePath,
-        ProgressThrottle progress,
-        CancellationToken cancellationToken)
-    {
-        var records = new Dictionary<ulong, NtfsFileRecord>();
-        var input = new MftEnumDataV0
-        {
-            StartFileReferenceNumber = 0,
-            LowUsn = 0,
-            HighUsn = long.MaxValue
-        };
-        var output = new byte[BufferSize];
-        var inputSize = Marshal.SizeOf<MftEnumDataV0>();
-        var seen = 0L;
-
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var ok = DeviceIoControl(
-                handle,
-                FsctlEnumUsnData,
-                ref input,
-                inputSize,
-                output,
-                output.Length,
-                out var bytesReturned,
-                IntPtr.Zero);
-
-            if (!ok)
-            {
-                var error = Marshal.GetLastPInvokeError();
-                if (error == 38)
-                {
-                    break;
-                }
-
-                throw new IOException($"MFT enumeration failed with Win32 error {error}.");
-            }
-
-            if (bytesReturned <= sizeof(long))
-            {
-                break;
-            }
-
-            input.StartFileReferenceNumber = BinaryPrimitives.ReadUInt64LittleEndian(output.AsSpan(0, 8));
-            var offset = 8;
-            while (offset < bytesReturned)
-            {
-                var recordLength = BinaryPrimitives.ReadUInt32LittleEndian(output.AsSpan(offset, 4));
-                if (recordLength == 0 || offset + recordLength > bytesReturned)
-                {
-                    break;
-                }
-
-                var record = ParseRecord(output.AsSpan(offset, (int)recordLength));
-                if (record is not null)
-                {
-                    records[record.FileReferenceNumber] = record;
-                    seen++;
-                }
-
-                offset += (int)recordLength;
-            }
-
-            progress.Report(volumePath, seen, 0, 0, "Enumerating MFT");
-        }
-
-        return records;
-    }
-
-    private static NtfsFileRecord? ParseRecord(ReadOnlySpan<byte> buffer)
-    {
-        if (buffer.Length < 60)
-        {
-            return null;
-        }
-
-        var major = BinaryPrimitives.ReadUInt16LittleEndian(buffer[4..6]);
-        if (major is not (2 or 3 or 4))
-        {
-            return null;
-        }
-
-        var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(buffer[56..58]);
-        var nameOffset = BinaryPrimitives.ReadUInt16LittleEndian(buffer[58..60]);
-        if (nameOffset + nameLength > buffer.Length)
-        {
-            return null;
-        }
-
-        var name = Encoding.Unicode.GetString(buffer.Slice(nameOffset, nameLength));
-        if (name is "")
-        {
-            return null;
-        }
-
-        return new NtfsFileRecord(
-            BinaryPrimitives.ReadUInt64LittleEndian(buffer[8..16]),
-            BinaryPrimitives.ReadUInt64LittleEndian(buffer[16..24]),
-            (FileAttributes)BinaryPrimitives.ReadUInt32LittleEndian(buffer[52..56]),
-            name);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MftEnumDataV0
-    {
-        public ulong StartFileReferenceNumber;
-        public long LowUsn;
-        public long HighUsn;
-    }
-
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern SafeFileHandle CreateFile(
-        string lpFileName,
-        uint dwDesiredAccess,
-        uint dwShareMode,
-        IntPtr lpSecurityAttributes,
-        uint dwCreationDisposition,
-        uint dwFlagsAndAttributes,
-        IntPtr hTemplateFile);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool DeviceIoControl(
-        SafeFileHandle hDevice,
-        uint dwIoControlCode,
-        ref MftEnumDataV0 lpInBuffer,
-        int nInBufferSize,
-        byte[] lpOutBuffer,
-        int nOutBufferSize,
-        out int lpBytesReturned,
-        IntPtr lpOverlapped);
 }

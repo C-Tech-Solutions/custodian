@@ -150,7 +150,15 @@ left untouched by auto-renaming duplicates.
 custodian scan C:\Data --out data.custodian-scan
 custodian scan \\server\share --export share.csv --silent
 custodian export data.custodian-scan --format json --out data.json
+custodian scan C:\ --mode mft --mft-read enum
 ```
+
+MFT scans read the `$MFT` straight from the volume device: one sequential,
+read-only pass over the `$MFT`'s own clusters, with the volume opened read-only
+and shared. Nothing is written. Endpoint-protection products can flag raw
+volume reads, because credential-theft tools use them too. If the direct read
+cannot run, the scan falls back to `FSCTL_ENUM_USN_DATA` on its own and says why
+in its diagnostics. `--mft-read enum` uses that path only.
 
 ## TUI Examples
 

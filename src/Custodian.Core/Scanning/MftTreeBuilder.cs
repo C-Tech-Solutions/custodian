@@ -17,7 +17,7 @@ internal static class MftTreeBuilder
     private const ulong RootDirectorySegment = 5;
 
     public static MftTreeBuildResult Build(
-        IReadOnlyDictionary<ulong, NtfsFileRecord> records,
+        IReadOnlyCollection<NtfsFileRecord> records,
         string requestedRootPath,
         ScanOptions options,
         ProgressThrottle progress,
@@ -35,7 +35,7 @@ internal static class MftTreeBuilder
         var directoryNodes = new Dictionary<ulong, FileSystemEntry>();
         var skippedReparseDirectories = new Dictionary<ulong, NtfsFileRecord>();
 
-        foreach (var record in records.Values)
+        foreach (var record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -47,6 +47,7 @@ internal static class MftTreeBuilder
             if (record.IsRootRecord)
             {
                 directoryNodes[record.FileReferenceNumber] = rootEntry;
+                rootEntry.LastWriteTime = record.LastWriteTime;
                 continue;
             }
 
@@ -60,11 +61,12 @@ internal static class MftTreeBuilder
             {
                 Name = record.FileName,
                 IsDirectory = true,
-                Attributes = record.FileAttributes.ToString()
+                Attributes = record.FileAttributes.ToString(),
+                LastWriteTime = record.LastWriteTime
             };
         }
 
-        foreach (var record in records.Values)
+        foreach (var record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -113,7 +115,7 @@ internal static class MftTreeBuilder
         var bytesSeen = 0L;
         var indexBuilder = new ScanGlobalIndexBuilder();
 
-        foreach (var record in records.Values)
+        foreach (var record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -162,7 +164,8 @@ internal static class MftTreeBuilder
                     AllocatedSizeBytes = allocatedSize,
                     FileCount = 1,
                     Extension = Path.GetExtension(record.FileName).ToLowerInvariant(),
-                    Attributes = record.FileAttributes.ToString()
+                    Attributes = record.FileAttributes.ToString(),
+                    LastWriteTime = record.LastWriteTime
                 };
                 parent.Children.Add(fileEntry);
                 indexBuilder.Observe(fileEntry);

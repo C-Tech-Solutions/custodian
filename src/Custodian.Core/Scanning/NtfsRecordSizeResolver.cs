@@ -1,7 +1,5 @@
 using System.Buffers.Binary;
-using System.Runtime.InteropServices;
 using Custodian.Core.Model;
-using Microsoft.Win32.SafeHandles;
 
 namespace Custodian.Core.Scanning;
 
@@ -13,7 +11,6 @@ internal delegate bool NtfsFileRecordReader(long segmentReference, byte[] output
 
 internal sealed class NtfsRecordSizeResolver
 {
-    private const uint FsctlGetNtfsFileRecord = 0x00090068;
     private const ulong FileReferenceSegmentMask = 0x0000ffffffffffff;
 
     // NTFS_FILE_RECORD_OUTPUT_BUFFER: FileReferenceNumber (8 bytes), FileRecordLength (4 bytes), record.
@@ -33,12 +30,7 @@ internal sealed class NtfsRecordSizeResolver
     private readonly Dictionary<int, long> _callFailuresByError = [];
     private bool _recordPathDisabled;
 
-    public NtfsRecordSizeResolver(SafeFileHandle volumeHandle, ScanOptions options)
-        : this(options, CreateVolumeReader(volumeHandle))
-    {
-    }
-
-    internal NtfsRecordSizeResolver(ScanOptions options, NtfsFileRecordReader readRecord)
+    public NtfsRecordSizeResolver(ScanOptions options, NtfsFileRecordReader readRecord)
     {
         _options = options;
         _readRecord = readRecord;
@@ -63,7 +55,7 @@ internal sealed class NtfsRecordSizeResolver
         }
 
         Fallbacks++;
-        return ResolveFromFileInfo(fullPath);
+        return ResolveFromPath(fullPath, _options);
     }
 
     public IReadOnlyList<string> GetDiagnostics()
@@ -167,39 +159,12 @@ internal sealed class NtfsRecordSizeResolver
         }
     }
 
-    private (long LogicalSize, long AllocatedSize) ResolveFromFileInfo(string fullPath)
+    /// <summary>Opens the file by path: the slow lookup used when no file record gives the size.</summary>
+    internal static (long LogicalSize, long AllocatedSize) ResolveFromPath(string fullPath, ScanOptions options)
     {
         var info = new FileInfo(fullPath);
         var length = info.Length;
-        var allocated = _options.CollectAllocatedSize ? FileSizeUtilities.GetAllocatedSize(fullPath, length) : length;
+        var allocated = options.CollectAllocatedSize ? FileSizeUtilities.GetAllocatedSize(fullPath, length) : length;
         return (length, allocated);
     }
-
-    private static NtfsFileRecordReader CreateVolumeReader(SafeFileHandle volumeHandle)
-    {
-        var input = new byte[sizeof(long)];
-        return (long segmentReference, byte[] output, out int bytesReturned, out int win32Error) =>
-        {
-            BinaryPrimitives.WriteInt64LittleEndian(input, segmentReference);
-            if (DeviceIoControl(volumeHandle, FsctlGetNtfsFileRecord, input, input.Length, output, output.Length, out bytesReturned, IntPtr.Zero))
-            {
-                win32Error = 0;
-                return true;
-            }
-
-            win32Error = Marshal.GetLastPInvokeError();
-            return false;
-        };
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool DeviceIoControl(
-        SafeFileHandle hDevice,
-        uint dwIoControlCode,
-        byte[] lpInBuffer,
-        int nInBufferSize,
-        byte[] lpOutBuffer,
-        int nOutBufferSize,
-        out int lpBytesReturned,
-        IntPtr lpOverlapped);
 }

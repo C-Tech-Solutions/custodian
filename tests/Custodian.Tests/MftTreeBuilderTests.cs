@@ -15,7 +15,7 @@ public sealed class MftTreeBuilderTests
         var skipped = new List<SkippedEntry>();
 
         var result = MftTreeBuilder.Build(
-            records,
+            records.Values,
             @"C:\",
             new ScanOptions(@"C:\", ScanMode.Mft),
             new ProgressThrottle(null),
@@ -39,7 +39,7 @@ public sealed class MftTreeBuilderTests
         var records = SampleRecords();
 
         var result = MftTreeBuilder.Build(
-            records,
+            records.Values,
             @"C:\Users",
             new ScanOptions(@"C:\Users", ScanMode.Mft),
             new ProgressThrottle(null),
@@ -61,7 +61,7 @@ public sealed class MftTreeBuilderTests
         var resolvedPaths = new List<string>();
 
         var result = MftTreeBuilder.Build(
-            records,
+            records.Values,
             @"C:\Users",
             new ScanOptions(@"C:\Users", ScanMode.Mft),
             new ProgressThrottle(null),
@@ -89,7 +89,7 @@ public sealed class MftTreeBuilderTests
         var resolvedPaths = new List<string>();
 
         var result = MftTreeBuilder.Build(
-            records,
+            records.Values,
             @"C:\",
             new ScanOptions(@"C:\", ScanMode.Mft),
             new ProgressThrottle(null),
@@ -128,7 +128,7 @@ public sealed class MftTreeBuilderTests
         var skipped = new List<SkippedEntry>();
 
         var result = MftTreeBuilder.Build(
-            records,
+            records.Values,
             @"C:\Users",
             new ScanOptions(@"C:\Users", ScanMode.Mft),
             new ProgressThrottle(null),
@@ -145,7 +145,7 @@ public sealed class MftTreeBuilderTests
     public void BuildFindsRequestedSubtreeIgnoringCase()
     {
         var result = MftTreeBuilder.Build(
-            SampleRecords(),
+            SampleRecords().Values,
             @"c:\users\strife",
             new ScanOptions(@"c:\users\strife", ScanMode.Mft),
             new ProgressThrottle(null),
@@ -161,7 +161,7 @@ public sealed class MftTreeBuilderTests
     public void BuildThrowsWhenRequestedSubtreeIsNotEnumerated()
     {
         Assert.Throws<DirectoryNotFoundException>(() => MftTreeBuilder.Build(
-            SampleRecords(),
+            SampleRecords().Values,
             @"C:\Users\Missing",
             new ScanOptions(@"C:\Users\Missing", ScanMode.Mft),
             new ProgressThrottle(null),
