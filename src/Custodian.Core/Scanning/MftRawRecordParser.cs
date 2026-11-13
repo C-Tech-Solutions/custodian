@@ -18,10 +18,13 @@ internal enum MftRawRecordStatus
     MalformedHeader
 }
 
+/// <summary>A <c>$FILE_NAME</c> that is not Win32 or a DOS alias, with the instance id of its attribute.</summary>
+internal readonly record struct MftNameCandidate(ushort Instance, string Name, ulong Parent);
+
 /// <summary>
 /// The fields of one raw file record that the direct <c>$MFT</c> read needs. One instance is reused for
 /// every record, so nothing here survives the next <see cref="MftRawRecordParser.Parse"/> call except
-/// the name string.
+/// the name strings; the lists are cleared and must be copied to be kept.
 /// </summary>
 internal sealed class MftRawRecord
 {
@@ -35,10 +38,38 @@ internal sealed class MftRawRecord
 
     public bool IsDirectory { get; set; }
 
+    /// <summary>
+    /// Header flag 0x4, which NTFS sets on some of its own files under <c>$Extend</c> (<c>$Quota</c>, <c>$ObjId</c>,
+    /// <c>$Reparse</c>, <c>$UsnJrnl</c>, <c>$Deleted</c>, <c>$RmMetadata\$Repair</c>). <c>FSCTL_ENUM_USN_DATA</c>
+    /// does not return those records.
+    /// </summary>
+    public bool IsNtfsMetadataFile { get; set; }
+
     /// <summary>The record's own number from header offset 0x2C, present in NTFS 3.1 headers.</summary>
     public uint? StoredRecordNumber { get; set; }
 
     public bool HasAttributeList { get; set; }
+
+    /// <summary>
+    /// The <c>$FILE_NAME</c> entries of a resident attribute list, in list order: the record's segment in the high
+    /// 48 bits and the attribute's instance id in the low 16 bits.
+    /// </summary>
+    public List<ulong> AttributeListNames { get; } = [];
+
+    /// <summary>The clusters of a non-resident attribute list, in VCN order; empty when the list is resident.</summary>
+    public List<MftExtent> AttributeListExtents { get; } = [];
+
+    /// <summary>The byte length of a non-resident attribute list.</summary>
+    public long AttributeListLength { get; set; }
+
+    /// <summary>The attribute list did not parse, so its order cannot be used.</summary>
+    public bool AttributeListMalformed { get; set; }
+
+    /// <summary>
+    /// In a base record with an attribute list, or in an extension record, that holds no Win32 name: every
+    /// <c>$FILE_NAME</c> that is not a DOS alias, in attribute order. The collector orders them by the attribute list.
+    /// </summary>
+    public List<MftNameCandidate> NameCandidates { get; } = [];
 
     public bool HasStandardInformation { get; set; }
 
@@ -48,7 +79,8 @@ internal sealed class MftRawRecord
 
     /// <summary>
     /// The name this record gives the file, in attribute order: the first Win32 (or Win32 and DOS) <c>$FILE_NAME</c>,
-    /// or with none, the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias.
+    /// or with none, the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias. For a file with an attribute list and no
+    /// Win32 name, the collector replaces it with the first name in list order.
     /// </summary>
     public string? Name { get; set; }
 
@@ -76,8 +108,14 @@ internal sealed class MftRawRecord
         SequenceNumber = 0;
         BaseRecordReference = 0;
         IsDirectory = false;
+        IsNtfsMetadataFile = false;
         StoredRecordNumber = null;
         HasAttributeList = false;
+        AttributeListNames.Clear();
+        AttributeListExtents.Clear();
+        AttributeListLength = 0;
+        AttributeListMalformed = false;
+        NameCandidates.Clear();
         HasStandardInformation = false;
         StandardAttributes = 0;
         LastWriteFileTime = 0;
@@ -105,6 +143,7 @@ internal static class MftRawRecordParser
     private const int UpdateSequenceStride = 512;
     private const ushort FlagInUse = 0x0001;
     private const ushort FlagDirectory = 0x0002;
+    private const ushort FlagNtfsMetadataFile = 0x0004;
 
     // Header fields run to 0x28 (the base record reference). The NTFS 3.1 header ends at 0x30 and carries
     // the record's own number at 0x2C; the update sequence array follows the header.
@@ -159,6 +198,7 @@ internal static class MftRawRecordParser
 
         result.SequenceNumber = BinaryPrimitives.ReadUInt16LittleEndian(record[0x10..0x12]);
         result.IsDirectory = (flags & FlagDirectory) != 0;
+        result.IsNtfsMetadataFile = (flags & FlagNtfsMetadataFile) != 0;
         result.BaseRecordReference = BinaryPrimitives.ReadUInt64LittleEndian(record[0x20..0x28]);
         if (updateSequenceOffset >= Ntfs31HeaderLength)
         {
@@ -217,7 +257,7 @@ internal static class MftRawRecordParser
                     ReadStandardInformation(attribute, result);
                     break;
                 case NtfsFileRecordParser.AttributeTypeAttributeList:
-                    result.HasAttributeList = true;
+                    ReadAttributeList(attribute, result);
                     break;
                 case NtfsFileRecordParser.AttributeTypeFileName:
                     ReadFileName(attribute, result);
@@ -269,15 +309,56 @@ internal static class MftRawRecordParser
         // FSCTL_ENUM_USN_DATA names a hard-linked file by its Win32 link where it has one, so a Win32 name passes over
         // an earlier POSIX name to give the same results.
         var isWin32 = nameSpace is Win32Namespace or Win32AndDosNamespace;
-        if (result.Name is not null && (result.HasWin32Name || !isWin32))
+        var takeName = result.Name is null || (isWin32 && !result.HasWin32Name);
+
+        // With no Win32 name it takes the first name in the attribute list's order, which the collector applies once
+        // it has the file's records, so a record that can belong to such a file keeps all its names.
+        var keepCandidate = !isWin32 && !result.HasWin32Name && (result.IsExtension || result.HasAttributeList);
+        if (!takeName && !keepCandidate)
         {
             return;
         }
 
-        result.PassedOverFirstName = result.Name is not null;
-        result.Name = Encoding.Unicode.GetString(value.Slice(FileNameMinimumLength, nameBytes));
-        result.NameParent = BinaryPrimitives.ReadUInt64LittleEndian(value[..8]);
-        result.HasWin32Name = isWin32;
+        var name = Encoding.Unicode.GetString(value.Slice(FileNameMinimumLength, nameBytes));
+        var parent = BinaryPrimitives.ReadUInt64LittleEndian(value[..8]);
+        if (keepCandidate)
+        {
+            result.NameCandidates.Add(new MftNameCandidate(NtfsFileRecordParser.GetInstance(attribute), name, parent));
+        }
+
+        if (takeName)
+        {
+            result.PassedOverFirstName = result.Name is not null;
+            result.Name = name;
+            result.NameParent = parent;
+            result.HasWin32Name = isWin32;
+            if (isWin32)
+            {
+                result.NameCandidates.Clear();
+            }
+        }
+    }
+
+    private static void ReadAttributeList(ReadOnlySpan<byte> attribute, MftRawRecord result)
+    {
+        result.HasAttributeList = true;
+        if (!NtfsFileRecordParser.IsNonResident(attribute))
+        {
+            result.AttributeListMalformed =
+                !NtfsFileRecordParser.TryGetResidentValue(attribute, out var list) ||
+                !MftAttributeList.TryReadFileNameEntries(list, result.AttributeListNames);
+            return;
+        }
+
+        // An attribute list is never split, so its runs start at VCN 0.
+        if (!NtfsRunListDecoder.TryDecode(attribute, result.AttributeListExtents) || result.AttributeListExtents.Count == 0)
+        {
+            result.AttributeListExtents.Clear();
+            result.AttributeListMalformed = true;
+            return;
+        }
+
+        result.AttributeListLength = BinaryPrimitives.ReadInt64LittleEndian(attribute[0x30..0x38]);
     }
 
     private static void ReadData(ReadOnlySpan<byte> attribute, MftRawRecord result)

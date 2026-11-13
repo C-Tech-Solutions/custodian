@@ -145,6 +145,9 @@ internal static class NtfsFileRecordParser
 
     public static bool IsUnnamed(ReadOnlySpan<byte> attribute) => attribute[9] == 0;
 
+    /// <summary>The attribute's instance id (header offset 0x0E), unique within its file record.</summary>
+    public static ushort GetInstance(ReadOnlySpan<byte> attribute) => BinaryPrimitives.ReadUInt16LittleEndian(attribute[0x0e..0x10]);
+
     /// <summary>Returns the value of a resident attribute, or false when its bounds do not fit the attribute.</summary>
     public static bool TryGetResidentValue(ReadOnlySpan<byte> attribute, out ReadOnlySpan<byte> value)
     {

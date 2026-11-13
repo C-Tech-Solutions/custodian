@@ -83,7 +83,9 @@ public sealed class MftDirectReaderTests
         Assert.Equal(0, statistics.FilesWithoutData);
         Assert.Contains(statistics.GetDiagnostics(), line => line.StartsWith("$MFT records: files 9; folders 4;", StringComparison.Ordinal));
         Assert.Contains(
-            "$MFT names: files and folders with several names 2; of those, with a Win32 name 2; named by a later Win32 name instead of the first name 0",
+            "$MFT names: files and folders with several names 2; of those, with a Win32 name 2; named by a later Win32 name instead of " +
+            "the first name 0; with no Win32 name, named in attribute-list order 0, of those not the first name in record order 0; " +
+            "attribute lists read from outside the $MFT 0 in 0.00 s; lists that could not be read or used, so record order was kept 0",
             statistics.GetDiagnostics());
     }
 
@@ -115,6 +117,111 @@ public sealed class MftDirectReaderTests
         Assert.Equal(1, result.Statistics.SeveralNamesWithWin32Name);
         Assert.Equal(1, result.Statistics.FirstNamePassedOver);
         Assert.Equal(2, result.Statistics.NamesFromExtensions);
+    }
+
+    [Fact]
+    public void ReadNamesAFileWithoutAWin32NameByItsAttributeListOrder()
+    {
+        const uint standardInformation = NtfsFileRecordParser.AttributeTypeStandardInformation;
+        const uint fileName = NtfsFileRecordParser.AttributeTypeFileName;
+        const uint data = NtfsFileRecordParser.AttributeTypeData;
+        var mft = SyntheticMft.CreateStandard(Layout);
+        var usersReference = mft.Records[24].Reference;
+
+        // No attribute list: the first name in the base record.
+        mft.Add(28).StandardInformation(FileAttributes.Archive)
+            .FileName(StrifeReference, "first.txt", nameSpace: 0)
+            .FileName(usersReference, "second.txt", nameSpace: 0)
+            .ResidentData(10);
+
+        // A resident list in the reverse of the base record's order.
+        mft.Add(16).StandardInformation(FileAttributes.Archive)
+            .AttributeList((standardInformation, 16, 0, 0), (fileName, 16, 0, 8), (fileName, 16, 0, 10), (data, 16, 0, 11))
+            .AttributeId(10).FileName(StrifeReference, "reversed-record-first.txt", nameSpace: 0)
+            .AttributeId(8).FileName(usersReference, "reversed-list-first.txt", nameSpace: 0)
+            .AttributeId(11).ResidentData(16);
+
+        // Names only in extension records, the higher-numbered one listed first. Both names have instance 0.
+        var spread = mft.Add(17).StandardInformation(FileAttributes.Archive)
+            .AttributeList((standardInformation, 17, 0, 0), (fileName, 19, 0, 0), (fileName, 18, 0, 0), (data, 17, 0, 2))
+            .ResidentData(17);
+        mft.Add(18).ExtensionOf(spread.Reference).FileName(StrifeReference, "spread-record-first.txt", nameSpace: 0);
+        mft.Add(19).ExtensionOf(spread.Reference).FileName(usersReference, "spread-list-first.txt", nameSpace: 0);
+
+        // A Win32 name in an extension record, listed after a POSIX name in the base record, still wins.
+        var win32 = mft.Add(20).StandardInformation(FileAttributes.Archive)
+            .AttributeList((standardInformation, 20, 0, 0), (fileName, 20, 0, 2), (fileName, 21, 0, 0), (data, 20, 0, 3))
+            .FileName(StrifeReference, "posix-listed-first.txt", nameSpace: 0)
+            .ResidentData(20);
+        mft.Add(21).ExtensionOf(win32.Reference).FileName(usersReference, "win32-listed-second.txt", nameSpace: 1);
+
+        // The list's first $FILE_NAME entry is a DOS alias, which is never the name.
+        mft.Add(22).StandardInformation(FileAttributes.Archive)
+            .AttributeList((standardInformation, 22, 0, 0), (fileName, 22, 0, 2), (fileName, 22, 0, 4), (fileName, 22, 0, 3))
+            .FileName(StrifeReference, "DOSALI~1.TXT", nameSpace: 2)
+            .FileName(StrifeReference, "dos-record-first.txt", nameSpace: 0)
+            .FileName(usersReference, "dos-list-first.txt", nameSpace: 0)
+            .ResidentData(22);
+
+        // A list stored outside the record, in cluster 50, in the reverse of the record's order.
+        mft.Add(23).StandardInformation(FileAttributes.Archive)
+            .NonResidentAttributeList(4 * 0x20, MftRuns.Encode((1, 50)))
+            .FileName(StrifeReference, "volume-record-first.txt", nameSpace: 0)
+            .FileName(usersReference, "volume-list-first.txt", nameSpace: 0)
+            .ResidentData(23);
+        var volume = mft.CreateVolume(4096, Layout, 64);
+        MftRecordBuilder.EncodeAttributeList((standardInformation, 23, 0, 0), (fileName, 23, 0, 3), (fileName, 23, 0, 2), (data, 23, 0, 4))
+            .CopyTo(volume.Image, 50 * 4096);
+
+        var result = Read(volume);
+
+        var parents = result.Records.ToDictionary(record => record.FileName, record => record.ParentFileReferenceNumber);
+        Assert.Equal(StrifeReference, parents["first.txt"]);
+        Assert.Equal(usersReference, parents["reversed-list-first.txt"]);
+        Assert.Equal(usersReference, parents["spread-list-first.txt"]);
+        Assert.Equal(usersReference, parents["win32-listed-second.txt"]);
+        Assert.Equal(usersReference, parents["dos-list-first.txt"]);
+        Assert.Equal(usersReference, parents["volume-list-first.txt"]);
+        Assert.DoesNotContain(
+            result.Records,
+            record => record.FileName is "second.txt" or "reversed-record-first.txt" or "spread-record-first.txt" or
+                "posix-listed-first.txt" or "DOSALI~1.TXT" or "dos-record-first.txt" or "volume-record-first.txt");
+        Assert.Equal(new NtfsRecordSize(17, 17), result.Records.Single(record => record.FileName == "spread-list-first.txt").Size);
+        Assert.Empty(volume.MisalignedReads);
+
+        var statistics = result.Statistics;
+        Assert.Equal(7, statistics.RecordsWithSeveralNames);
+        Assert.Equal(2, statistics.SeveralNamesWithWin32Name);
+        Assert.Equal(1, statistics.FirstNamePassedOver);
+        Assert.Equal(4, statistics.NamesFromAttributeList);
+        Assert.Equal(4, statistics.AttributeListChangedName);
+        Assert.Equal(1, statistics.AttributeListsReadFromVolume);
+        Assert.Equal(0, statistics.AttributeListsNotUsed);
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(50)]
+    public void ReadKeepsRecordOrderWhenAnAttributeListOutsideTheMftCannotBeRead(long lcn)
+    {
+        // Cluster 100 is past the end of the 64-cluster volume. Cluster 50 is read but holds zeros, which are not a list.
+        var mft = SyntheticMft.CreateStandard(Layout);
+        var usersReference = mft.Records[24].Reference;
+        mft.Add(23).StandardInformation(FileAttributes.Archive)
+            .NonResidentAttributeList(4 * 0x20, MftRuns.Encode((1, lcn)))
+            .FileName(StrifeReference, "volume-record-first.txt", nameSpace: 0)
+            .FileName(usersReference, "volume-list-first.txt", nameSpace: 0)
+            .ResidentData(23);
+
+        var result = Read(mft.CreateVolume(4096, Layout, 64));
+
+        Assert.Equal(StrifeReference, result.Records.Single(record => record.FileName == "volume-record-first.txt").ParentFileReferenceNumber);
+        Assert.Equal(0, result.Statistics.NamesFromAttributeList);
+        Assert.Equal(1, result.Statistics.AttributeListsReadFromVolume);
+        Assert.Equal(1, result.Statistics.AttributeListsNotUsed);
+        Assert.Contains(
+            result.Statistics.GetDiagnostics(),
+            line => line.EndsWith("lists that could not be read or used, so record order was kept 1", StringComparison.Ordinal));
     }
 
     [Fact]

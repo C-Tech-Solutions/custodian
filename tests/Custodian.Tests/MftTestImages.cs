@@ -14,6 +14,7 @@ internal sealed class MftRecordBuilder
     private ushort _sequence = 1;
     private bool _inUse = true;
     private bool _directory;
+    private bool _metadataFile;
     private ulong _baseReference;
     private uint? _storedNumber;
     private ushort _nextAttributeId;
@@ -32,6 +33,8 @@ internal sealed class MftRecordBuilder
     public bool IsDirectory => _directory;
 
     public bool IsExtension => _baseReference != 0;
+
+    public bool IsNtfsMetadataFile => _metadataFile;
 
     public uint StandardAttributes { get; private set; }
 
@@ -53,6 +56,20 @@ internal sealed class MftRecordBuilder
     public MftRecordBuilder NotInUse()
     {
         _inUse = false;
+        return this;
+    }
+
+    /// <summary>Sets header flag 0x4, which NTFS puts on its own files under <c>$Extend</c>.</summary>
+    public MftRecordBuilder NtfsMetadataFile()
+    {
+        _metadataFile = true;
+        return this;
+    }
+
+    /// <summary>Gives the next attribute this instance id; the ones after it count up from there.</summary>
+    public MftRecordBuilder AttributeId(ushort id)
+    {
+        _nextAttributeId = id;
         return this;
     }
 
@@ -135,6 +152,35 @@ internal sealed class MftRecordBuilder
 
     public MftRecordBuilder AttributeList(params (uint Type, long Segment, long StartingVcn)[] entries)
     {
+        return AddResident(
+            NtfsFileRecordParser.AttributeTypeAttributeList,
+            EncodeAttributeList([.. entries.Select(entry => (entry.Type, entry.Segment, entry.StartingVcn, (ushort)0))]));
+    }
+
+    /// <summary>A resident attribute list whose entries name the attribute instance each one points at.</summary>
+    public MftRecordBuilder AttributeList(params (uint Type, long Segment, long StartingVcn, ushort Instance)[] entries)
+    {
+        return AddResident(NtfsFileRecordParser.AttributeTypeAttributeList, EncodeAttributeList(entries));
+    }
+
+    /// <summary>An attribute list stored outside the record: <paramref name="length"/> bytes in the clusters <paramref name="runs"/> maps.</summary>
+    public MftRecordBuilder NonResidentAttributeList(long length, byte[] runs)
+    {
+        const int headerLength = 0x40;
+        var attribute = new byte[Align8(headerLength + runs.Length)];
+        WriteAttributeHeader(attribute, NtfsFileRecordParser.AttributeTypeAttributeList, nonResident: true, [], headerLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(attribute.AsSpan(0x20), headerLength);
+        BinaryPrimitives.WriteInt64LittleEndian(attribute.AsSpan(0x28), (length + 4095) / 4096 * 4096);
+        BinaryPrimitives.WriteInt64LittleEndian(attribute.AsSpan(0x30), length);
+        BinaryPrimitives.WriteInt64LittleEndian(attribute.AsSpan(0x38), length);
+        runs.CopyTo(attribute, headerLength);
+        _attributes.Add(attribute);
+        return this;
+    }
+
+    /// <summary>The bytes of an attribute list: one 32-byte entry per attribute, with no attribute names.</summary>
+    public static byte[] EncodeAttributeList(params (uint Type, long Segment, long StartingVcn, ushort Instance)[] entries)
+    {
         const int entryLength = 0x20;
         var value = new byte[entries.Length * entryLength];
         for (var i = 0; i < entries.Length; i++)
@@ -145,9 +191,10 @@ internal sealed class MftRecordBuilder
             entry[7] = 0x1a;
             BinaryPrimitives.WriteInt64LittleEndian(entry[0x08..], entries[i].StartingVcn);
             BinaryPrimitives.WriteUInt64LittleEndian(entry[0x10..], (ulong)entries[i].Segment | (1UL << 48));
+            BinaryPrimitives.WriteUInt16LittleEndian(entry[0x18..], entries[i].Instance);
         }
 
-        return AddResident(NtfsFileRecordParser.AttributeTypeAttributeList, value);
+        return value;
     }
 
     /// <summary>Adds raw bytes in place of an attribute, for malformed records.</summary>
@@ -173,7 +220,7 @@ internal sealed class MftRecordBuilder
         BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x10), _sequence);
         BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x12), (ushort)Math.Max(1, Names.Count));
         BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x14), (ushort)firstAttribute);
-        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x16), (ushort)((_inUse ? 1 : 0) | (_directory ? 2 : 0)));
+        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x16), (ushort)((_inUse ? 1 : 0) | (_directory ? 2 : 0) | (_metadataFile ? 4 : 0)));
 
         var offset = firstAttribute;
         foreach (var attribute in _attributes)
@@ -468,7 +515,7 @@ internal sealed class SyntheticMft
 
     /// <summary>
     /// What FSCTL_ENUM_USN_DATA would list for this <c>$MFT</c>: one entry per intact in-use base record from
-    /// record 16 on, plus the root, under its first name. Files whose names sit only in extension records are
+    /// record 16 on that is not an NTFS metadata file, plus the root, under its first name. Files whose names sit only in extension records are
     /// not modelled, so use it with <see cref="CreateStandard"/> without its attribute-list files.
     /// </summary>
     public Dictionary<ulong, NtfsFileRecord> UsnRecords()
@@ -478,6 +525,7 @@ internal sealed class SyntheticMft
         {
             if (!builder.IsInUse ||
                 builder.IsExtension ||
+                builder.IsNtfsMetadataFile ||
                 builder.Names.Count == 0 ||
                 _tampering.ContainsKey(builder.Segment) ||
                 (builder.Segment < 16 && builder.Segment != 5))

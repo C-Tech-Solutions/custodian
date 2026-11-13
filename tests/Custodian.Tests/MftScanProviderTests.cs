@@ -48,6 +48,50 @@ public sealed class MftScanProviderTests
     }
 
     [Fact]
+    public void ScanLeavesOutNtfsMetadataFilesAndTheirExtensionRecords()
+    {
+        var mft = SyntheticMft.CreateStandard(Layout);
+
+        // Header flags 0x5: a file NTFS keeps for itself, like $Extend\$RmMetadata\$Repair.
+        mft.Add(16).NtfsMetadataFile().StandardInformation(FileAttributes.Hidden | FileAttributes.System)
+            .FileName(SyntheticMft.RootReference, "$Repair")
+            .ResidentData(10);
+
+        // Header flags 0x7: a folder like $Extend\$Deleted, with an extension record on either side of it and a file inside.
+        var deleted = mft.Add(18).NtfsMetadataFile().Directory().StandardInformation(FileAttributes.Hidden | FileAttributes.System)
+            .AttributeList(
+                (NtfsFileRecordParser.AttributeTypeStandardInformation, 18, 0),
+                (NtfsFileRecordParser.AttributeTypeFileName, 17, 0),
+                (NtfsFileRecordParser.AttributeTypeFileName, 19, 0));
+        mft.Add(17).ExtensionOf(deleted.Reference).FileName(SyntheticMft.RootReference, "$Deleted", nameSpace: 0);
+        mft.Add(19).ExtensionOf(deleted.Reference).FileName(SyntheticMft.RootReference, "$Deleted-link", nameSpace: 0);
+        mft.Add(20).StandardInformation(FileAttributes.Archive).FileName(deleted.Reference, "child.txt").ResidentData(7);
+        var volume = mft.CreateVolume(4096, Layout, 64);
+
+        var result = Scan(new ScanOptions(@"C:\", ScanMode.Mft), volume);
+
+        Assert.Equal(MftScanProvider.DirectSourceDiagnostic, result.Diagnostics[0]);
+        Assert.Equal(SyntheticMft.StandardFileCount, result.Root.FileCount);
+        Assert.Equal(SyntheticMft.StandardLogicalBytes, result.Root.LogicalSizeBytes);
+        Assert.DoesNotContain(result.Root.Flatten(), entry => entry.Name.StartsWith('$'));
+        Assert.Equal(
+            [
+                new SkippedEntry("$UsnJrnl", MftTreeBuilder.ParentNotEnumeratedReason),
+                new SkippedEntry(@"C:\Junction", MftTreeBuilder.ReparsePointReason),
+                new SkippedEntry(@"C:\Users\Strife\cloud.bin", MftTreeBuilder.ReparsePointReason),
+                new SkippedEntry("child.txt", MftTreeBuilder.ParentNotEnumeratedReason)
+            ],
+            result.SkippedEntries.OrderBy(entry => entry.Path, StringComparer.Ordinal));
+
+        // Both extension records are left out with their base record, not counted as orphans: the one orphan is record 40.
+        Assert.Contains(
+            result.Diagnostics,
+            line => line.StartsWith("$MFT records: files 10; folders 4; extension 6;", StringComparison.Ordinal) &&
+                line.EndsWith("; NTFS metadata files left out for header flag 0x4 2", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, line => line.Contains("extension records attached 3, with no matching base record 1,", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ScanFallsBackToTheEnumerationWhenTheDirectReadFails()
     {
         var mft = SyntheticMft.CreateStandard(Layout, includeAttributeListFiles: false);

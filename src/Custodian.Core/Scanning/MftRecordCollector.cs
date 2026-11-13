@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Custodian.Core.Scanning;
 
 /// <summary>
@@ -5,15 +7,16 @@ namespace Custodian.Core.Scanning;
 /// order, and an extension record can come before or after its base record.
 /// </summary>
 /// <remarks>
-/// A file is counted once, under one name and parent, looking at the base record in attribute order and then
-/// its extension records in ascending record number: the first Win32 (or Win32 and DOS) <c>$FILE_NAME</c>, or
-/// with none, the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias. That is the name
-/// <c>FSCTL_ENUM_USN_DATA</c> gives a hard-linked file with a Win32 link, and which link a file is counted under
-/// decides which folder holds it.
+/// A file is counted once, under one name and parent, the one <c>FSCTL_ENUM_USN_DATA</c> gives it; which link a
+/// file is counted under decides which folder holds it. That is its first Win32 (or Win32 and DOS)
+/// <c>$FILE_NAME</c>, looking at the base record in attribute order and then its extension records in ascending
+/// record number. With no Win32 name it is the first <c>$FILE_NAME</c> that is not a DOS 8.3 alias, in the order of
+/// the file's attribute list where it has one, and in the base record's attribute order where it has none.
 /// <para>
 /// Its size is the first extent of the unnamed <c>$DATA</c> attribute, from the base record or else the
 /// lowest-numbered extension record that holds it. Extension records are tied to their file by the base record
-/// reference in their header, so no attribute list is read.
+/// reference in their header. An attribute list stored outside the <c>$MFT</c> is read from the volume only for
+/// the files whose name depends on it.
 /// </para>
 /// </remarks>
 internal sealed class MftRecordCollector
@@ -32,6 +35,9 @@ internal sealed class MftRecordCollector
 
     // Base records with an attribute list, and the extension records seen so far for any base record.
     private readonly Dictionary<long, PendingFile> _pending = [];
+
+    // Base records left out for header flag 0x4; their extension records are left out with them.
+    private readonly HashSet<long> _metadataFiles = [];
 
     public MftRecordCollector(MftDirectReadStatistics statistics)
     {
@@ -54,6 +60,14 @@ internal sealed class MftRecordCollector
                 _statistics.SystemBytesLeftOut += record.DataSize.LogicalSize;
             }
 
+            return;
+        }
+
+        if (record.IsNtfsMetadataFile)
+        {
+            _statistics.MetadataFilesLeftOut++;
+            _metadataFiles.Add(segment);
+            _pending.Remove(segment);
             return;
         }
 
@@ -88,6 +102,17 @@ internal sealed class MftRecordCollector
             return;
         }
 
+        // A Win32 name in the base record decides the name, so the list's order is only kept without one.
+        if (!record.HasWin32Name)
+        {
+            file.NameOrder = new NameOrder(
+                [.. record.NameCandidates],
+                record.AttributeListExtents.Count == 0 ? [.. record.AttributeListNames] : null,
+                record.AttributeListExtents.Count > 0 ? [.. record.AttributeListExtents] : null,
+                record.AttributeListLength,
+                record.AttributeListMalformed);
+        }
+
         if (_pending.TryGetValue(segment, out var existing))
         {
             file.Extensions = existing.Extensions;
@@ -98,8 +123,12 @@ internal sealed class MftRecordCollector
         _pending[segment] = file;
     }
 
-    /// <summary>Merges the extension records into their files and returns every file, in record order.</summary>
-    public List<NtfsFileRecord> Complete()
+    /// <summary>
+    /// Merges the extension records into their files and returns every file, in record order.
+    /// <paramref name="readAttributeList"/> reads an attribute list stored outside the <c>$MFT</c> from its extents
+    /// and byte length, or returns null when it cannot.
+    /// </summary>
+    public List<NtfsFileRecord> Complete(Func<IReadOnlyList<MftExtent>, long, byte[]?>? readAttributeList = null)
     {
         foreach (var file in _pending.Values)
         {
@@ -113,6 +142,7 @@ internal sealed class MftRecordCollector
 
             // Records arrive in slot order, so the extension records are in ascending record number.
             var nameFromExtension = false;
+            List<(long Segment, MftNameCandidate[] Names)>? extensionNames = null;
             foreach (var extension in file.Extensions ?? [])
             {
                 if (extension.BaseSequenceNumber != file.SequenceNumber)
@@ -134,11 +164,21 @@ internal sealed class MftRecordCollector
                     nameFromExtension = true;
                 }
 
+                if (extension.NameCandidates is { } names)
+                {
+                    (extensionNames ??= []).Add((extension.Segment, names));
+                }
+
                 if (file.Size is null && extension.Size is not null)
                 {
                     file.Size = extension.Size;
                     _statistics.DataFromExtensions++;
                 }
+            }
+
+            if (file.NameOrder is { } order && !file.HasWin32Name && file.NameCount > 1)
+            {
+                NameByAttributeList(file, order, extensionNames, readAttributeList, ref nameFromExtension);
             }
 
             if (nameFromExtension)
@@ -163,11 +203,64 @@ internal sealed class MftRecordCollector
         return records;
     }
 
+    /// <summary>
+    /// Names a file with several names and no Win32 name by the first of them in its attribute list's order, as
+    /// <c>FSCTL_ENUM_USN_DATA</c> does. Keeps the record-order name when the list cannot be read or names none of them.
+    /// </summary>
+    private void NameByAttributeList(
+        PendingFile file,
+        NameOrder order,
+        List<(long Segment, MftNameCandidate[] Names)>? extensionNames,
+        Func<IReadOnlyList<MftExtent>, long, byte[]?>? readAttributeList,
+        ref bool nameFromExtension)
+    {
+        var entries = order.ListMalformed ? null : order.ListNames;
+        if (order.ListExtents is { } extents && !order.ListMalformed)
+        {
+            _statistics.AttributeListsReadFromVolume++;
+            var watch = Stopwatch.StartNew();
+            var list = readAttributeList?.Invoke(extents, order.ListLength);
+            _statistics.AttributeListReadDuration += watch.Elapsed;
+
+            var parsed = new List<ulong>();
+            entries = list is not null && MftAttributeList.TryReadFileNameEntries(list, parsed) ? [.. parsed] : null;
+        }
+
+        foreach (var entry in entries ?? [])
+        {
+            var segment = MftAttributeList.EntrySegment(entry);
+            var instance = MftAttributeList.EntryInstance(entry);
+            var names = segment == file.Segment ? order.BaseNames : extensionNames?.Find(part => part.Segment == segment).Names;
+
+            // DOS aliases are not candidates, so an alias listed first is passed over.
+            foreach (var candidate in names ?? [])
+            {
+                if (candidate.Instance != instance)
+                {
+                    continue;
+                }
+
+                _statistics.NamesFromAttributeList++;
+                if (candidate.Name != file.Name || candidate.Parent != file.Parent)
+                {
+                    _statistics.AttributeListChangedName++;
+                }
+
+                file.Name = candidate.Name;
+                file.Parent = candidate.Parent;
+                nameFromExtension = segment != file.Segment;
+                return;
+            }
+        }
+
+        _statistics.AttributeListsNotUsed++;
+    }
+
     private void AddExtension(long segment, MftRawRecord record)
     {
         _statistics.ExtensionRecords++;
         var baseSegment = (long)(record.BaseRecordReference & MftRawRecordParser.SegmentMask);
-        if (baseSegment < FirstUserSegment && baseSegment != RootDirectorySegment)
+        if ((baseSegment < FirstUserSegment && baseSegment != RootDirectorySegment) || _metadataFiles.Contains(baseSegment))
         {
             return;
         }
@@ -187,6 +280,7 @@ internal sealed class MftRecordCollector
             record.HasWin32Name,
             record.PassedOverFirstName,
             record.NameCount,
+            record.NameCandidates.Count > 0 ? [.. record.NameCandidates] : null,
             record.HasData ? record.DataSize : null));
     }
 
@@ -263,8 +357,20 @@ internal sealed class MftRecordCollector
         public bool PassedOverFirstName { get; set; }
         public int NameCount { get; set; }
         public NtfsRecordSize? Size { get; set; }
+        public NameOrder? NameOrder { get; set; }
         public List<ExtensionPart>? Extensions { get; set; }
     }
+
+    /// <summary>
+    /// What a base record without a Win32 name keeps to order the file's names by its attribute list: the names in
+    /// the base record, and the list's <c>$FILE_NAME</c> entries, or the list's extents when it is stored outside the record.
+    /// </summary>
+    private sealed record NameOrder(
+        MftNameCandidate[] BaseNames,
+        ulong[]? ListNames,
+        MftExtent[]? ListExtents,
+        long ListLength,
+        bool ListMalformed);
 
     private sealed record ExtensionPart(
         long Segment,
@@ -274,5 +380,6 @@ internal sealed class MftRecordCollector
         bool HasWin32Name,
         bool PassedOverFirstName,
         int NameCount,
+        MftNameCandidate[]? NameCandidates,
         NtfsRecordSize? Size);
 }

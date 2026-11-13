@@ -106,7 +106,7 @@ internal static class MftDirectReader
         }
 
         var parseWatch = Stopwatch.StartNew();
-        var records = collector.Complete();
+        var records = collector.Complete(new AttributeListReader(volume, geometry).Read);
         parseWatch.Stop();
         statistics.ParseDuration += parseWatch.Elapsed;
         return new MftDirectReadResult(records, statistics);
@@ -371,6 +371,69 @@ internal static class MftDirectReader
         var padding = (int)((alignment - address % alignment) % alignment);
         return array.AsMemory(padding, length);
     }
+
+    /// <summary>
+    /// Reads an attribute list stored outside the <c>$MFT</c> from the volume, one list at a time, after the
+    /// <c>$MFT</c> pass. Returns null when the extents do not fit the volume or a read fails, so the caller keeps
+    /// the record-order name.
+    /// </summary>
+    private sealed class AttributeListReader(INtfsVolume volume, NtfsVolumeData geometry)
+    {
+        private Memory<byte> _buffer;
+
+        public byte[]? Read(IReadOnlyList<MftExtent> extents, long length)
+        {
+            if (length <= 0 || length > MftAttributeList.MaximumLength)
+            {
+                return null;
+            }
+
+            var clusterSize = geometry.BytesPerCluster;
+            if (_buffer.IsEmpty)
+            {
+                _buffer = AllocateAligned(
+                    (MftAttributeList.MaximumLength / clusterSize + 1) * clusterSize,
+                    Math.Max(MinimumBufferAlignment, geometry.BytesPerSector));
+            }
+
+            var list = new byte[length];
+            long filled = 0;
+            long vcn = 0;
+            try
+            {
+                foreach (var extent in extents)
+                {
+                    if (filled == length)
+                    {
+                        break;
+                    }
+
+                    if (extent.Vcn != vcn || extent.Lcn < 0 || extent.Lcn > geometry.TotalClusters - extent.Clusters)
+                    {
+                        return null;
+                    }
+
+                    // Whole clusters, as unbuffered reads need, and no more than the list still lacks.
+                    var take = (int)Math.Min(extent.Clusters * clusterSize, length - filled);
+                    var bytes = (take + clusterSize - 1) / clusterSize * clusterSize;
+                    if (volume.Read(extent.Lcn * clusterSize, _buffer.Span[..bytes]) < take)
+                    {
+                        return null;
+                    }
+
+                    _buffer.Span[..take].CopyTo(list.AsSpan((int)filled));
+                    filled += take;
+                    vcn += extent.Clusters;
+                }
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+
+            return filled == length ? list : null;
+        }
+    }
 }
 
 /// <summary>What a direct <c>$MFT</c> read found, reported in the scan's diagnostics.</summary>
@@ -396,6 +459,10 @@ internal sealed class MftDirectReadStatistics
 
     public long SystemRecordsLeftOut { get; set; }
     public long SystemBytesLeftOut { get; set; }
+
+    /// <summary>Base records from 16 up left out for header flag 0x4, NTFS's mark for its own files under <c>$Extend</c>.</summary>
+    public long MetadataFilesLeftOut { get; set; }
+
     public long RecordsWithoutName { get; set; }
     public long RecordsWithSeveralNames { get; set; }
 
@@ -404,6 +471,20 @@ internal sealed class MftDirectReadStatistics
 
     /// <summary>Files and folders named by a Win32 name that came after their first name.</summary>
     public long FirstNamePassedOver { get; set; }
+
+    /// <summary>Files and folders with several names, no Win32 name and an attribute list, named in the list's order.</summary>
+    public long NamesFromAttributeList { get; set; }
+
+    /// <summary>Of <see cref="NamesFromAttributeList"/>, those whose name differs from the first one in record order.</summary>
+    public long AttributeListChangedName { get; set; }
+
+    /// <summary>Attribute lists stored outside the <c>$MFT</c> that were read from the volume.</summary>
+    public long AttributeListsReadFromVolume { get; set; }
+
+    public TimeSpan AttributeListReadDuration { get; set; }
+
+    /// <summary>Attribute lists that could not be read or named none of the file's names, so record order was kept.</summary>
+    public long AttributeListsNotUsed { get; set; }
 
     public long ExtensionsAttached { get; set; }
     public long NamesFromExtensions { get; set; }
@@ -431,7 +512,7 @@ internal sealed class MftDirectReadStatistics
         diagnostics.Add(
             $"$MFT records: files {Files:n0}; folders {Folders:n0}; extension {ExtensionRecords:n0}; not in use {NotInUse:n0}; " +
             $"not FILE {NotFileRecord:n0}; torn {Torn:n0}; bad header {MalformedHeader:n0}; wrong record number {WrongRecordNumber:n0}; " +
-            $"attributes cut short {AttributesIncomplete:n0}");
+            $"attributes cut short {AttributesIncomplete:n0}; NTFS metadata files left out for header flag 0x4 {MetadataFilesLeftOut:n0}");
         diagnostics.Add(
             $"$MFT merge: NTFS system records left out {SystemRecordsLeftOut:n0} ({SystemBytesLeftOut:n0} bytes); " +
             $"in-use records without a name {RecordsWithoutName:n0}; " +
@@ -440,7 +521,11 @@ internal sealed class MftDirectReadStatistics
             $"data sizes from extension records {DataFromExtensions:n0}; files without an unnamed $DATA {FilesWithoutData:n0}");
         diagnostics.Add(
             $"$MFT names: files and folders with several names {RecordsWithSeveralNames:n0}; of those, with a Win32 name " +
-            $"{SeveralNamesWithWin32Name:n0}; named by a later Win32 name instead of the first name {FirstNamePassedOver:n0}");
+            $"{SeveralNamesWithWin32Name:n0}; named by a later Win32 name instead of the first name {FirstNamePassedOver:n0}; " +
+            $"with no Win32 name, named in attribute-list order {NamesFromAttributeList:n0}, of those not the first name in " +
+            $"record order {AttributeListChangedName:n0}; attribute lists read from outside the $MFT {AttributeListsReadFromVolume:n0} " +
+            $"in {AttributeListReadDuration.TotalSeconds:0.00} s; lists that could not be read or used, so record order was kept " +
+            $"{AttributeListsNotUsed:n0}");
         return diagnostics;
     }
 }
