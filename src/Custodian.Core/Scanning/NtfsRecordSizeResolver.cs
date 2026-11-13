@@ -24,6 +24,9 @@ internal sealed class NtfsRecordSizeResolver
     private const int RecordOutputBufferSize = OutputHeaderLength + 4096;
     private const int AttemptsBeforeGivingUp = 100;
 
+    // FILE_RECORD_SEGMENT_HEADER.SequenceNumber. A file reference carries the same number in its top 16 bits.
+    private const int RecordSequenceNumberOffset = 0x10;
+
     private readonly ScanOptions _options;
     private readonly NtfsFileRecordReader _readRecord;
     private readonly byte[] _output = new byte[RecordOutputBufferSize];
@@ -92,7 +95,7 @@ internal sealed class NtfsRecordSizeResolver
     private bool TryResolveFromNtfsRecord(ulong fileReferenceNumber, out NtfsRecordSize size)
     {
         Attempts++;
-        if (TryReadRecordSize((long)(fileReferenceNumber & FileReferenceSegmentMask), out size))
+        if (TryReadRecordSize(fileReferenceNumber, out size))
         {
             return true;
         }
@@ -106,9 +109,10 @@ internal sealed class NtfsRecordSizeResolver
         return false;
     }
 
-    private bool TryReadRecordSize(long segmentReference, out NtfsRecordSize size)
+    private bool TryReadRecordSize(ulong fileReferenceNumber, out NtfsRecordSize size)
     {
         size = default;
+        var segmentReference = (long)(fileReferenceNumber & FileReferenceSegmentMask);
 
         if (!_readRecord(segmentReference, _output, out var bytesReturned, out var win32Error))
         {
@@ -138,7 +142,18 @@ internal sealed class NtfsRecordSizeResolver
             return false;
         }
 
-        switch (NtfsFileRecordParser.ReadDefaultDataSize(_output.AsSpan(OutputHeaderLength, recordLength), out size))
+        var record = _output.AsSpan(OutputHeaderLength, recordLength);
+
+        // A file deleted after the enumeration can have its record reused by a new file. The record then
+        // carries a different sequence number from the enumerated reference, and its size is not this file's.
+        if (record.Length >= RecordSequenceNumberOffset + sizeof(ushort) &&
+            BinaryPrimitives.ReadUInt16LittleEndian(record[RecordSequenceNumberOffset..]) != (ushort)(fileReferenceNumber >> 48))
+        {
+            DifferentRecordReturned++;
+            return false;
+        }
+
+        switch (NtfsFileRecordParser.ReadDefaultDataSize(record, out size))
         {
             case NtfsDataSizeReadResult.Found:
                 return true;

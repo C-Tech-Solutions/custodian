@@ -29,7 +29,10 @@ public sealed class NtfsRecordSizeResolverTests : IDisposable
             (long segment, byte[] output, out int bytesReturned, out int error) =>
             {
                 error = 0;
-                bytesReturned = WriteOutput(output, segment, FileRecordWithNonResidentData(logicalSize: 5_000, allocatedSize: 8_192));
+                bytesReturned = WriteOutput(
+                    output,
+                    segment,
+                    WithSequenceNumber(FileRecordWithNonResidentData(logicalSize: 5_000, allocatedSize: 8_192), 3));
                 return true;
             });
 
@@ -39,6 +42,29 @@ public sealed class NtfsRecordSizeResolverTests : IDisposable
         Assert.Equal(1, resolver.Parsed);
         Assert.Equal(0, resolver.Fallbacks);
         Assert.Equal("NTFS record sizes parsed 1; fallbacks 0", resolver.GetDiagnostics()[0]);
+    }
+
+    [Fact]
+    public void ResolveFallsBackWhenTheRecordWasReusedByAnotherFile()
+    {
+        var resolver = new NtfsRecordSizeResolver(
+            new ScanOptions(@"C:\", ScanMode.Mft),
+            (long segment, byte[] output, out int bytesReturned, out int error) =>
+            {
+                error = 0;
+                bytesReturned = WriteOutput(
+                    output,
+                    segment,
+                    WithSequenceNumber(FileRecordWithNonResidentData(logicalSize: 5_000, allocatedSize: 8_192), 4));
+                return true;
+            });
+
+        // Enumerated with sequence number 3; the segment now holds a newer file with sequence number 4.
+        var size = resolver.Resolve(_fallbackFile, Record(0x0003_0000_0000_002a));
+
+        Assert.Equal((7L, 7L), size);
+        Assert.Equal(0, resolver.Parsed);
+        Assert.Equal(1, resolver.DifferentRecordReturned);
     }
 
     [Fact]
@@ -159,6 +185,12 @@ public sealed class NtfsRecordSizeResolverTests : IDisposable
         BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(8, 4), record.Length);
         record.CopyTo(output, 12);
         return 12 + record.Length;
+    }
+
+    private static byte[] WithSequenceNumber(byte[] record, ushort sequenceNumber)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x10, 2), sequenceNumber);
+        return record;
     }
 
     private static byte[] FileRecordWithoutData()
