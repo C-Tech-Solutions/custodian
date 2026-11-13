@@ -49,6 +49,7 @@ static async Task<int> ScanAsync(string[] args)
     var silent = HasFlag(args, "--silent");
     var allocated = HasFlag(args, "--allocated");
     var mode = ParseMode(GetOption(args, "--mode"));
+    var threads = ParseThreads(GetOption(args, "--threads"));
     var scanner = new DiskScanner();
     var progress = silent
         ? null
@@ -57,7 +58,7 @@ static async Task<int> ScanAsync(string[] args)
             Console.Write($"\r{p.Message}: {p.FilesSeen:n0} files, {SizeFormatter.Format(p.BytesSeen)}       ");
         });
 
-    var result = await scanner.ScanAsync(new ScanOptions(path, mode, CollectAllocatedSize: allocated), progress);
+    var result = await scanner.ScanAsync(new ScanOptions(path, mode, CollectAllocatedSize: allocated, MaxDegreeOfParallelism: threads), progress);
     if (!silent)
     {
         Console.WriteLine();
@@ -145,6 +146,21 @@ static ScanMode ParseMode(string? value)
     };
 }
 
+static int? ParseThreads(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    if (!int.TryParse(value, out var threads) || threads < 1 || threads > ScanOptions.MaxDegreeOfParallelismLimit)
+    {
+        throw new ArgumentException($"--threads must be a whole number from 1 to {ScanOptions.MaxDegreeOfParallelismLimit}: {value}");
+    }
+
+    return threads;
+}
+
 static string? GetOption(string[] args, string name)
 {
     for (var i = 0; i < args.Length - 1; i++)
@@ -199,8 +215,11 @@ static void PrintHelp()
         Custodian CLI
 
         Usage:
-          custodian scan <path> [--mode auto|recursive|mft] [--allocated] [--out file.custodian-scan] [--export file.csv|file.json] [--silent]
+          custodian scan <path> [--mode auto|recursive|mft] [--threads <n>] [--allocated] [--out file.custodian-scan] [--export file.csv|file.json] [--silent]
           custodian export <file.custodian-scan> --format csv|json --out <file>
+
+        Options:
+          --threads <n>  Directories the recursive engine lists at once (1-64; default: processor count, at most 8).
 
         Examples:
           custodian scan C:\Data --out data.custodian-scan
