@@ -44,7 +44,8 @@ internal static class NtfsRunListDecoder
                 return false;
             }
 
-            var length = ReadSigned(attribute.Slice(position, lengthSize));
+            // Run lengths are unsigned; only the LCN deltas are signed.
+            var length = ReadUnsigned(attribute.Slice(position, lengthSize));
             position += lengthSize;
             if (length <= 0)
             {
@@ -64,7 +65,7 @@ internal static class NtfsRunListDecoder
         return false;
     }
 
-    private static long ReadSigned(ReadOnlySpan<byte> bytes)
+    private static long ReadUnsigned(ReadOnlySpan<byte> bytes)
     {
         long value = 0;
         for (var i = 0; i < bytes.Length; i++)
@@ -72,6 +73,12 @@ internal static class NtfsRunListDecoder
             value |= (long)bytes[i] << (8 * i);
         }
 
+        return value;
+    }
+
+    private static long ReadSigned(ReadOnlySpan<byte> bytes)
+    {
+        var value = ReadUnsigned(bytes);
         if (bytes.Length < 8 && (bytes[^1] & 0x80) != 0)
         {
             value |= -1L << (8 * bytes.Length);

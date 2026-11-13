@@ -114,6 +114,16 @@ public sealed class MftRawRecordParserTests
     }
 
     [Fact]
+    public void ParseRejectsAnUpdateSequenceArrayThatDoesNotCoverTheWholeRecord()
+    {
+        // Two entries cover only the first 512 bytes of a 1 KB record; the second sector would go unchecked.
+        var record = new MftRecordBuilder(30).StandardInformation(FileAttributes.Archive).Build();
+        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(6), 2);
+
+        Assert.Equal(MftRawRecordStatus.MalformedHeader, MftRawRecordParser.Parse(record, new MftRawRecord()));
+    }
+
+    [Fact]
     public void ParseReportsBytesInUseBeyondTheRecord()
     {
         var record = new MftRecordBuilder(30).StandardInformation(FileAttributes.Archive).Build();
@@ -205,6 +215,28 @@ public sealed class MftRawRecordParserTests
 
         Assert.False(parsed.HasData);
         Assert.False(parsed.AttributesIncomplete);
+    }
+
+    [Fact]
+    public void ParseRejectsResidentDataWhoseValueDoesNotFitTheAttribute()
+    {
+        // A 24-byte resident $DATA that claims a 4,096-byte value right after its header.
+        var broken = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(broken, NtfsFileRecordParser.AttributeTypeData);
+        BinaryPrimitives.WriteUInt32LittleEndian(broken.AsSpan(4), 24);
+        BinaryPrimitives.WriteUInt32LittleEndian(broken.AsSpan(16), 4096);
+        BinaryPrimitives.WriteUInt16LittleEndian(broken.AsSpan(20), 24);
+        var record = new MftRecordBuilder(30)
+            .StandardInformation(FileAttributes.Archive)
+            .FileName(ParentReference, "a.bin")
+            .RawAttribute(broken)
+            .Build();
+
+        var parsed = new MftRawRecord();
+
+        Assert.Equal(MftRawRecordStatus.InUse, MftRawRecordParser.Parse(record, parsed));
+        Assert.True(parsed.AttributesIncomplete);
+        Assert.False(parsed.HasData);
     }
 
     [Fact]

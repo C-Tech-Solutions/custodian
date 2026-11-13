@@ -31,6 +31,7 @@ internal static class MftDirectReader
     private const int RecordOutputHeaderLength = 12;
     private const int AttributeListEntryMinimumLength = 0x1a;
     private const string MftFileName = "$MFT";
+    private const int MaxRecordsInWrongSlot = 3;
 
     // Volume handles are not cached, so reads follow the unbuffered I/O rules: offsets, lengths and the
     // buffer's address are multiples of the sector size.
@@ -85,6 +86,16 @@ internal static class MftDirectReader
 
         var collector = new MftRecordCollector(statistics);
         StreamRecords(volume, geometry, plan, collector, statistics, progress, chunkBytes, cancellationToken);
+
+        // An extent map that is off moves at least a cluster of records at once (4 with 4 KB clusters and
+        // 1 KB records), while a lone corrupt record is just skipped. A few records in the wrong slot means the
+        // map cannot be trusted, even though they are far below the unusable-slot limit.
+        if (statistics.WrongRecordNumber > MaxRecordsInWrongSlot)
+        {
+            throw new MftDirectReadException(
+                $"{statistics.WrongRecordNumber:n0} records sat in the wrong slot, so the $MFT's extent map is not trustworthy",
+                statistics);
+        }
 
         var unusable = statistics.NotFileRecord + statistics.Torn + statistics.MalformedHeader + statistics.WrongRecordNumber;
         if (unusable > plan.RecordSlots / 2)

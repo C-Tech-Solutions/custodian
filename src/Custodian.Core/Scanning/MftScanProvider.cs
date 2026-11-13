@@ -125,20 +125,37 @@ public sealed class MftScanProvider : IDiskScanProvider
             diagnostics.Add($"{EnumerationSourceDiagnostic}; the direct $MFT read is turned off");
         }
 
-        MftTreeBuildResult build;
+        MftTreeBuildResult? build = null;
         if (direct is not null)
         {
-            diagnostics.Add(DirectSourceDiagnostic);
-            diagnostics.AddRange(direct.Statistics.GetDiagnostics());
             var sizes = new MftRecordSizeSource(options);
-            build = MftTreeBuilder.Build(direct.Records, rootPath, options, progress, skipped, cancellationToken, sizes.Resolve);
-            diagnostics.Add(sizes.GetDiagnostic());
-            phases.Add(new ScanPhaseTiming("MFT read", direct.Statistics.ReadDuration));
-            phases.Add(new ScanPhaseTiming("MFT parse", direct.Statistics.ParseDuration));
-            phases.Add(new ScanPhaseTiming("MFT tree construction", build.TreeConstructionDuration));
-            phases.Add(new ScanPhaseTiming("File entries", build.SizeResolutionDuration));
+            try
+            {
+                build = MftTreeBuilder.Build(direct.Records, rootPath, options, progress, skipped, cancellationToken, sizes.Resolve);
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                // A torn or mid-update record can drop the requested folder from the direct read; the enumeration may
+                // still list it. A folder that really is missing fails the enumeration with the same error.
+                skipped.Clear();
+                diagnostics.Add($"{EnumerationSourceDiagnostic}; the direct $MFT read failed: {ex.Message}");
+                diagnostics.AddRange(direct.Statistics.GetDiagnostics());
+                phases.Add(new ScanPhaseTiming("Direct MFT read (abandoned)", direct.Statistics.ReadDuration + direct.Statistics.ParseDuration));
+            }
+
+            if (build is not null)
+            {
+                diagnostics.Add(DirectSourceDiagnostic);
+                diagnostics.AddRange(direct.Statistics.GetDiagnostics());
+                diagnostics.Add(sizes.GetDiagnostic());
+                phases.Add(new ScanPhaseTiming("MFT read", direct.Statistics.ReadDuration));
+                phases.Add(new ScanPhaseTiming("MFT parse", direct.Statistics.ParseDuration));
+                phases.Add(new ScanPhaseTiming("MFT tree construction", build.TreeConstructionDuration));
+                phases.Add(new ScanPhaseTiming("File entries", build.SizeResolutionDuration));
+            }
         }
-        else
+
+        if (build is null)
         {
             var enumerationWatch = Stopwatch.StartNew();
             var records = volume.EnumerateUsnRecords(progress, cancellationToken);

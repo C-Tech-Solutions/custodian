@@ -28,6 +28,20 @@ public sealed class MftReadPlanTests
     }
 
     [Fact]
+    public void DecodeReadsRunLengthsAsUnsigned()
+    {
+        // 128 clusters in one length byte (0x80) at LCN 5000, then 200 clusters (0xC8) 100 clusters back.
+        var attribute = new MftRecordBuilder(0)
+            .NonResidentData(0, 0, runs: [0x21, 0x80, 0x88, 0x13, 0x11, 0xc8, 0x9c, 0x00])
+            .Build(fixupsApplied: true)
+            .AsSpan(0x38);
+        var extents = new List<MftExtent>();
+
+        Assert.True(NtfsRunListDecoder.TryDecode(attribute, extents));
+        Assert.Equal([new MftExtent(0, 128, 5000), new MftExtent(128, 200, 4900)], extents);
+    }
+
+    [Fact]
     public void DecodeRejectsRunsThatRunPastTheAttribute()
     {
         var attribute = new MftRecordBuilder(0)

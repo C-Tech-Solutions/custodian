@@ -198,13 +198,12 @@ internal static class NtfsFileRecordParser
     private static bool TryReadResidentDataSize(ReadOnlySpan<byte> attribute, out NtfsRecordSize size)
     {
         size = default;
-        if (attribute.Length < ResidentHeaderLength)
+        if (!TryGetResidentValue(attribute, out var value))
         {
             return false;
         }
 
-        var valueLength = BinaryPrimitives.ReadUInt32LittleEndian(attribute[16..20]);
-        size = new NtfsRecordSize(valueLength, valueLength);
+        size = new NtfsRecordSize(value.Length, value.Length);
         return true;
     }
 

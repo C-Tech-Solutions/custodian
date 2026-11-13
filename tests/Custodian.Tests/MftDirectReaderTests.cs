@@ -174,7 +174,7 @@ public sealed class MftDirectReaderTests
 
         var error = Assert.Throws<MftDirectReadException>(() => Read(volume));
 
-        Assert.Contains("implausible: 1,000 bytes per file record", error.Message);
+        Assert.Contains($"implausible: {1000:n0} bytes per file record", error.Message);
         Assert.Equal(0, volume.ReadCalls);
     }
 
@@ -225,6 +225,21 @@ public sealed class MftDirectReaderTests
 
         Assert.Equal(1, result.Statistics.WrongRecordNumber);
         Assert.DoesNotContain(result.Records, record => record.FileName == "small.txt");
+    }
+
+    [Fact]
+    public void ReadRejectsAnExtentMapThatPutsSeveralRecordsInTheWrongSlot()
+    {
+        var mft = SyntheticMft.CreateStandard(Layout);
+        foreach (var segment in new[] { 24, 25, 26, 27 })
+        {
+            mft.Records[segment].StoredNumber((uint)segment + 100);
+        }
+
+        var error = Assert.Throws<MftDirectReadException>(() => Read(mft.CreateVolume(4096, Layout, 64)));
+
+        Assert.Contains("records sat in the wrong slot", error.Message);
+        Assert.Equal(4, error.Statistics!.WrongRecordNumber);
     }
 
     [Fact]

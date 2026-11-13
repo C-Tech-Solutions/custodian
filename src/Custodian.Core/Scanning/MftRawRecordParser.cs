@@ -160,10 +160,10 @@ internal static class MftRawRecordParser
     {
         var offset = BinaryPrimitives.ReadUInt16LittleEndian(record[4..6]);
         var count = BinaryPrimitives.ReadUInt16LittleEndian(record[6..8]);
-        if (count < 2 ||
+        // One entry per 512-byte stride, plus the update sequence number: a shorter array would leave sectors unchecked.
+        if (count != record.Length / UpdateSequenceStride + 1 ||
             offset < HeaderFieldsLength ||
-            offset + count * 2 > record.Length ||
-            (count - 1) * UpdateSequenceStride > record.Length)
+            offset + count * 2 > record.Length)
         {
             return MftRawRecordStatus.MalformedHeader;
         }

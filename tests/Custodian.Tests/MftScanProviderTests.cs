@@ -147,6 +147,31 @@ public sealed class MftScanProviderTests
     }
 
     [Fact]
+    public void ScanFallsBackWhenTheDirectReadMissesTheRequestedFolder()
+    {
+        var mft = SyntheticMft.CreateStandard(Layout, includeAttributeListFiles: false);
+        var listed = mft.UsnRecords();
+        mft.Tamper(25, record => record[510] ^= 0xff);
+        var volume = mft.CreateVolume(4096, Layout, 64);
+        foreach (var (reference, record) in listed)
+        {
+            volume.UsnRecords[reference] = record;
+        }
+
+        var result = Scan(new ScanOptions(@"C:\Users\Strife", ScanMode.Mft), volume);
+
+        Assert.StartsWith(
+            $"{MftScanProvider.EnumerationSourceDiagnostic}; the direct $MFT read failed: MFT records did not include the requested root",
+            result.Diagnostics[0],
+            StringComparison.Ordinal);
+        Assert.Equal(1, volume.EnumerateCalls);
+        Assert.Equal(@"C:\Users\Strife", result.Root.FullPath);
+        Assert.Equal(3, result.Root.FileCount);
+        Assert.Equal([new SkippedEntry(@"C:\Users\Strife\cloud.bin", MftTreeBuilder.ReparsePointReason)], result.SkippedEntries);
+        Assert.Equal("Direct MFT read (abandoned)", result.PhaseTimings[0].Name);
+    }
+
+    [Fact]
     public void ScanDoesNotFallBackWhenCancelled()
     {
         using var cancellation = new CancellationTokenSource();
