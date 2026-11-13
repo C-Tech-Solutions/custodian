@@ -374,6 +374,26 @@ public sealed class ScanStoreTests
     }
 
     [Fact]
+    public async Task LoadIgnoresSpoofedPragmaViews()
+    {
+        using var temp = await SavedSampleAsync();
+        // A file can define views with the pragma function names. In a SELECT they would shadow
+        // the built-ins and report every table as ordinary, with no generated columns.
+        await ExecuteAsync(temp.Path, """
+            ALTER TABLE entries RENAME TO entries_data;
+            CREATE VIEW entries AS SELECT * FROM entries_data;
+            CREATE VIEW pragma_table_list AS
+                SELECT 'main' AS schema, 'metadata' AS name, 'table' AS type
+                UNION ALL SELECT 'main', 'entries', 'table'
+                UNION ALL SELECT 'main', 'skipped_entries', 'table';
+            CREATE VIEW pragma_table_xinfo AS SELECT 'id' AS name, 0 AS hidden WHERE 0;
+            """);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("view", error.Message);
+    }
+
+    [Fact]
     public async Task LoadRejectsMissingScanTable()
     {
         using var temp = await SavedSampleAsync();

@@ -444,16 +444,21 @@ public sealed class ScanStore
         return metadata;
     }
 
+    // These checks use PRAGMA statements, not the pragma_* table-valued functions: a scan file can
+    // define its own view named pragma_table_list (or pragma_table_xinfo), and in a SELECT that
+    // view would shadow the built-in function and report whatever the file wants.
     private static async Task EnsureOrdinaryTablesAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         var tableTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT name, type FROM pragma_table_list WHERE schema = 'main'";
+            command.CommandText = "PRAGMA main.table_list";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var nameOrdinal = reader.GetOrdinal("name");
+            var typeOrdinal = reader.GetOrdinal("type");
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                tableTypes[reader.GetString(0)] = reader.GetString(1);
+                tableTypes[reader.GetString(nameOrdinal)] = reader.GetString(typeOrdinal);
             }
         }
 
@@ -470,12 +475,17 @@ public sealed class ScanStore
             }
 
             await using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT name FROM pragma_table_xinfo('{table}') WHERE hidden <> 0";
+            command.CommandText = $"PRAGMA main.table_xinfo({table})";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            var columnNameOrdinal = reader.GetOrdinal("name");
+            var hiddenOrdinal = reader.GetOrdinal("hidden");
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                throw new InvalidDataException(
-                    $"Scan file '{table}' table has a generated column '{reader.GetString(0)}'.");
+                if (reader.GetInt64(hiddenOrdinal) != 0)
+                {
+                    throw new InvalidDataException(
+                        $"Scan file '{table}' table has a generated column '{reader.GetString(columnNameOrdinal)}'.");
+                }
             }
         }
     }
