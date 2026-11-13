@@ -56,6 +56,16 @@ public sealed class TuiLaunchOptionsTests
         Assert.Equal(["--scan", path, path], resolved);
     }
 
+    [Theory]
+    [InlineData(@"\Scans\data.custodian-scan", @"D:\Scans\data.custodian-scan")]
+    [InlineData(@"D:Scans\data.custodian-scan", @"D:\Users\Owner\Scans\data.custodian-scan")]
+    public void ResolveRelativePathsResolvesRootRelativeAndDriveRelativePaths(string path, string expected)
+    {
+        var resolved = TuiLaunchOptions.ResolveRelativePaths(["--open", path], @"D:\Users\Owner");
+
+        Assert.Equal(["--open", expected], resolved);
+    }
+
     [Fact]
     public void ResolveRelativePathsLeavesOptionValuesAndHookArgumentsAlone()
     {

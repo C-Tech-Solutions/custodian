@@ -113,9 +113,15 @@ internal sealed record TuiLaunchOptions(
         return resolved;
     }
 
-    // Rooted values, including drive-only forms such as "C:", are left exactly as typed.
+    // Fully qualified paths stay as typed, and so does a bare drive such as "C:", which
+    // ScanPathUtility.NormalizeRoot treats as that drive's root. Root-relative (\Scans)
+    // and drive-relative (C:Scans) forms still depend on the caller's directory, so they
+    // are resolved along with plain relative paths.
     private static string ResolveRelativePath(string path, string baseDirectory)
-        => string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)
+        => string.IsNullOrWhiteSpace(path) || Path.IsPathFullyQualified(path) || IsBareDrive(path)
             ? path
             : Path.GetFullPath(path, baseDirectory);
+
+    private static bool IsBareDrive(string path)
+        => path.Length == 2 && char.IsAsciiLetter(path[0]) && path[1] == ':';
 }
