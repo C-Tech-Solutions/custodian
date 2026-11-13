@@ -8,6 +8,12 @@ All notable changes to Custodian are tracked here.
 
 - MFT scans read the `$MFT` directly from the volume device and build the scan from its records, which also gives MFT scans last-write times. When the direct read cannot run, the scan falls back to the previous enumeration and says why in its diagnostics. The CLI's `--mft-read enum` forces the previous path.
 
+### Security
+
+- Saved scans opened from a file are now checked before use. Custodian rejects scan files whose tables are views or have generated columns, including views that hide behind SQLite's built-in names, and files whose folder links form cycles or point at missing folders. Very deep folder trees no longer exhaust the stack when a scan is analyzed or saved.
+- The terminal UI now refuses Recycle and Copy to PC on scans opened from a file, as the GUI already did.
+- Opening a phone item from a scan now matches only phone storage, never a local drive, folder or file, so a crafted scan file can't open a local program through This PC.
+
 ## 1.5.6 - 2026-08-25
 
 ### Security

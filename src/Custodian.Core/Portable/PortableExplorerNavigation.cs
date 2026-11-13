@@ -42,6 +42,12 @@ public interface IPortableExplorerNode
     string Name { get; }
     string IdentityText { get; }
     bool IsFolder { get; }
+
+    /// <summary>
+    /// True for items backed by the Windows file system (drives, folders, files). Phone
+    /// (MTP) storage is not, and the navigator never resolves through these items.
+    /// </summary>
+    bool IsFileSystem { get; }
     IReadOnlyList<IPortableExplorerNode> GetChildren();
     bool TryOpen();
     bool TryInvokeDefault();
@@ -230,7 +236,7 @@ public static class PortableExplorerNavigator
             return null;
         }
 
-        var children = parent.GetChildren();
+        var children = GetPortableChildren(parent);
         var exactMatch = children.FirstOrDefault(child =>
             NamesMatch(child.Name, expectedName, allowContains: false));
         if (exactMatch is not null || !allowContains)
@@ -248,7 +254,7 @@ public static class PortableExplorerNavigator
     {
         if (!string.IsNullOrWhiteSpace(result.PortableStorageObjectId))
         {
-            var identityMatch = device.GetChildren().FirstOrDefault(child =>
+            var identityMatch = GetPortableChildren(device).FirstOrDefault(child =>
                 ObjectIdentityMatches(child.IdentityText, result.PortableStorageObjectId));
             if (identityMatch is not null)
             {
@@ -264,7 +270,7 @@ public static class PortableExplorerNavigator
         string expectedSegment,
         string expectedObjectId)
     {
-        var children = parent.GetChildren();
+        var children = GetPortableChildren(parent);
         if (!string.IsNullOrWhiteSpace(expectedObjectId))
         {
             var identityMatch = children.FirstOrDefault(child =>
@@ -278,6 +284,12 @@ public static class PortableExplorerNavigator
         return children.FirstOrDefault(child =>
             NamesMatch(child.Name, expectedSegment, allowContains: false));
     }
+
+    // A scan's device, storage and path names come from the scan file, which may be imported.
+    // Matching only non-file-system items keeps a crafted name or object id from resolving to a
+    // local drive, folder or file under This PC, whose default verb would run local programs.
+    private static List<IPortableExplorerNode> GetPortableChildren(IPortableExplorerNode parent)
+        => parent.GetChildren().Where(child => !child.IsFileSystem).ToList();
 
     private static bool NamesMatch(string shellName, string expected, bool allowContains)
     {

@@ -258,6 +258,53 @@ public sealed class PortableExplorerNavigatorTests
         Assert.Equal(1, rightDcim.OpenCount);
     }
 
+    [Fact]
+    public void OpenNeverResolvesFileSystemItemsNamedByTheScan()
+    {
+        // An imported scan can name a local drive as its "device" and a local program as the
+        // selected file. The navigator must not walk into file-system items to reach it.
+        var thisPc = new FakeExplorerNode("This PC");
+        var drive = new FakeExplorerNode("Local Disk (C:)") { IsFileSystem = true };
+        var windows = new FakeExplorerNode("Windows") { IsFileSystem = true };
+        var program = new FakeExplorerNode("notepad.exe", isFolder: false) { IsFileSystem = true };
+        thisPc.Children.Add(drive);
+        drive.Children.Add(windows);
+        windows.Children.Add(program);
+        var result = new ScanResult
+        {
+            DisplayRootPath = "Local Disk (C:)/Windows",
+            PortableDeviceName = "Local Disk (C:)",
+            PortableStorageName = "Windows"
+        };
+        var entry = File("Local Disk (C:)/Windows/notepad.exe", string.Empty);
+
+        var openResult = PortableExplorerNavigator.Open(result, entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.OpenedThisPc, openResult.Kind);
+        Assert.Equal(0, program.InvokeDefaultCount);
+        Assert.Equal(0, drive.OpenCount);
+        Assert.Equal(0, windows.OpenCount);
+    }
+
+    [Fact]
+    public void OpenSkipsFileSystemItemThatMatchesTheObjectIdentity()
+    {
+        var (thisPc, _, _) = BuildTree(out _, out var camera, out var photo);
+        var localCopy = new FakeExplorerNode("photo.jpg", isFolder: false)
+        {
+            IdentityText = @"C:\Users\Public\photo-object",
+            IsFileSystem = true
+        };
+        camera.Children.Insert(0, localCopy);
+        var entry = File("Pixel/Internal storage/DCIM/Camera/photo.jpg", "photo-object");
+
+        var openResult = PortableExplorerNavigator.Open(ScanResult(), entry, thisPc, PortableExplorerOpenMode.Open);
+
+        Assert.Equal(PortableExplorerOpenResultKind.OpenedExactItem, openResult.Kind);
+        Assert.Equal(0, localCopy.InvokeDefaultCount);
+        Assert.Equal(1, photo.InvokeDefaultCount);
+    }
+
     private static ScanResult ScanResult() => new()
     {
         DisplayRootPath = "Pixel/Internal storage",
@@ -315,6 +362,7 @@ public sealed class PortableExplorerNavigatorTests
         public string Name { get; set; } = name;
         public string IdentityText { get; set; } = name;
         public bool IsFolder { get; set; } = isFolder;
+        public bool IsFileSystem { get; set; }
         public List<IPortableExplorerNode> Children { get; } = [];
         public int OpenCount { get; private set; }
         public int InvokeDefaultCount { get; private set; }

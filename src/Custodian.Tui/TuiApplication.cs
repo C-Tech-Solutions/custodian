@@ -814,6 +814,12 @@ internal static class TuiApplication
                 return;
             }
 
+            if (_currentScanLoadedFromScanFile)
+            {
+                SetStatus(FileLaunchSafety.ImportedScanFileOperationsMessage);
+                return;
+            }
+
             var line = SelectedDetail();
             if (line is null)
             {
@@ -885,6 +891,15 @@ internal static class TuiApplication
                 return;
             }
 
+            if (_currentScanLoadedFromScanFile)
+            {
+                SetStatus(FileLaunchSafety.ImportedScanFileOperationsMessage);
+                return;
+            }
+
+            // Read the scan together with the imported-scan check. Another scan can be selected
+            // while the operation starts, so the copy must not read _currentScan again later.
+            var scan = _currentScan;
             var line = SelectedDetail();
             if (line is null)
             {
@@ -904,7 +919,7 @@ internal static class TuiApplication
             {
                 var progress = new Progress<PortableCopyProgress>(p =>
                     ReportProgress(new ScanProgress(p.CurrentPath, p.FilesCopied, 0, p.BytesCopied, p.Message)));
-                var result = await _portableDevices.CopyToPcAsync(_currentScan, [line.Row.Entry], destination, progress, cts.Token);
+                var result = await _portableDevices.CopyToPcAsync(scan, [line.Row.Entry], destination, progress, cts.Token);
                 SetStatus($"Copied {result.FilesCopied:n0} file(s), skipped {result.FilesSkipped:n0}.");
             }
             catch (OperationCanceledException)
