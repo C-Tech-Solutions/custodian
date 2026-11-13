@@ -375,7 +375,15 @@ internal static class UpdatePackageSignatureVerifier
         var mainExe = mainExeText.Value;
         try
         {
-            return NormalizeArchivePath("lib/app/" + mainExe).NormalizedPath;
+            // Normalizing drops a trailing slash, but Velopack launches the name as written, so a
+            // name like "Custodian.App.exe/" would pass the check below and then fail to start.
+            var (normalizedPath, isDirectory) = NormalizeArchivePath("lib/app/" + mainExe);
+            if (isDirectory)
+            {
+                throw new InvalidOperationException("The mainExe names a directory.");
+            }
+
+            return normalizedPath;
         }
         catch (InvalidOperationException ex)
         {

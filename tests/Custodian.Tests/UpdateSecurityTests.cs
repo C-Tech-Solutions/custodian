@@ -704,6 +704,8 @@ public sealed class UpdateSecurityTests
     [InlineData("<package><metadata><mainExe>   </mainExe></metadata></package>", "plain text")]
     [InlineData("<package><metadata><mainExe>../Custodian.App.exe</mainExe></metadata></package>", "unsafe mainExe")]
     [InlineData("<package><metadata><mainExe>C:/Windows/notepad.exe</mainExe></metadata></package>", "unsafe mainExe")]
+    [InlineData("<package><metadata><mainExe>Custodian.App.exe/</mainExe></metadata></package>", "unsafe mainExe")]
+    [InlineData("<package><metadata><mainExe>Custodian.App.exe\\</mainExe></metadata></package>", "unsafe mainExe")]
     [InlineData("<package><metadata><mainExe>Accessibility.dll</mainExe></metadata></package>", "not a Custodian-signed file")]
     [InlineData("<package><metadata><mainExe>readme.txt</mainExe></metadata></package>", "not a Custodian-signed file")]
     [InlineData("<package><metadata><mainExe>missing.exe</mainExe></metadata></package>", "not a Custodian-signed file")]
