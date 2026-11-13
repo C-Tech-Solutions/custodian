@@ -49,6 +49,7 @@ internal sealed class NtfsRecordSizeResolver
     public long Fallbacks { get; private set; }
     public long CallFailures { get; private set; }
     public long DifferentRecordReturned { get; private set; }
+    public long RecordReused { get; private set; }
     public long Malformed { get; private set; }
     public long DataNotInBaseRecord { get; private set; }
     public long? DisabledAfterAttempts { get; private set; }
@@ -78,8 +79,8 @@ internal sealed class NtfsRecordSizeResolver
         {
             $"NTFS record sizes parsed {Parsed:n0}; fallbacks {Fallbacks:n0}",
             $"NTFS record size fallbacks by reason: call failed {CallFailures:n0}{callFailures}; " +
-            $"different record returned {DifferentRecordReturned:n0}; record did not parse {Malformed:n0}; " +
-            $"no unnamed $DATA in base record {DataNotInBaseRecord:n0}"
+            $"different record returned {DifferentRecordReturned:n0}; record reused by another file {RecordReused:n0}; " +
+            $"record did not parse {Malformed:n0}; no unnamed $DATA in base record {DataNotInBaseRecord:n0}"
         };
 
         if (DisabledAfterAttempts is { } attempts)
@@ -149,7 +150,7 @@ internal sealed class NtfsRecordSizeResolver
         if (record.Length >= RecordSequenceNumberOffset + sizeof(ushort) &&
             BinaryPrimitives.ReadUInt16LittleEndian(record[RecordSequenceNumberOffset..]) != (ushort)(fileReferenceNumber >> 48))
         {
-            DifferentRecordReturned++;
+            RecordReused++;
             return false;
         }
 

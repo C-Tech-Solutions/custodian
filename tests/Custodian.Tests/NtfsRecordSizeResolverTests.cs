@@ -64,7 +64,8 @@ public sealed class NtfsRecordSizeResolverTests : IDisposable
 
         Assert.Equal((7L, 7L), size);
         Assert.Equal(0, resolver.Parsed);
-        Assert.Equal(1, resolver.DifferentRecordReturned);
+        Assert.Equal(1, resolver.RecordReused);
+        Assert.Equal(0, resolver.DifferentRecordReturned);
     }
 
     [Fact]
@@ -97,28 +98,36 @@ public sealed class NtfsRecordSizeResolverTests : IDisposable
                         "BAAD"u8.CopyTo(corrupt);
                         bytesReturned = WriteOutput(output, segment, corrupt);
                         return true;
+                    case 6:
+                        bytesReturned = WriteOutput(
+                            output,
+                            segment,
+                            WithSequenceNumber(FileRecordWithNonResidentData(logicalSize: 10, allocatedSize: 4_096), 1));
+                        return true;
                     default:
                         bytesReturned = WriteOutput(output, segment, FileRecordWithoutData());
                         return true;
                 }
             });
 
-        var sizes = Enumerable.Range(0, 7).Select(i => resolver.Resolve(_fallbackFile, Record((ulong)(100 + i)))).ToList();
+        var sizes = Enumerable.Range(0, 8).Select(i => resolver.Resolve(_fallbackFile, Record((ulong)(100 + i)))).ToList();
 
         Assert.Equal((10L, 10L), sizes[0]);
         Assert.All(sizes.Skip(1), size => Assert.Equal((7L, 7L), size));
         Assert.Equal(1, resolver.Parsed);
-        Assert.Equal(6, resolver.Fallbacks);
+        Assert.Equal(7, resolver.Fallbacks);
         Assert.Equal(3, resolver.CallFailures);
         Assert.Equal(1, resolver.DifferentRecordReturned);
+        Assert.Equal(1, resolver.RecordReused);
         Assert.Equal(1, resolver.Malformed);
         Assert.Equal(1, resolver.DataNotInBaseRecord);
         Assert.Null(resolver.DisabledAfterAttempts);
         Assert.Equal(
             [
-                "NTFS record sizes parsed 1; fallbacks 6",
+                "NTFS record sizes parsed 1; fallbacks 7",
                 "NTFS record size fallbacks by reason: call failed 3 (Win32 error 5: 2, Win32 error 1: 1); " +
-                "different record returned 1; record did not parse 1; no unnamed $DATA in base record 1"
+                "different record returned 1; record reused by another file 1; record did not parse 1; " +
+                "no unnamed $DATA in base record 1"
             ],
             resolver.GetDiagnostics());
     }
