@@ -489,6 +489,53 @@ public sealed class RecursiveScannerTests : IDisposable
         Assert.True(listingsAtCompletion < FakeTree.ExpectedFolders, $"Listed {listingsAtCompletion} directories after cancellation.");
     }
 
+    [Fact]
+    public async Task CancellationStopsListingInsideALargeDirectory()
+    {
+        using var cts = new CancellationTokenSource();
+        var fileSystem = new FlatDirectory
+        {
+            RootPath = _root,
+            FileCount = 10_000,
+            OnEntry = index =>
+            {
+                if (index == 10)
+                {
+                    cts.Cancel();
+                }
+            }
+        };
+        var provider = new RecursiveScanProvider(fileSystem);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.ScanAsync(new ScanOptions(_root, ScanMode.Recursive, MaxDegreeOfParallelism: 1), null, cts.Token));
+        Assert.Equal(11, fileSystem.EntriesReturned);
+    }
+
+    [Fact]
+    public async Task LargeDirectoryReportsProgressWhileItIsListed()
+    {
+        const int fileCount = 2_000;
+        var fileSystem = new FlatDirectory { RootPath = _root, FileCount = fileCount };
+        var reports = new List<ScanProgress>();
+        var progress = new InlineProgress<ScanProgress>(report =>
+        {
+            lock (reports)
+            {
+                reports.Add(report);
+            }
+        });
+
+        var result = await new RecursiveScanProvider(fileSystem).ScanAsync(
+            new ScanOptions(_root, ScanMode.Recursive, MaxDegreeOfParallelism: 1),
+            progress,
+            CancellationToken.None);
+
+        Assert.Equal(fileCount, result.Root.FileCount);
+        Assert.Contains(reports, report => report.FilesSeen is > 0 and < fileCount);
+        Assert.All(reports, report => Assert.InRange(report.FilesSeen, 0, fileCount));
+    }
+
     [Theory]
     [InlineData(null, false, 0)]
     [InlineData(3, false, 3)]
@@ -656,6 +703,41 @@ public sealed class RecursiveScannerTests : IDisposable
     {
         public void Report(T value)
             => handler(value);
+    }
+
+    /// <summary>A root directory holding <see cref="FileCount"/> files and nothing else.</summary>
+    private sealed class FlatDirectory : IRecursiveScanFileSystem
+    {
+        private int _entriesReturned;
+
+        public required string RootPath { get; init; }
+
+        public required int FileCount { get; init; }
+
+        /// <summary>Called with the zero-based index of each entry as it is returned.</summary>
+        public Action<int>? OnEntry { get; init; }
+
+        public int EntriesReturned => Volatile.Read(ref _entriesReturned);
+
+        public bool DirectoryExists(string path)
+            => Directory.Exists(path);
+
+        public IEnumerable<ScanItem> EnumerateEntries(string directoryPath)
+        {
+            var time = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            for (var i = 0; i < FileCount; i++)
+            {
+                Interlocked.Increment(ref _entriesReturned);
+                OnEntry?.Invoke(i);
+                yield return new ScanItem($"f{i}.bin", FileAttributes.Archive, 100, time);
+            }
+        }
+
+        public bool IsCloudFilesReparsePoint(string directoryPath)
+            => false;
+
+        public long GetAllocatedSize(string path, long fallbackLength)
+            => fallbackLength;
     }
 
     /// <summary>Real directories, with attribute overrides and injected listing failures.</summary>

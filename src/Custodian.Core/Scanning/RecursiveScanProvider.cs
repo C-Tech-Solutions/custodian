@@ -23,8 +23,11 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
     private const FileAttributes FileAttributeRecallOnOpen = (FileAttributes)0x00040000;
     private const FileAttributes FileAttributeRecallOnDataAccess = (FileAttributes)0x00400000;
 
-    // How often to check for cancellation inside one large directory and inside the totals pass.
-    private const int ListingCancellationInterval = 4096;
+    // Entries of one directory between progress updates, so a huge directory or a slow share
+    // keeps reporting while it is listed. Reports are still throttled to one per 250 ms.
+    private const int ListingProgressInterval = 256;
+
+    // How often the totals pass checks for cancellation.
     private const int AggregationCancellationInterval = 65536;
 
     private readonly IRecursiveScanFileSystem _fileSystem;
@@ -173,6 +176,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         FileSystemEntry directory,
         ScanOptions options,
         WorkerState worker,
+        DirectoryWalk walk,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -183,15 +187,21 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
         files.Clear();
         var directoryPath = directory.FullPath;
         long fileBytes = 0;
+        var reportedFiles = 0;
+        long reportedBytes = 0;
 
         try
         {
             var seen = 0;
             foreach (var item in _fileSystem.EnumerateEntries(directoryPath))
             {
-                if (++seen % ListingCancellationInterval == 0)
+                // Checked per entry: an allocated-size probe on a slow share can take a while.
+                cancellationToken.ThrowIfCancellationRequested();
+                if (++seen % ListingProgressInterval == 0)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    walk.ReportListingProgress(directoryPath, files.Count - reportedFiles, fileBytes - reportedBytes);
+                    reportedFiles = files.Count;
+                    reportedBytes = fileBytes;
                 }
 
                 var fullPath = Path.Join(directoryPath, item.Name);
@@ -235,8 +245,9 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
 
         children.AddRange(folders);
         children.AddRange(files);
-        worker.FileCount = files.Count;
-        worker.FileBytes = fileBytes;
+        // Only what the progress updates during the listing have not already added.
+        worker.FileCount = files.Count - reportedFiles;
+        worker.FileBytes = fileBytes - reportedBytes;
         files.Clear();
     }
 
@@ -476,7 +487,7 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
             {
                 foreach (var directory in queue.GetConsumingEnumerable(stop.Token))
                 {
-                    provider.ListDirectory(directory, options, worker, stop.Token);
+                    provider.ListDirectory(directory, options, worker, this, stop.Token);
                     ReportDirectoryListed(directory, worker);
 
                     var subdirectories = worker.Subdirectories;
@@ -507,6 +518,14 @@ public sealed class RecursiveScanProvider : IDiskScanProvider
                 Interlocked.CompareExchange(ref _failure, ex, null);
                 stop.Cancel();
             }
+        }
+
+        /// <summary>Adds files found so far in a directory that is still being listed.</summary>
+        public void ReportListingProgress(string directoryPath, int fileCount, long fileBytes)
+        {
+            var files = Interlocked.Add(ref _files, fileCount);
+            var bytes = Interlocked.Add(ref _bytes, fileBytes);
+            progress.Report(directoryPath, files, Interlocked.Read(ref _directories), bytes, "Scanning files");
         }
 
         private void ReportDirectoryListed(FileSystemEntry directory, WorkerState worker)
