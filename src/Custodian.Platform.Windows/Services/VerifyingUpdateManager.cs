@@ -58,6 +58,10 @@ internal sealed class VerifyingUpdateManager : UpdateManager
             cancelToken).ConfigureAwait(false);
 
         await base.DownloadUpdatesAsync(updates, progress, ignoreDeltas: true, cancelToken).ConfigureAwait(false);
+
+        // When cancellation arrives after the package is in place, Velopack returns normally but
+        // skips extracting Update.exe. Report that as cancelled, not as a finished download.
+        cancelToken.ThrowIfCancellationRequested();
         progress(100);
     }
 }
@@ -94,6 +98,7 @@ internal static class VerifiedUpdatePackageStager
             try
             {
                 verify(packagePath);
+                cancellationToken.ThrowIfCancellationRequested();
                 logger.LogInformation("Update package {Package} is already downloaded and verified.", asset.FileName);
                 return packagePath;
             }
@@ -114,6 +119,7 @@ internal static class VerifiedUpdatePackageStager
             await download(stagingPath, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             verify(stagingPath);
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(stagingPath, packagePath, overwrite: true);
             logger.LogInformation("Downloaded and verified update package {Package}.", asset.FileName);
             return packagePath;

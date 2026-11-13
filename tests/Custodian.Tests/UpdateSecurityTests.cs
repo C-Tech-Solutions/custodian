@@ -693,6 +693,15 @@ public sealed class UpdateSecurityTests
     [Theory]
     [InlineData("<package><metadata><id>Custodian</id></metadata></package>", "exactly one mainExe")]
     [InlineData("<package><metadata><mainExe>Custodian.App.exe</mainExe><mainExe>other.exe</mainExe></metadata></package>", "exactly one mainExe")]
+    // Velopack's native updater would launch the last mainExe it sees, at any depth.
+    [InlineData("<package><metadata><mainExe>Custodian.App.exe</mainExe></metadata><mainExe>C:\\Windows\\notepad.exe</mainExe></package>", "exactly one mainExe")]
+    [InlineData("<package><metadata><mainExe>Custodian.App.exe</mainExe></metadata><files><mainExe>other.exe</mainExe></files></package>", "exactly one mainExe")]
+    [InlineData("<package><metadata><group><mainExe>Custodian.App.exe</mainExe></group></metadata></package>", "exactly one mainExe")]
+    [InlineData("<package><metadata><mainExe>Custodian.<!-- x -->App.exe</mainExe></metadata></package>", "plain text")]
+    [InlineData("<package><metadata><mainExe><![CDATA[Custodian.App.exe]]></mainExe></metadata></package>", "plain text")]
+    [InlineData("<package><metadata><mainExe>Custodian.App.exe<b>x</b></mainExe></metadata></package>", "plain text")]
+    [InlineData("<package><metadata><mainExe> Custodian.App.exe </mainExe></metadata></package>", "plain text")]
+    [InlineData("<package><metadata><mainExe>   </mainExe></metadata></package>", "plain text")]
     [InlineData("<package><metadata><mainExe>../Custodian.App.exe</mainExe></metadata></package>", "unsafe mainExe")]
     [InlineData("<package><metadata><mainExe>C:/Windows/notepad.exe</mainExe></metadata></package>", "unsafe mainExe")]
     [InlineData("<package><metadata><mainExe>Accessibility.dll</mainExe></metadata></package>", "not a Custodian-signed file")]
@@ -931,6 +940,45 @@ public sealed class UpdateSecurityTests
     }
 
     [Fact]
+    public async Task StagerDoesNotPlaceAPackageWhenCancelledDuringVerification()
+    {
+        using var directory = new TempDirectory();
+        using var cancellation = new CancellationTokenSource();
+        var asset = new VelopackAsset { FileName = "Custodian-2.0.0-full.nupkg" };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => VerifiedUpdatePackageStager.StageAsync(
+            asset,
+            directory.Path,
+            (path, _) => File.WriteAllTextAsync(path, "package"),
+            _ => cancellation.Cancel(),
+            NullLogger.Instance,
+            cancellation.Token));
+
+        Assert.Empty(Directory.GetFiles(directory.Path));
+    }
+
+    [Fact]
+    public async Task StagerReportsCancellationWhenCancelledWhileCheckingAnExistingPackage()
+    {
+        using var directory = new TempDirectory();
+        using var cancellation = new CancellationTokenSource();
+        var asset = new VelopackAsset { FileName = "Custodian-2.0.0-full.nupkg" };
+        var finalPath = Path.Combine(directory.Path, asset.FileName);
+        File.WriteAllText(finalPath, "package");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => VerifiedUpdatePackageStager.StageAsync(
+            asset,
+            directory.Path,
+            (_, _) => Task.CompletedTask,
+            _ => cancellation.Cancel(),
+            NullLogger.Instance,
+            cancellation.Token));
+
+        // The verified package stays for the next attempt; it is not treated as failing verification.
+        Assert.Equal("package", File.ReadAllText(finalPath));
+    }
+
+    [Fact]
     public async Task StagerRejectsUnsafeFileNameBeforeDownloading()
     {
         using var directory = new TempDirectory();
@@ -985,6 +1033,24 @@ public sealed class UpdateSecurityTests
             manager.DownloadUpdatesAsync(new UpdateInfo(fixture.Asset, isDowngrade: false)));
 
         Assert.Contains("Squirrel.exe", ex.Message);
+        Assert.Equal(UpdateManagerFixture.OldUpdateExe, File.ReadAllBytes(fixture.UpdateExePath));
+        Assert.Empty(Directory.GetFiles(fixture.PackagesDirectory, "*.nupkg"));
+        Assert.Empty(Directory.GetFiles(fixture.PackagesDirectory, "*.partial"));
+    }
+
+    [Fact]
+    public async Task VerifyingUpdateManagerReportsCancellationDuringVerification()
+    {
+        using var fixture = new UpdateManagerFixture();
+        using var cancellation = new CancellationTokenSource();
+        var source = new CopyingUpdateSource(fixture.SourcePackagePath);
+        var manager = fixture.CreateManager(
+            source,
+            new CancellingAuthenticodeSignatureVerifier(cancellation, CustodianSignature()));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            manager.DownloadUpdatesAsync(new UpdateInfo(fixture.Asset, isDowngrade: false), cancelToken: cancellation.Token));
+
         Assert.Equal(UpdateManagerFixture.OldUpdateExe, File.ReadAllBytes(fixture.UpdateExePath));
         Assert.Empty(Directory.GetFiles(fixture.PackagesDirectory, "*.nupkg"));
         Assert.Empty(Directory.GetFiles(fixture.PackagesDirectory, "*.partial"));
@@ -1186,6 +1252,17 @@ public sealed class UpdateSecurityTests
     private sealed class FixedAuthenticodeSignatureVerifier(AuthenticodeSignatureResult result) : IAuthenticodeSignatureVerifier
     {
         public AuthenticodeSignatureResult Verify(string filePath) => result;
+    }
+
+    private sealed class CancellingAuthenticodeSignatureVerifier(
+        CancellationTokenSource cancellation,
+        AuthenticodeSignatureResult result) : IAuthenticodeSignatureVerifier
+    {
+        public AuthenticodeSignatureResult Verify(string filePath)
+        {
+            cancellation.Cancel();
+            return result;
+        }
     }
 
     private sealed class FixedCertificateChainVerifier(CertificateChainVerificationResult result) : ICertificateChainVerifier

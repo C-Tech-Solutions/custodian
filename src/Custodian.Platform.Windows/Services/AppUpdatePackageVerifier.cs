@@ -348,19 +348,31 @@ internal static class UpdatePackageSignatureVerifier
             throw new InvalidOperationException("The update package manifest is not valid XML.", ex);
         }
 
-        var mainExeElements = manifest.Root?
-            .Elements()
-            .Where(element => element.Name.LocalName == "metadata")
-            .SelectMany(metadata => metadata.Elements())
+        // Velopack's native updater takes the text of the last element named mainExe at any depth,
+        // as written. So the whole document may hold only one, directly in the metadata, and its
+        // content must be a single text node that both readers see as the same string.
+        var mainExeElements = manifest
+            .Descendants()
             .Where(element => element.Name.LocalName == "mainExe")
             .Take(2)
-            .ToList() ?? [];
-        if (mainExeElements.Count != 1 || string.IsNullOrWhiteSpace(mainExeElements[0].Value))
+            .ToList();
+        if (mainExeElements.Count != 1 ||
+            mainExeElements[0].Parent is not { Name.LocalName: "metadata" } metadata ||
+            metadata.Parent != manifest.Root)
         {
-            throw new InvalidOperationException("The update package manifest must name exactly one mainExe.");
+            throw new InvalidOperationException("The update package manifest must name exactly one mainExe, in its metadata.");
         }
 
-        var mainExe = mainExeElements[0].Value.Trim();
+        var mainExeNodes = mainExeElements[0].Nodes().Take(2).ToList();
+        if (mainExeNodes.Count != 1 ||
+            mainExeNodes[0] is not XText { NodeType: XmlNodeType.Text } mainExeText ||
+            string.IsNullOrWhiteSpace(mainExeText.Value) ||
+            !string.Equals(mainExeText.Value, mainExeText.Value.Trim(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The update package manifest's mainExe must be plain text with no surrounding whitespace.");
+        }
+
+        var mainExe = mainExeText.Value;
         try
         {
             return NormalizeArchivePath("lib/app/" + mainExe).NormalizedPath;
