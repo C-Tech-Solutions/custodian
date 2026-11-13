@@ -1626,6 +1626,15 @@ foreach ($contract in $checkoutContracts) {
         throw "Workflow job '$($contract.Job)' must set checkout persist-credentials to '$($contract.Expected)'."
     }
 }
+if (!($ciWorkflowLines -ccontains "    types: [opened, synchronize, reopened, ready_for_review]")) {
+    throw "CI must run when a draft pull request is marked ready for review."
+}
+foreach ($ciJobName in @("build-test", "vulnerability-scan")) {
+    $ciJobLines = @(Get-WorkflowJobLines -WorkflowLines $ciWorkflowLines -JobName $ciJobName)
+    if (!($ciJobLines -ccontains "    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false")) {
+        throw "CI job '$ciJobName' must skip draft pull requests."
+    }
+}
 $validateJobLines = @(Get-WorkflowJobLines -WorkflowLines $releaseWorkflowLines -JobName "validate")
 $permissionEntries = @(Get-WorkflowPermissionEntries -JobLines $validateJobLines)
 if ($permissionEntries.Count -ne 1 -or $permissionEntries[0] -cne "contents: read") {
