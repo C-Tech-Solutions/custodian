@@ -102,14 +102,53 @@ public sealed class ScanUiPreparationTests
     }
 
     [Fact]
-    public void FolderJumpRowSizeFollowsTheEntry()
+    public void RebuiltFolderJumpRowDiffersWhenTheFolderSizeChanged()
     {
         var entry = Folder(@"C:\Data", size: 1024);
-        var row = FolderJumpRow.From(entry);
+        var before = FolderJumpRow.From(entry);
+
+        Assert.Equal(before, FolderJumpRow.From(entry));
 
         entry.LogicalSizeBytes = 4096;
+        var after = FolderJumpRow.From(entry);
 
-        Assert.Equal(SizeFormatter.Format(4096), row.Size);
+        // The jump box keeps rows that compare equal, and their size text does not refresh.
+        Assert.NotEqual(before, after);
+        Assert.Equal(SizeFormatter.Format(4096), after.Size);
+        Assert.Equal(SizeFormatter.Format(1024), before.Size);
+    }
+
+    [Fact]
+    public async Task JumpSearchKeepsOnlyTheNewestSearchWhileTheIndexBuilds()
+    {
+        var root = BuildTree(seed: 11, folders: 200);
+        var build = new TaskCompletionSource<IReadOnlyList<FolderJumpRow>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var search = new FolderJumpSearch { Index = BackgroundFolderJumpIndex.FromTask(build.Task) };
+
+        var older = search.SearchAsync("f1");
+        var newer = search.SearchAsync("f2");
+        build.SetResult(ScanViewProjector.FolderJumpIndex(root));
+
+        Assert.Null(await older);
+        var rows = await newer;
+        Assert.NotNull(rows);
+        Assert.NotEmpty(rows);
+        Assert.All(rows, row => Assert.Contains("f2", row.FullPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task JumpSearchDropsResultsFromAReplacedIndex()
+    {
+        var root = BuildTree(seed: 13, folders: 200);
+        var build = new TaskCompletionSource<IReadOnlyList<FolderJumpRow>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var search = new FolderJumpSearch { Index = BackgroundFolderJumpIndex.FromTask(build.Task) };
+
+        var pending = search.SearchAsync("f1");
+        search.Index = BackgroundFolderJumpIndex.Empty;
+        build.SetResult(ScanViewProjector.FolderJumpIndex(root));
+
+        Assert.Null(await pending);
+        Assert.Empty(await search.SearchAsync("f1") ?? throw new InvalidOperationException("Search was superseded."));
     }
 
     [Fact]

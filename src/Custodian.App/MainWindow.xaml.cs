@@ -100,8 +100,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _folderJumpDebounceTimer;
     private readonly DispatcherTimer _targetRefreshDebounceTimer;
-    private BackgroundFolderJumpIndex _folderJumpIndex = BackgroundFolderJumpIndex.Empty;
-    private int _folderJumpSearchVersion;
+    private readonly FolderJumpSearch _folderJumpSearch = new();
     private IReadOnlyList<CloudProviderTarget> _cloudTargets = [];
     private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
@@ -3099,7 +3098,7 @@ public partial class MainWindow : Window
         }
 
         ReplaceCollection(FolderNodes, [preparation.RootNode]);
-        _folderJumpIndex = preparation.FolderJumpIndex;
+        _folderJumpSearch.Index = preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
         RefreshFolderJumpRows(JumpBox.Text ?? string.Empty);
@@ -3657,7 +3656,7 @@ public partial class MainWindow : Window
 
         FolderNodes.Clear();
         FolderNodes.Add(cached.Preparation.RootNode);
-        _folderJumpIndex = cached.Preparation.FolderJumpIndex;
+        _folderJumpSearch.Index = cached.Preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
 
@@ -4200,20 +4199,17 @@ public partial class MainWindow : Window
         RunUiAction(() => RefreshFolderJumpRowsAsync(query), "Failed to search folders");
     }
 
-    /// <returns>False when a newer search or a new index superseded this search while the index was building.</returns>
+    /// <returns>False when a newer search or a new index superseded this search.</returns>
     private async Task<bool> RefreshFolderJumpRowsAsync(string query)
     {
-        var index = _folderJumpIndex;
-        var version = ++_folderJumpSearchVersion;
-        if (!index.IsBuilt)
+        if (!_folderJumpSearch.Index.IsBuilt)
         {
             // Rows still listed come from an earlier index and may point at removed entries.
             ShowFolderJumpRows([]);
         }
 
-        // Searches waiting on the same build resume together and can finish in any order.
-        var rows = await index.SearchAsync(query);
-        if (version != _folderJumpSearchVersion || !ReferenceEquals(index, _folderJumpIndex)) return false;
+        var rows = await _folderJumpSearch.SearchAsync(query);
+        if (rows is null) return false;
 
         ShowFolderJumpRows(rows);
         return true;
@@ -4250,7 +4246,7 @@ public partial class MainWindow : Window
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
-        _folderJumpIndex = BackgroundFolderJumpIndex.Empty;
+        _folderJumpSearch.Index = BackgroundFolderJumpIndex.Empty;
         _backStack.Clear();
         _forwardStack.Clear();
         ClearChartSelection();
@@ -4306,7 +4302,7 @@ public partial class MainWindow : Window
         _currentScan = null;
         _selectedEntry = null;
         ClearChartSelection();
-        _folderJumpIndex = BackgroundFolderJumpIndex.Empty;
+        _folderJumpSearch.Index = BackgroundFolderJumpIndex.Empty;
         _backStack.Clear();
         _forwardStack.Clear();
 

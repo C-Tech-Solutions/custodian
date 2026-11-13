@@ -30,6 +30,12 @@ public sealed class BackgroundFolderJumpIndex
         return new BackgroundFolderJumpIndex(Task.Run(() => ScanViewProjector.FolderJumpIndex(root)));
     }
 
+    /// <summary>An index whose build is <paramref name="rows"/>; lets tests decide when it finishes.</summary>
+    internal static BackgroundFolderJumpIndex FromTask(Task<IReadOnlyList<FolderJumpRow>> rows)
+    {
+        return new BackgroundFolderJumpIndex(rows);
+    }
+
     /// <summary>
     /// Waits for the index, then returns up to <paramref name="take"/> folders whose name or
     /// path contains <paramref name="query"/>. Completes synchronously once the index is built.
