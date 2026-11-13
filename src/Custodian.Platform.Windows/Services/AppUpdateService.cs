@@ -24,11 +24,7 @@ internal sealed class AppUpdateService
     }
 
     private AppUpdateService(UpdateManagerContext context)
-        : this(
-            context.Manager,
-            new VelopackUpdatePackageVerifier(
-                context.Locator,
-                new WindowsAuthenticodeSignatureVerifier()))
+        : this(context.Manager, context.PackageVerifier)
     {
     }
 
@@ -74,10 +70,11 @@ internal sealed class AppUpdateService
         }
 
         var availableVersion = update.Status.AvailableVersion ?? update.UpdateInfo.TargetFullRelease.Version?.ToString() ?? "the latest version";
+        // VerifyingUpdateManager downloads the full package and verifies it before Velopack uses it.
         return _manager.DownloadUpdatesAsync(
             update.UpdateInfo,
             percent => progress.Report(AppUpdateStatusFactory.Downloading(availableVersion, percent)),
-            ignoreDeltas: false,
+            ignoreDeltas: true,
             cancellationToken);
     }
 
@@ -134,7 +131,7 @@ internal sealed class AppUpdateService
                 "Update source overridden via {Variable}. Updates will be fetched from local source {Source} instead of the official GitHub releases. This should only be set for local testing.",
                 UpdateSourceOverrideVariable,
                 localSourceOverride);
-            return new UpdateManagerContext(new UpdateManager(localSourceOverride, options, logger, locator), locator);
+            return CreateContext(new SimpleFileSource(new DirectoryInfo(localSourceOverride)), options, logger, locator);
         }
 
         var channel = channelOverride ?? locator?.Channel;
@@ -142,7 +139,19 @@ internal sealed class AppUpdateService
         var includePrereleases = ReadEnvironmentFlag(GitHubPrereleaseVariable) ?? IsPrereleaseChannel(channel);
         var source = new GithubSource(RepositoryUrl, accessToken, includePrereleases);
 
-        return new UpdateManagerContext(new UpdateManager(source, options, logger, locator), locator);
+        return CreateContext(source, options, logger, locator);
+    }
+
+    private static UpdateManagerContext CreateContext(
+        IUpdateSource source,
+        UpdateOptions options,
+        ILogger logger,
+        IVelopackLocator? locator)
+    {
+        var packageVerifier = new VelopackUpdatePackageVerifier(locator, new WindowsAuthenticodeSignatureVerifier());
+        return new UpdateManagerContext(
+            new VerifyingUpdateManager(source, options, logger, locator, packageVerifier),
+            packageVerifier);
     }
 
     private static string? ReadEnvironmentValue(string name)
@@ -195,7 +204,7 @@ internal sealed class AppUpdateService
     }
 }
 
-internal sealed record UpdateManagerContext(UpdateManager Manager, IVelopackLocator? Locator);
+internal sealed record UpdateManagerContext(UpdateManager Manager, IUpdatePackageVerifier PackageVerifier);
 
 internal sealed record PreparedAppUpdate(VelopackAsset Asset);
 

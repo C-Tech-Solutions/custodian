@@ -4,6 +4,8 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Xml;
+using System.Xml.Linq;
 using Velopack;
 using Velopack.Locators;
 
@@ -11,7 +13,11 @@ namespace Custodian.Platform.Windows.Services;
 
 internal interface IUpdatePackageVerifier
 {
+    /// <summary>Verifies the package for <paramref name="asset"/> where Velopack keeps it in its packages folder.</summary>
     void Verify(VelopackAsset asset);
+
+    /// <summary>Verifies a package file for <paramref name="asset"/> at <paramref name="packagePath"/>.</summary>
+    void VerifyFile(VelopackAsset asset, string packagePath);
 }
 
 internal sealed class VelopackUpdatePackageVerifier : IUpdatePackageVerifier
@@ -44,7 +50,14 @@ internal sealed class VelopackUpdatePackageVerifier : IUpdatePackageVerifier
     {
         ArgumentNullException.ThrowIfNull(asset);
 
-        var packagePath = _packagePathResolver.GetPackagePath(asset);
+        VerifyFile(asset, _packagePathResolver.GetPackagePath(asset));
+    }
+
+    public void VerifyFile(VelopackAsset asset, string packagePath)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
+
         if (!File.Exists(packagePath))
         {
             throw new FileNotFoundException("The downloaded update package was not found.", packagePath);
@@ -74,7 +87,29 @@ internal sealed class VelopackUpdatePackagePathResolver(IVelopackLocator? locato
             throw new InvalidOperationException("Custodian could not locate the Velopack packages directory.");
         }
 
+        UpdatePackageFileNamePolicy.EnsureSafe(asset.FileName);
         return Path.Combine(locator.PackagesDir, asset.FileName);
+    }
+}
+
+/// <summary>
+/// Asset file names come from the update feed, which Custodian does not trust. Velopack joins them
+/// onto the update source folder and the local packages folder, so a rooted, UNC or nested name
+/// could read or write outside those folders. Only a plain package file name is accepted. For such
+/// a name, Velopack's own sanitized package path is also the same path Custodian verifies.
+/// </summary>
+internal static class UpdatePackageFileNamePolicy
+{
+    public static void EnsureSafe(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal) ||
+            fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            fileName.Trim('.').Length == 0 ||
+            !fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"The update feed named an unsafe package file: '{fileName}'.");
+        }
     }
 }
 
@@ -170,6 +205,7 @@ internal static class UpdatePackageSignatureVerifier
     internal const int MaximumPeEntries = 2_048;
     internal const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
     internal const long MaximumArchiveUncompressedBytes = 768L * 1024 * 1024;
+    internal const long MaximumManifestBytes = 1024 * 1024;
     internal const string JetBrainsAnnotationsPath = "lib/app/tui/JetBrains.Annotations.dll";
     private static readonly string[] PackagePeExtensions = [".dll", ".exe"];
     private static readonly IReadOnlyDictionary<string, MicrosoftFileIdentityException> MicrosoftFileIdentityExceptions =
@@ -212,11 +248,26 @@ internal static class UpdatePackageSignatureVerifier
                 entry.FullName,
                 entry.Length,
                 entry.CompressedLength)));
+        var mainExePath = ReadMainExePath(archive);
         var verifiedFiles = new List<string>();
-        var verifiedCustodianFiles = 0;
-        foreach (var validatedEntry in archiveValidation.Entries.Where(entry => entry.IsPeFile))
+        var verifiedCustodianPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var peCount = 0;
+        foreach (var validatedEntry in archiveValidation.Entries.Where(entry => !entry.IsDirectory))
         {
             var entry = archive.Entries[validatedEntry.Index];
+
+            // An entry counts as a PE file if it is named like one or starts with the "MZ" header,
+            // so a renamed executable or library still has to pass the publisher policy.
+            if (!validatedEntry.IsPeFile && !HasPeHeader(entry))
+            {
+                continue;
+            }
+
+            if (++peCount > MaximumPeEntries)
+            {
+                throw new InvalidOperationException($"The update package contains more than {MaximumPeEntries:n0} executable files.");
+            }
+
             var tempPath = ExtractToTemporaryFile(entry);
             try
             {
@@ -237,7 +288,7 @@ internal static class UpdatePackageSignatureVerifier
                 verifiedFiles.Add(entry.FullName);
                 if (publisher == AuthorizedPackagePublisher.Custodian)
                 {
-                    verifiedCustodianFiles++;
+                    verifiedCustodianPaths.Add(validatedEntry.NormalizedPath);
                 }
             }
             finally
@@ -246,12 +297,127 @@ internal static class UpdatePackageSignatureVerifier
             }
         }
 
-        if (verifiedCustodianFiles == 0)
+        if (verifiedCustodianPaths.Count == 0)
         {
             throw new InvalidOperationException("The update package did not contain any Custodian-owned executable files to verify.");
         }
 
+        // Velopack starts the manifest's mainExe after an update, so it must be one of the files
+        // just verified as signed by Custodian, not a data file or another publisher's binary.
+        if (!verifiedCustodianPaths.Contains(mainExePath))
+        {
+            throw new InvalidOperationException(
+                $"The update package main executable '{mainExePath}' is not a Custodian-signed file in the package.");
+        }
+
         return new UpdatePackageSignatureVerificationResult(verifiedFiles);
+    }
+
+    /// <summary>
+    /// Reads the package manifest's mainExe and returns it as a normalized archive path under
+    /// lib/app/. Velopack reads the first entry ending in .nuspec, so exactly one is allowed. The
+    /// manifest is read with a size bound and without DTD processing.
+    /// </summary>
+    private static string ReadMainExePath(ZipArchive archive)
+    {
+        var manifests = archive.Entries
+            .Where(entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToList();
+        if (manifests.Count != 1)
+        {
+            throw new InvalidOperationException(manifests.Count == 0
+                ? "The update package does not contain a .nuspec manifest."
+                : "The update package contains more than one .nuspec manifest.");
+        }
+
+        var manifestBytes = ReadEntryBytes(manifests[0], MaximumManifestBytes);
+        XDocument manifest;
+        try
+        {
+            using var stream = new MemoryStream(manifestBytes, writable: false);
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null
+            });
+            manifest = XDocument.Load(reader);
+        }
+        catch (XmlException ex)
+        {
+            throw new InvalidOperationException("The update package manifest is not valid XML.", ex);
+        }
+
+        var mainExeElements = manifest.Root?
+            .Elements()
+            .Where(element => element.Name.LocalName == "metadata")
+            .SelectMany(metadata => metadata.Elements())
+            .Where(element => element.Name.LocalName == "mainExe")
+            .Take(2)
+            .ToList() ?? [];
+        if (mainExeElements.Count != 1 || string.IsNullOrWhiteSpace(mainExeElements[0].Value))
+        {
+            throw new InvalidOperationException("The update package manifest must name exactly one mainExe.");
+        }
+
+        var mainExe = mainExeElements[0].Value.Trim();
+        try
+        {
+            return NormalizeArchivePath("lib/app/" + mainExe).NormalizedPath;
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException($"The update package manifest names an unsafe mainExe: '{mainExe}'.", ex);
+        }
+    }
+
+    private static bool HasPeHeader(ZipArchiveEntry entry)
+    {
+        if (entry.Length < 2)
+        {
+            return false;
+        }
+
+        using var stream = entry.Open();
+        Span<byte> header = stackalloc byte[2];
+        return stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length &&
+            header[0] == (byte)'M' &&
+            header[1] == (byte)'Z';
+    }
+
+    private static byte[] ReadEntryBytes(ZipArchiveEntry entry, long maximumBytes)
+    {
+        if (entry.Length > maximumBytes)
+        {
+            throw new InvalidOperationException(
+                $"Update package entry '{entry.FullName}' exceeds the {maximumBytes / 1024:n0} KiB limit for its type.");
+        }
+
+        using var input = entry.Open();
+        using var output = new MemoryStream((int)entry.Length);
+        var buffer = new byte[81_920];
+        while (true)
+        {
+            var read = input.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (output.Length + read > entry.Length)
+            {
+                throw new InvalidOperationException($"Update package entry '{entry.FullName}' expanded beyond its declared size.");
+            }
+
+            output.Write(buffer, 0, read);
+        }
+
+        if (output.Length != entry.Length)
+        {
+            throw new InvalidOperationException($"Update package entry '{entry.FullName}' did not match its declared size.");
+        }
+
+        return output.ToArray();
     }
 
     internal static bool IsTrustedSigner(string? subject)
@@ -318,7 +484,7 @@ internal static class UpdatePackageSignatureVerifier
                 throw new InvalidOperationException($"The update package contains more than {MaximumPeEntries:n0} executable files.");
             }
 
-            entries.Add(new ValidatedPackageArchiveEntry(index, normalizedPath, isPeFile));
+            entries.Add(new ValidatedPackageArchiveEntry(index, normalizedPath, isPeFile, isDirectory));
             index++;
         }
 
@@ -511,7 +677,9 @@ internal sealed record UpdatePackageArchiveEntryMetadata(
     long UncompressedLength,
     long CompressedLength);
 
-internal sealed record ValidatedPackageArchiveEntry(int Index, string NormalizedPath, bool IsPeFile);
+/// <param name="IsPeFile">True when the entry is named like a PE file (.dll or .exe). Verification also
+/// treats any file that starts with the MZ header as a PE file.</param>
+internal sealed record ValidatedPackageArchiveEntry(int Index, string NormalizedPath, bool IsPeFile, bool IsDirectory);
 
 internal sealed record UpdatePackageArchiveValidationResult(
     IReadOnlyList<ValidatedPackageArchiveEntry> Entries,
