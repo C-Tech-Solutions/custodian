@@ -25,7 +25,7 @@ internal static class Program
 
             // The elevated copy starts in a trusted working directory, so relative
             // --open/--scan/positional paths are resolved against ours first.
-            var startupArgs = TuiLaunchOptions.ResolveRelativePaths(args, Environment.CurrentDirectory);
+            var startupArgs = TuiLaunchOptions.ResolveRelativePaths(args);
             if (ElevationService.TryRelaunchElevatedAtStartup(startupArgs, launchPath, logger))
             {
                 return;

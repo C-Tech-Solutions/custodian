@@ -29,7 +29,7 @@ public sealed class TuiLaunchOptionsTests
     {
         var resolved = TuiLaunchOptions.ResolveRelativePaths(
             ["--open", "data.custodian-scan", "--scan", @"..\Data", "--mode", "mft", "--allocated"],
-            @"C:\Users\Owner\Scans");
+            FromScansFolder);
 
         Assert.Equal(
             ["--open", @"C:\Users\Owner\Scans\data.custodian-scan", "--scan", @"C:\Users\Owner\Data", "--mode", "mft", "--allocated"],
@@ -39,7 +39,7 @@ public sealed class TuiLaunchOptionsTests
     [Fact]
     public void ResolveRelativePathsMakesPositionalPathsAbsolute()
     {
-        var resolved = TuiLaunchOptions.ResolveRelativePaths(["data.custodian-scan"], @"C:\Users\Owner\Scans");
+        var resolved = TuiLaunchOptions.ResolveRelativePaths(["data.custodian-scan"], FromScansFolder);
         var options = TuiLaunchOptions.Parse(resolved);
 
         Assert.Equal(@"C:\Users\Owner\Scans\data.custodian-scan", options.ScanFilePath);
@@ -51,19 +51,21 @@ public sealed class TuiLaunchOptionsTests
     [InlineData(@"\\server\share\folder")]
     public void ResolveRelativePathsLeavesRootedPathsAsTyped(string path)
     {
-        var resolved = TuiLaunchOptions.ResolveRelativePaths(["--scan", path, path], @"C:\Users\Owner");
+        var resolved = TuiLaunchOptions.ResolveRelativePaths(["--scan", path, path], FromScansFolder);
 
         Assert.Equal(["--scan", path, path], resolved);
     }
 
     [Theory]
-    [InlineData(@"\Scans\data.custodian-scan", @"D:\Scans\data.custodian-scan")]
-    [InlineData(@"D:Scans\data.custodian-scan", @"D:\Users\Owner\Scans\data.custodian-scan")]
-    public void ResolveRelativePathsResolvesRootRelativeAndDriveRelativePaths(string path, string expected)
+    [InlineData(@"\Scans\data.custodian-scan")]
+    [InlineData(@"C:Scans\data.custodian-scan")]
+    [InlineData(@"E:Scans\data.custodian-scan")]
+    public void ResolveRelativePathsResolvesRootRelativeAndDriveRelativePaths(string path)
     {
-        var resolved = TuiLaunchOptions.ResolveRelativePaths(["--open", path], @"D:\Users\Owner");
+        // These still depend on the caller's current directories, so Windows resolves them.
+        var resolved = TuiLaunchOptions.ResolveRelativePaths(["--open", path], p => "resolved:" + p);
 
-        Assert.Equal(["--open", expected], resolved);
+        Assert.Equal(["--open", "resolved:" + path], resolved);
     }
 
     [Fact]
@@ -71,7 +73,7 @@ public sealed class TuiLaunchOptionsTests
     {
         var resolved = TuiLaunchOptions.ResolveRelativePaths(
             ["--custodian-path", "E:", "--mode", "recursive", "--veloapp-version"],
-            @"C:\Users\Owner");
+            FromScansFolder);
 
         Assert.Equal(["--custodian-path", "E:", "--mode", "recursive", "--veloapp-version"], resolved);
     }
@@ -83,4 +85,6 @@ public sealed class TuiLaunchOptionsTests
 
         Assert.Equal("E:\\Root", options.TargetPath);
     }
+
+    private static string FromScansFolder(string path) => Path.GetFullPath(path, @"C:\Users\Owner\Scans");
 }

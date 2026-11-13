@@ -7,7 +7,7 @@ All notable changes to Custodian are tracked here.
 ### Fixed
 
 - Fixed installing and launching with View > Always open as administrator turned on. The setting used to put a Windows "run as administrator" compatibility flag on `Custodian.App.exe`. That flag made the installer's setup step and its launch of Custodian fail with error 740, and the previous version stayed installed. Custodian now asks for elevation itself as it starts, after any installer or update step has been handled, and those steps never ask for elevation.
-- On first launch, an existing Always open as administrator setting is moved off the compatibility flag automatically, so the setting stays on and later installs and updates work. If you still use an older version with the setting on, update from inside Custodian (Help > Check for Updates), or turn the setting off before you run a new `Setup.exe`.
+- On first launch, an existing Always open as administrator setting is moved off the compatibility flag automatically, so the setting stays on and later installs and updates work. If you still use an older version with the setting on, update from inside Custodian (Help > Check for Updates), or turn the setting off before you run a new `Setup.exe`. If you elevate by entering a different administrator account's credentials, Custodian runs as that account and can't move your setting, so the old flag stays. To clear it, open Properties for `%LOCALAPPDATA%\Custodian.DiskAnalyzer\current\Custodian.App.exe`, clear "Run this program as an administrator" on the Compatibility tab, then turn the setting back on in Custodian.
 
 ## 1.5.6 - 2026-08-25
 

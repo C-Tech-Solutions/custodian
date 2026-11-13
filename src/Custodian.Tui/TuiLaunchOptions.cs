@@ -69,12 +69,15 @@ internal sealed record TuiLaunchOptions(
     }
 
     /// <summary>
-    /// Returns <paramref name="args"/> with relative scan and scan-file paths resolved
-    /// against <paramref name="baseDirectory"/>. The startup elevation relaunch runs in a
-    /// trusted working directory, not the caller's, so relative paths have to be resolved
-    /// before it.
+    /// Returns <paramref name="args"/> with relative scan and scan-file paths made absolute.
+    /// The startup elevation relaunch runs in a trusted working directory, not the caller's,
+    /// so relative paths have to be resolved before it. Windows does the resolving, so a
+    /// drive-relative path such as <c>D:Scans</c> uses the caller's current directory on D:.
     /// </summary>
-    public static IReadOnlyList<string> ResolveRelativePaths(IReadOnlyList<string> args, string baseDirectory)
+    public static IReadOnlyList<string> ResolveRelativePaths(IReadOnlyList<string> args)
+        => ResolveRelativePaths(args, Path.GetFullPath);
+
+    internal static IReadOnlyList<string> ResolveRelativePaths(IReadOnlyList<string> args, Func<string, string> getFullPath)
     {
         var resolved = new List<string>(args.Count);
         for (var i = 0; i < args.Count; i++)
@@ -98,7 +101,7 @@ internal sealed record TuiLaunchOptions(
             {
                 if (i + 1 < args.Count)
                 {
-                    resolved.Add(ResolveRelativePath(args[++i], baseDirectory));
+                    resolved.Add(ResolveRelativePath(args[++i], getFullPath));
                 }
 
                 continue;
@@ -106,7 +109,7 @@ internal sealed record TuiLaunchOptions(
 
             if (!arg.StartsWith("-", StringComparison.Ordinal))
             {
-                resolved[^1] = ResolveRelativePath(arg, baseDirectory);
+                resolved[^1] = ResolveRelativePath(arg, getFullPath);
             }
         }
 
@@ -117,10 +120,10 @@ internal sealed record TuiLaunchOptions(
     // ScanPathUtility.NormalizeRoot treats as that drive's root. Root-relative (\Scans)
     // and drive-relative (C:Scans) forms still depend on the caller's directory, so they
     // are resolved along with plain relative paths.
-    private static string ResolveRelativePath(string path, string baseDirectory)
+    private static string ResolveRelativePath(string path, Func<string, string> getFullPath)
         => string.IsNullOrWhiteSpace(path) || Path.IsPathFullyQualified(path) || IsBareDrive(path)
             ? path
-            : Path.GetFullPath(path, baseDirectory);
+            : getFullPath(path);
 
     private static bool IsBareDrive(string path)
         => path.Length == 2 && char.IsAsciiLetter(path[0]) && path[1] == ':';
