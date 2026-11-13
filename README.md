@@ -150,7 +150,13 @@ left untouched by auto-renaming duplicates.
 custodian scan C:\Data --out data.custodian-scan
 custodian scan \\server\share --export share.csv --silent
 custodian export data.custodian-scan --format json --out data.json
+custodian scan E:\Archive --mode recursive --threads 2
 ```
+
+The recursive engine lists up to eight folders at once (fewer on machines with
+fewer processors). `--threads <n>` sets that number, for example `--threads 1`
+or `2` for a spinning disk. Cloud-provider folders are always scanned on one
+thread.
 
 ## TUI Examples
 
