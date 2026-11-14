@@ -24,6 +24,14 @@ internal static class Program
                 .SetAutoApplyOnStartup(false)
                 .Run(null);
 
+            // Velopack has already exited for its hook arguments, so this only runs for
+            // real launches. Elevating here, rather than with a Windows compatibility
+            // layer, keeps Velopack's non-elevated installer and updater able to start us.
+            if (ElevationService.TryRelaunchElevatedAtStartup(args, launchPath, logger))
+            {
+                return;
+            }
+
             var app = new App();
             app.InitializeComponent();
             app.Run(new MainWindow(launchPath));

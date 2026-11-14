@@ -13,6 +13,13 @@ internal enum FileLaunchConfirmationReason
 
 internal static class FileLaunchSafety
 {
+    /// <summary>
+    /// Shown when a copy, move, recycle or delete is refused because the current scan was
+    /// loaded from a .custodian-scan file, whose paths cannot be trusted as the user's own.
+    /// </summary>
+    internal const string ImportedScanFileOperationsMessage =
+        "File operations are unavailable for imported scans. Run a new live scan to enable them.";
+
     private static readonly ILogger Logger = AppLogging.CreateLogger(typeof(FileLaunchSafety).FullName!);
 
     private static readonly HashSet<string> ExecutableOrScriptExtensions = new(StringComparer.OrdinalIgnoreCase)

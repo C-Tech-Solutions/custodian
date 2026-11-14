@@ -4,9 +4,25 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
+### Changed
+
+- The Folder Map lists every drive and folder scanned in the session, not only the scan on screen. Clicking a folder under another scan switches to that scan, opens the folder and selects its target. A scan leaves the map when it leaves the session cache (up to 8 scans are kept). Its rows now fit the panel and resize with it instead of scrolling sideways, each scan is a heading with a drive or folder icon, and expanding a folder with thousands of subfolders no longer stalls the window.
+- MFT scans read the `$MFT` directly from the volume device and build the scan from its records, which also gives MFT scans last-write times. When the direct read cannot run, the scan falls back to the previous enumeration and says why in its diagnostics. The CLI's `--mft-read enum` forces the previous path.
+
 ### Fixed
 
+- Fixed installing and launching with View > Always open as administrator turned on. The setting used to put a Windows "run as administrator" compatibility flag on `Custodian.App.exe`. That flag made the installer's setup step and its launch of Custodian fail with error 740, and the previous version stayed installed. Custodian now asks for elevation itself as it starts, after any installer or update step has been handled, and those steps never ask for elevation.
+- On first launch, an existing Always open as administrator setting is moved off the compatibility flag automatically, so the setting stays on and later installs and updates work. If you still use an older version with the setting on, update from inside Custodian (Help > Check for Updates), or turn the setting off before you run a new `Setup.exe`. If you elevate by entering a different administrator account's credentials, Custodian runs as that account and can't move your setting, so the old flag stays. To clear it, open Properties for `%LOCALAPPDATA%\Custodian.DiskAnalyzer\current\Custodian.App.exe`, clear "Run this program as an administrator" on the Compatibility tab, then turn the setting back on in Custodian.
 - Fixed white and gray panels that flashed in the Targets list, Folder map, Bars chart, results list and Recycle Bin list when you chose Relaunch as administrator, and briefly when Custodian closed. These lists now keep the current theme while the window waits.
+
+### Security
+
+- Update packages are now fully verified before the updater uses them. A downloaded package that fails Custodian's signature policy is discarded before it can replace the updater (`Update.exe`).
+- Files in an update package are checked by their content as well as their name, so a renamed executable still has to be signed by an approved publisher. The package manifest is size-limited and read without DTD processing, and the program it names as the main executable must be signed by C-Tech Solutions.
+- The updater accepts only plain package file names from the release feed, so a feed can't point it at a network share or another folder.
+- Saved scans opened from a file are now checked before use. Custodian rejects scan files whose tables are views or have generated columns, including views that hide behind SQLite's built-in names, and files whose folder links form cycles or point at missing folders. Very deep folder trees no longer exhaust the stack when a scan is analyzed or saved.
+- The terminal UI now refuses Recycle and Copy to PC on scans opened from a file, as the GUI already did.
+- Opening a phone item from a scan now matches only phone storage, never a local drive, folder or file, so a crafted scan file can't open a local program through This PC.
 
 ## 1.5.6 - 2026-08-25
 

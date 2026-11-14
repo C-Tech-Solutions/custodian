@@ -1,3 +1,4 @@
+using Custodian.Core.Analysis;
 using Custodian.Core.Model;
 using Custodian.Core.Storage;
 using System.Globalization;
@@ -344,6 +345,158 @@ public sealed class ScanStoreTests
         Assert.NotNull(loaded.GlobalIndex);
         var largestFile = loaded.GlobalIndex!.LargestFiles.First();
         Assert.Equal(@"C:\Alpha\a.bin", largestFile.FullPath);
+    }
+
+    [Theory]
+    [InlineData("metadata", "CREATE VIEW metadata AS SELECT key, value FROM metadata_data")]
+    [InlineData("entries", "CREATE VIEW entries AS SELECT * FROM entries_data")]
+    [InlineData("skipped_entries", "CREATE VIEW skipped_entries AS SELECT * FROM skipped_entries_data")]
+    public async Task LoadRejectsViewsInPlaceOfScanTables(string table, string createView)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, $"ALTER TABLE {table} RENAME TO {table}_data; {createView};");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("view", error.Message);
+    }
+
+    [Theory]
+    [InlineData("metadata")]
+    [InlineData("entries")]
+    [InlineData("skipped_entries")]
+    public async Task LoadRejectsGeneratedColumns(string table)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, $"ALTER TABLE {table} ADD COLUMN padding TEXT GENERATED ALWAYS AS (zeroblob(16)) VIRTUAL;");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("generated column", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadIgnoresSpoofedPragmaViews()
+    {
+        using var temp = await SavedSampleAsync();
+        // A file can define views with the pragma function names. In a SELECT they would shadow
+        // the built-ins and report every table as ordinary, with no generated columns.
+        await ExecuteAsync(temp.Path, """
+            ALTER TABLE entries RENAME TO entries_data;
+            CREATE VIEW entries AS SELECT * FROM entries_data;
+            CREATE VIEW pragma_table_list AS
+                SELECT 'main' AS schema, 'metadata' AS name, 'table' AS type
+                UNION ALL SELECT 'main', 'entries', 'table'
+                UNION ALL SELECT 'main', 'skipped_entries', 'table';
+            CREATE VIEW pragma_table_xinfo AS SELECT 'id' AS name, 0 AS hidden WHERE 0;
+            """);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("view", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadRejectsMissingScanTable()
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, "DROP TABLE skipped_entries;");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+    }
+
+    [Fact]
+    public async Task LoadRejectsParentCycle()
+    {
+        using var temp = await SavedSampleAsync();
+        // Saved ids are pre-order: 1 C:\, 2 Alpha, 3 Alpha\a.bin, 4 Alpha\b.bin, 5 Beta, ...
+        // Point Alpha at its own child so 2 and 3 form a cycle with 4 hanging below it.
+        await ExecuteAsync(temp.Path, "UPDATE entries SET parent_id = 3 WHERE id = 2;");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("cycle", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadRejectsSelfParentedEntry()
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, "UPDATE entries SET parent_id = id WHERE id = 5;");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("cycle", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadRejectsEntryWithMissingParent()
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, "UPDATE entries SET parent_id = 999 WHERE id = 5;");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("missing parent", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadRejectsDuplicateEntryIds()
+    {
+        using var temp = await SavedSampleAsync();
+        // Rebuild entries without its primary key so a second row can reuse an id.
+        await ExecuteAsync(temp.Path, """
+            CREATE TABLE entries_copy AS SELECT * FROM entries;
+            DROP TABLE entries;
+            ALTER TABLE entries_copy RENAME TO entries;
+            INSERT INTO entries SELECT * FROM entries WHERE id = 7;
+            """);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("duplicate", error.Message);
+    }
+
+    [Fact]
+    public async Task SaveAndLoadHandleVeryDeepTrees()
+    {
+        const int depth = 100_000;
+        var root = Directory(@"C:\", depth, 1, depth - 1);
+        var current = root;
+        for (var i = 1; i < depth; i++)
+        {
+            var child = Directory($@"C:\d{i}", depth - i, 1, depth - i - 1);
+            current.Children.Add(child);
+            current = child;
+        }
+
+        current.Children.Add(File(@"C:\leaf.bin", 1, ".bin"));
+        var result = new ScanResult
+        {
+            RootPath = root.FullPath,
+            Root = root,
+            Engine = "Test",
+            StartedAt = DateTimeOffset.UnixEpoch,
+            CompletedAt = DateTimeOffset.UnixEpoch
+        };
+        using var temp = new TempScanFile();
+        var store = new ScanStore();
+
+        await store.SaveAsync(result, temp.Path);
+        var loaded = await store.LoadAsync(temp.Path);
+
+        Assert.Equal(depth + 1, loaded.Root.Flatten().Count());
+        Assert.Equal(@"C:\leaf.bin", Assert.Single(ScanAnalysis.LargestFiles(loaded.Root)).FullPath);
+        Assert.Single(ScanAnalysis.ExtensionSummary(loaded.Root));
+    }
+
+    private static async Task<TempScanFile> SavedSampleAsync()
+    {
+        var temp = new TempScanFile();
+        await new ScanStore().SaveAsync(SampleResult(), temp.Path);
+        return temp;
+    }
+
+    private static async Task ExecuteAsync(string path, string sql)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
     }
 
     private static ScanResult SampleResult()

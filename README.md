@@ -121,8 +121,11 @@ Release assets include:
 
 Custodian warns when it is not running as administrator and can relaunch itself
 elevated when you need MFT scanning to reach protected NTFS metadata.
-Use View > Always open as administrator when you want Windows to request
-elevation before future launches instead of starting normally and relaunching.
+Use View > Always open as administrator when you want every launch to request
+elevation. Custodian asks for it as it starts, before any window opens; if you
+decline the prompt it opens without administrator rights and shows the warning
+banner. Installer and update steps never ask for elevation, so the installer and
+in-app updates work with the setting on.
 
 Drive targets show whether a scan is currently running or already cached for
 the session. Uncached drives show a Start Scan prompt instead of clearing the
@@ -151,12 +154,21 @@ custodian scan C:\Data --out data.custodian-scan
 custodian scan \\server\share --export share.csv --silent
 custodian export data.custodian-scan --format json --out data.json
 custodian scan E:\Archive --mode recursive --threads 2
+custodian scan C:\ --mode mft --mft-read enum
 ```
 
 The recursive engine lists up to eight folders at once (fewer on machines with
 fewer processors). `--threads <n>` sets that number, for example `--threads 1`
 or `2` for a spinning disk. Cloud-provider folders are always scanned on one
 thread.
+
+MFT scans read the `$MFT` straight from the volume device: one sequential,
+read-only pass over the `$MFT`'s own clusters, then small reads of the attribute
+lists stored outside it for the few files whose name depends on them, with the
+volume opened read-only and shared. Nothing is written. Endpoint-protection products can flag raw
+volume reads, because credential-theft tools use them too. If the direct read
+cannot run, the scan falls back to `FSCTL_ENUM_USN_DATA` on its own and says why
+in its diagnostics. `--mft-read enum` uses that path only.
 
 ## TUI Examples
 

@@ -96,7 +96,6 @@ public sealed class NtfsFileRecordParserTests
     {
         var record = CreateBaseRecord();
         WriteResidentDataAttribute(record, 56, valueLength: 99, nameLength: 4);
-        WriteEndAttribute(record, 80);
 
         var result = NtfsFileRecordParser.ReadDefaultDataSize(record, out _);
 
@@ -161,7 +160,8 @@ public sealed class NtfsFileRecordParserTests
 
     private static void WriteResidentDataAttribute(byte[] record, int offset, uint valueLength, byte nameLength = 0)
     {
-        var length = 24;
+        // The header, then the value, rounded up to 8 bytes.
+        var length = 24 + (int)((valueLength + 7) & ~7u);
         WriteAttribute(record, offset, 0x80, length);
         record[offset + 8] = 0;
         record[offset + 9] = nameLength;

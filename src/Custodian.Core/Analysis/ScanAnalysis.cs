@@ -111,12 +111,13 @@ public static class ScanAnalysis
         return -StringComparer.OrdinalIgnoreCase.Compare(left.FullPath, right.FullPath);
     }
 
+    // Iterative (via Flatten) so a very deep tree, such as one loaded from an imported scan
+    // file, cannot overflow the stack.
     private static void Traverse(FileSystemEntry entry, Action<FileSystemEntry> visit)
     {
-        visit(entry);
-        foreach (var child in entry.Children)
+        foreach (var descendant in entry.Flatten())
         {
-            Traverse(child, visit);
+            visit(descendant);
         }
     }
 

@@ -8,6 +8,10 @@ namespace Custodian.Core.Storage;
 
 public sealed class ScanStore
 {
+    // A scan file can come from anywhere, so the loader reads only these ordinary tables and
+    // refuses views, virtual tables and generated columns, whose reads run code from the file.
+    private static readonly string[] LoadedTables = ["metadata", "entries", "skipped_entries"];
+
     public async Task SaveAsync(ScanResult result, string path, CancellationToken cancellationToken = default)
     {
         var tempPath = CreateTemporarySavePath(path);
@@ -81,7 +85,7 @@ public sealed class ScanStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using var entryCommand = CreateInsertEntryCommand(connection, transaction);
         entryCommand.Prepare();
-        await InsertEntryAsync(entryCommand, result.Root, null, nextId: 1, cancellationToken).ConfigureAwait(false);
+        await InsertEntriesAsync(entryCommand, result.Root, cancellationToken).ConfigureAwait(false);
 
         foreach (var skipped in result.SkippedEntries)
         {
@@ -96,6 +100,7 @@ public sealed class ScanStore
         await using var connection = CreateConnection(path, SqliteOpenMode.ReadOnly);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
+        await EnsureOrdinaryTablesAsync(connection, cancellationToken).ConfigureAwait(false);
         var metadata = await LoadMetadataAsync(connection, cancellationToken).ConfigureAwait(false);
         var entryColumns = await LoadTableColumnsAsync(connection, "entries", cancellationToken).ConfigureAwait(false);
         var portableObjectIdSelect = entryColumns.Contains("portable_object_id") ? "portable_object_id" : "''";
@@ -131,32 +136,17 @@ public sealed class ScanStore
                     PortableObjectId = reader.GetString(12),
                     PortablePersistentId = reader.GetString(13)
                 };
-                byId[id] = entry;
+                if (!byId.TryAdd(id, entry))
+                {
+                    throw new InvalidDataException($"Scan file contains duplicate entry ID {id}.");
+                }
+
                 parentById[id] = parentId;
                 indexBuilder.Observe(entry);
             }
         }
 
-        foreach (var (id, entry) in byId)
-        {
-            if (parentById[id] is { } parentId && byId.TryGetValue(parentId, out var parent))
-            {
-                parent.Children.Add(entry);
-            }
-        }
-
-        var rootIds = parentById.Where(pair => pair.Value is null).Select(pair => pair.Key).ToList();
-        if (rootIds.Count != 1)
-        {
-            throw new InvalidDataException(rootIds.Count == 0
-                ? "No root folder found in scan file."
-                : "Multiple root folders found in scan file.");
-        }
-
-        if (!byId.TryGetValue(rootIds[0], out var root))
-        {
-            throw new InvalidDataException("Root folder ID not found in scan file entries.");
-        }
+        var root = LinkEntryTree(byId, parentById);
 
         var rootPath = metadata["root_path"];
         var result = new ScanResult
@@ -188,6 +178,53 @@ public sealed class ScanStore
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Links the loaded entries into one tree and returns its root. Throws unless the rows form
+    /// exactly one tree: a single root, every parent present, and every entry reachable from the
+    /// root (an entry that is not is part of, or hangs below, a parent cycle).
+    /// </summary>
+    private static FileSystemEntry LinkEntryTree(
+        Dictionary<long, FileSystemEntry> byId,
+        Dictionary<long, long?> parentById)
+    {
+        FileSystemEntry? root = null;
+        foreach (var (id, entry) in byId)
+        {
+            if (parentById[id] is not { } parentId)
+            {
+                if (root is not null)
+                {
+                    throw new InvalidDataException("Multiple root folders found in scan file.");
+                }
+
+                root = entry;
+                continue;
+            }
+
+            if (!byId.TryGetValue(parentId, out var parent))
+            {
+                throw new InvalidDataException($"Scan file entry {id} refers to missing parent entry {parentId}.");
+            }
+
+            parent.Children.Add(entry);
+        }
+
+        if (root is null)
+        {
+            throw new InvalidDataException("No root folder found in scan file.");
+        }
+
+        // Each entry has exactly one parent, so a cycle can never be reached from the root and
+        // this walk always ends. Any entry it does not reach is in, or below, a cycle.
+        var reachable = root.Flatten().Count();
+        if (reachable != byId.Count)
+        {
+            throw new InvalidDataException("Scan file entries contain a parent cycle.");
+        }
+
+        return root;
     }
 
     private static DateTimeOffset ParseRoundTripDateTimeOffset(string value)
@@ -330,14 +367,38 @@ public sealed class ScanStore
         command.Parameters.Add(parameter);
     }
 
-    private static async Task<long> InsertEntryAsync(
+    // Ids are assigned in pre-order (an entry, then each child's subtree in order) so that loading
+    // ORDER BY id restores every Children list in its saved order. The walk is iterative so a very
+    // deep tree cannot overflow the stack.
+    private static async Task InsertEntriesAsync(
         SqliteCommand command,
-        FileSystemEntry entry,
-        long? parentId,
-        long nextId,
+        FileSystemEntry root,
         CancellationToken cancellationToken)
     {
-        var id = nextId;
+        var nextId = 1L;
+        var pending = new Stack<(FileSystemEntry Entry, long? ParentId)>();
+        pending.Push((root, null));
+        while (pending.Count > 0)
+        {
+            var (entry, parentId) = pending.Pop();
+            var id = nextId++;
+            await InsertEntryAsync(command, entry, id, parentId, cancellationToken).ConfigureAwait(false);
+
+            var children = entry.Children;
+            for (var i = children.Count - 1; i >= 0; i--)
+            {
+                pending.Push((children[i], id));
+            }
+        }
+    }
+
+    private static async Task InsertEntryAsync(
+        SqliteCommand command,
+        FileSystemEntry entry,
+        long id,
+        long? parentId,
+        CancellationToken cancellationToken)
+    {
         command.Parameters[0].Value = id;
         command.Parameters[1].Value = parentId is null ? DBNull.Value : parentId.Value;
         command.Parameters[2].Value = entry.Name;
@@ -353,14 +414,6 @@ public sealed class ScanStore
         command.Parameters[12].Value = entry.PortableObjectId;
         command.Parameters[13].Value = entry.PortablePersistentId;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        nextId++;
-
-        foreach (var child in entry.Children)
-        {
-            nextId = await InsertEntryAsync(command, child, id, nextId, cancellationToken).ConfigureAwait(false);
-        }
-
-        return nextId;
     }
 
     private static async Task InsertSkippedAsync(
@@ -389,6 +442,52 @@ public sealed class ScanStore
         }
 
         return metadata;
+    }
+
+    // These checks use PRAGMA statements, not the pragma_* table-valued functions: a scan file can
+    // define its own view named pragma_table_list (or pragma_table_xinfo), and in a SELECT that
+    // view would shadow the built-in function and report whatever the file wants.
+    private static async Task EnsureOrdinaryTablesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var tableTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA main.table_list";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var nameOrdinal = reader.GetOrdinal("name");
+            var typeOrdinal = reader.GetOrdinal("type");
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                tableTypes[reader.GetString(nameOrdinal)] = reader.GetString(typeOrdinal);
+            }
+        }
+
+        foreach (var table in LoadedTables)
+        {
+            if (!tableTypes.TryGetValue(table, out var type))
+            {
+                throw new InvalidDataException($"Scan file is missing the '{table}' table.");
+            }
+
+            if (!string.Equals(type, "table", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Scan file '{table}' is a {type}, not an ordinary table.");
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"PRAGMA main.table_xinfo({table})";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var columnNameOrdinal = reader.GetOrdinal("name");
+            var hiddenOrdinal = reader.GetOrdinal("hidden");
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (reader.GetInt64(hiddenOrdinal) != 0)
+                {
+                    throw new InvalidDataException(
+                        $"Scan file '{table}' table has a generated column '{reader.GetString(columnNameOrdinal)}'.");
+                }
+            }
+        }
     }
 
     private static async Task<HashSet<string>> LoadTableColumnsAsync(
