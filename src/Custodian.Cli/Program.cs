@@ -49,6 +49,8 @@ static async Task<int> ScanAsync(string[] args)
     var silent = HasFlag(args, "--silent");
     var allocated = HasFlag(args, "--allocated");
     var mode = ParseMode(GetOption(args, "--mode"));
+    var threads = ParseThreads(GetOption(args, "--threads"));
+    var useDirectMftRead = ParseMftRead(GetOption(args, "--mft-read"));
     var scanner = new DiskScanner();
     var progress = silent
         ? null
@@ -57,7 +59,7 @@ static async Task<int> ScanAsync(string[] args)
             Console.Write($"\r{p.Message}: {p.FilesSeen:n0} files, {SizeFormatter.Format(p.BytesSeen)}       ");
         });
 
-    var result = await scanner.ScanAsync(new ScanOptions(path, mode, CollectAllocatedSize: allocated), progress);
+    var result = await scanner.ScanAsync(new ScanOptions(path, mode, CollectAllocatedSize: allocated, MaxDegreeOfParallelism: threads, UseDirectMftRead: useDirectMftRead), progress);
     if (!silent)
     {
         Console.WriteLine();
@@ -145,6 +147,33 @@ static ScanMode ParseMode(string? value)
     };
 }
 
+static int? ParseThreads(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    if (!int.TryParse(value, out var threads) || threads < 1 || threads > ScanOptions.MaxDegreeOfParallelismLimit)
+    {
+        throw new ArgumentException($"--threads must be a whole number from 1 to {ScanOptions.MaxDegreeOfParallelismLimit}: {value}");
+    }
+
+    return threads;
+}
+
+// "direct" reads the $MFT from the volume device and falls back to the enumeration if that fails;
+// "enum" always uses FSCTL_ENUM_USN_DATA. Only MFT scans use either.
+static bool ParseMftRead(string? value)
+{
+    return value?.ToLowerInvariant() switch
+    {
+        null or "" or "direct" => true,
+        "enum" => false,
+        _ => throw new ArgumentException($"Unsupported MFT read: {value}")
+    };
+}
+
 static string? GetOption(string[] args, string name)
 {
     for (var i = 0; i < args.Length - 1; i++)
@@ -199,8 +228,15 @@ static void PrintHelp()
         Custodian CLI
 
         Usage:
-          custodian scan <path> [--mode auto|recursive|mft] [--allocated] [--out file.custodian-scan] [--export file.csv|file.json] [--silent]
+          custodian scan <path> [--mode auto|recursive|mft] [--threads <n>] [--mft-read direct|enum] [--allocated] [--out file.custodian-scan] [--export file.csv|file.json] [--silent]
           custodian export <file.custodian-scan> --format csv|json --out <file>
+
+        Options:
+          --threads <n>  Directories the recursive engine lists at once (1-64; default: processor count, at most 8).
+
+        --mft-read applies to MFT scans (elevated, NTFS volume):
+          direct  read the $MFT from the volume device, falling back to enum if that fails (default)
+          enum    enumerate with FSCTL_ENUM_USN_DATA and read each file's record
 
         Examples:
           custodian scan C:\Data --out data.custodian-scan

@@ -16,15 +16,23 @@ public sealed class FileSystemEntry
     public string PortablePersistentId { get; set; } = string.Empty;
     public List<FileSystemEntry> Children { get; } = [];
 
+    /// <summary>
+    /// Returns this entry and every descendant in pre-order: an entry, then each of its
+    /// children's subtrees in <see cref="Children"/> order.
+    /// </summary>
     public IEnumerable<FileSystemEntry> Flatten()
     {
-        yield return this;
-
-        foreach (var child in Children)
+        var pending = new Stack<FileSystemEntry>();
+        pending.Push(this);
+        while (pending.Count > 0)
         {
-            foreach (var nested in child.Flatten())
+            var entry = pending.Pop();
+            yield return entry;
+
+            var children = entry.Children;
+            for (var i = children.Count - 1; i >= 0; i--)
             {
-                yield return nested;
+                pending.Push(children[i]);
             }
         }
     }

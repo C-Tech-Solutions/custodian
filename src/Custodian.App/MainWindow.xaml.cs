@@ -100,7 +100,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _folderJumpDebounceTimer;
     private readonly DispatcherTimer _targetRefreshDebounceTimer;
-    private IReadOnlyList<FolderJumpRow> _folderJumpIndex = [];
+    private readonly FolderJumpSearch _folderJumpSearch = new();
     private IReadOnlyList<CloudProviderTarget> _cloudTargets = [];
     private readonly object _globalDetailRowsCacheGate = new();
     private readonly Dictionary<DetailViewMode, IReadOnlyList<DetailRow>> _globalDetailRowsCache = [];
@@ -948,7 +948,7 @@ public partial class MainWindow : Window
                     progress,
                     cts.Token);
 
-            var completed = await CacheScanResultAsync(result, scanKey);
+            var completed = CacheScanResult(result, scanKey);
             var shouldShowCompletedScan = ShouldShowCompletedScan(scanKey);
             if (shouldShowCompletedScan)
             {
@@ -1175,7 +1175,7 @@ public partial class MainWindow : Window
                 RememberCurrentScanState();
                 var navigationVersion = BeginNavigation();
                 var loaded = await _store.LoadAsync(dialog.FileName);
-                var cached = await CacheScanResultAsync(loaded, loadedFromScanFile: true);
+                var cached = CacheScanResult(loaded, loadedFromScanFile: true);
                 if (!IsCurrentNavigation(navigationVersion))
                 {
                     return;
@@ -1431,14 +1431,19 @@ public partial class MainWindow : Window
         if (e.Key == Key.Enter)
         {
             _folderJumpDebounceTimer.Stop();
-            RefreshFolderJumpRows(JumpBox.Text);
-            if (JumpBox.SelectedItem is FolderJumpRow selected) { NavigateToFolder(selected.Entry); return; }
-            if (FolderJumpRows.FirstOrDefault() is { } first) NavigateToFolder(first.Entry);
+            RunUiAction(() => JumpToFolderAsync(JumpBox.Text), "Failed to jump to folder");
             return;
         }
         if (e.Key is Key.Up or Key.Down or Key.Escape or Key.Tab) return;
 
         ScheduleFolderJumpRefresh();
+    }
+
+    private async Task JumpToFolderAsync(string query)
+    {
+        if (!await RefreshFolderJumpRowsAsync(query)) return;
+        if (JumpBox.SelectedItem is FolderJumpRow selected) { NavigateToFolder(selected.Entry); return; }
+        if (FolderJumpRows.FirstOrDefault() is { } first) NavigateToFolder(first.Entry);
     }
 
     private void JumpBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3029,7 +3034,7 @@ public partial class MainWindow : Window
             _chartScope);
     }
 
-    private async Task<CachedScan> CacheScanResultAsync(
+    private CachedScan CacheScanResult(
         ScanResult result,
         string? preferredKey = null,
         bool loadedFromScanFile = false)
@@ -3041,7 +3046,7 @@ public partial class MainWindow : Window
         var state = string.Equals(_visibleScanKey, key, StringComparison.OrdinalIgnoreCase) && _currentScan is not null
             ? CaptureCurrentScanState(_currentScan)
             : previous?.State ?? new CachedScanState(result.Root.FullPath, DetailViewMode.Contents, ChartScope.SelectedFolder);
-        var preparation = await PrepareScanUiAsync(result);
+        var preparation = PrepareScanUi(result);
         var cached = new CachedScan(key, result, state, preparation, loadedFromScanFile);
         _sessionScanCache[key] = cached;
         MarkSessionScanCacheKeyUsed(key, enforceLimit: true);
@@ -3058,7 +3063,7 @@ public partial class MainWindow : Window
             ResetProjectionRequests();
         }
 
-        var preparation = await PrepareScanUiAsync(result);
+        var preparation = PrepareScanUi(result);
         var stillVisibleScan = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
         if (stillVisibleScan && !IsEntryReachableFromRoot(result.Root, _selectedEntry ?? result.Root))
         {
@@ -3093,7 +3098,7 @@ public partial class MainWindow : Window
         }
 
         ReplaceCollection(FolderNodes, [preparation.RootNode]);
-        _folderJumpIndex = preparation.FolderJumpIndex;
+        _folderJumpSearch.Index = preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
         RefreshFolderJumpRows(JumpBox.Text ?? string.Empty);
@@ -3434,11 +3439,13 @@ public partial class MainWindow : Window
         return result.Root;
     }
 
-    private async Task<ScanUiPreparation> PrepareScanUiAsync(ScanResult result)
+    private static ScanUiPreparation PrepareScanUi(ScanResult result)
     {
-        return await Task.Run(() => new ScanUiPreparation(
+        // Both are cheap here: folder nodes build their children when the tree view asks,
+        // and the jump index builds on a background thread.
+        return new ScanUiPreparation(
             FolderNode.From(result.Root, Math.Max(1, result.Root.LogicalSizeBytes)),
-            ScanViewProjector.FolderJumpIndex(result.Root)));
+            BackgroundFolderJumpIndex.Start(result.Root));
     }
 
     private bool ShouldShowCompletedScan(string scanKey)
@@ -3649,7 +3656,7 @@ public partial class MainWindow : Window
 
         FolderNodes.Clear();
         FolderNodes.Add(cached.Preparation.RootNode);
-        _folderJumpIndex = cached.Preparation.FolderJumpIndex;
+        _folderJumpSearch.Index = cached.Preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
 
@@ -4189,8 +4196,29 @@ public partial class MainWindow : Window
 
     private void RefreshFolderJumpRows(string query)
     {
+        RunUiAction(() => RefreshFolderJumpRowsAsync(query), "Failed to search folders");
+    }
+
+    /// <returns>False when a newer search or a new index superseded this search.</returns>
+    private async Task<bool> RefreshFolderJumpRowsAsync(string query)
+    {
+        if (!_folderJumpSearch.Index.IsBuilt)
+        {
+            // Rows still listed come from an earlier index and may point at removed entries.
+            ShowFolderJumpRows([]);
+        }
+
+        var rows = await _folderJumpSearch.SearchAsync(query);
+        if (rows is null) return false;
+
+        ShowFolderJumpRows(rows);
+        return true;
+    }
+
+    private void ShowFolderJumpRows(IReadOnlyList<FolderJumpRow> rows)
+    {
         _suppressJumpSelection = true;
-        ReplaceCollection(FolderJumpRows, ScanViewProjector.FolderJumpRows(_folderJumpIndex, query));
+        ReplaceCollection(FolderJumpRows, rows);
         JumpBox.IsDropDownOpen = FolderJumpRows.Count > 0 && JumpBox.IsKeyboardFocusWithin;
         _suppressJumpSelection = false;
     }
@@ -4218,7 +4246,7 @@ public partial class MainWindow : Window
         SummaryMetrics.Clear();
         BreadcrumbItems.Clear();
         FolderJumpRows.Clear();
-        _folderJumpIndex = [];
+        _folderJumpSearch.Index = BackgroundFolderJumpIndex.Empty;
         _backStack.Clear();
         _forwardStack.Clear();
         ClearChartSelection();
@@ -4274,7 +4302,7 @@ public partial class MainWindow : Window
         _currentScan = null;
         _selectedEntry = null;
         ClearChartSelection();
-        _folderJumpIndex = [];
+        _folderJumpSearch.Index = BackgroundFolderJumpIndex.Empty;
         _backStack.Clear();
         _forwardStack.Clear();
 
@@ -5384,7 +5412,7 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
     }
 }
 
-public sealed record ScanUiPreparation(FolderNode RootNode, IReadOnlyList<FolderJumpRow> FolderJumpIndex);
+public sealed record ScanUiPreparation(FolderNode RootNode, BackgroundFolderJumpIndex FolderJumpIndex);
 
 public sealed record DriveRow(
     string Label,

@@ -234,14 +234,46 @@ public static class ScanViewProjector
         return false;
     }
 
+    /// <summary>
+    /// Every folder under <paramref name="root"/> (and the root itself when it is a folder),
+    /// ordered by full path with <see cref="StringComparer.OrdinalIgnoreCase"/>.
+    /// </summary>
     public static IReadOnlyList<FolderJumpRow> FolderJumpIndex(FileSystemEntry root)
     {
-        return root
-            .Flatten()
-            .Where(entry => entry.IsDirectory)
+        return CollectFolders(root)
             .OrderBy(entry => entry.FullPath, StringComparer.OrdinalIgnoreCase)
             .Select(FolderJumpRow.From)
             .ToList();
+    }
+
+    /// <summary>
+    /// Folders in the same pre-order as <see cref="FileSystemEntry.Flatten"/>, without passing
+    /// files through an iterator or descending into them.
+    /// </summary>
+    private static List<FileSystemEntry> CollectFolders(FileSystemEntry root)
+    {
+        var folders = new List<FileSystemEntry>();
+        var pending = new Stack<FileSystemEntry>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var entry = pending.Pop();
+            if (entry.IsDirectory)
+            {
+                folders.Add(entry);
+            }
+
+            var children = entry.Children;
+            for (var i = children.Count - 1; i >= 0; i--)
+            {
+                if (children[i].IsDirectory)
+                {
+                    pending.Push(children[i]);
+                }
+            }
+        }
+
+        return folders;
     }
 
     public static IReadOnlyList<FolderJumpRow> FolderJumpRows(IReadOnlyList<FolderJumpRow> directoryIndex, string query, int take = 50)

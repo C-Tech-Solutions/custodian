@@ -5,12 +5,19 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+    # ready_for_review starts CI when a draft is marked ready. The jobs below
+    # skip while the pull request is still a draft.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
   build-test:
+    # Draft pull requests skip CI so review-fix pushes do not spend runner
+    # minutes. The condition sits on the job, not the workflow, so a skipped
+    # job still reports a result to any required status check.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # WPF (Custodian.App) and the test project target net10.0-windows, so the
     # build/test must run on Windows.
     runs-on: windows-latest
@@ -42,6 +49,7 @@ jobs:
         run: ./scripts/test-release-scripts.ps1
 
   vulnerability-scan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: windows-latest
 
     steps:
