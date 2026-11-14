@@ -10,6 +10,9 @@ All notable changes to Custodian are tracked here.
 
 ### Security
 
+- Update packages are now fully verified before the updater uses them. A downloaded package that fails Custodian's signature policy is discarded before it can replace the updater (`Update.exe`).
+- Files in an update package are checked by their content as well as their name, so a renamed executable still has to be signed by an approved publisher. The package manifest is size-limited and read without DTD processing, and the program it names as the main executable must be signed by C-Tech Solutions.
+- The updater accepts only plain package file names from the release feed, so a feed can't point it at a network share or another folder.
 - Saved scans opened from a file are now checked before use. Custodian rejects scan files whose tables are views or have generated columns, including views that hide behind SQLite's built-in names, and files whose folder links form cycles or point at missing folders. Very deep folder trees no longer exhaust the stack when a scan is analyzed or saved.
 - The terminal UI now refuses Recycle and Copy to PC on scans opened from a file, as the GUI already did.
 - Opening a phone item from a scan now matches only phone storage, never a local drive, folder or file, so a crafted scan file can't open a local program through This PC.
