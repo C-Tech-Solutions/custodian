@@ -86,6 +86,17 @@ public sealed class ElevationStartupTests
     }
 
     [Fact]
+    public void UpdateRestartAsksForElevationAgain()
+    {
+        var elevatedArguments = ElevationService.BuildRelaunchArguments(["--mode", "mft"], @"D:\Data", startupElevation: true);
+
+        var restartArguments = AppUpdateService.RestartArguments(elevatedArguments);
+
+        Assert.Equal(["--mode", "mft"], restartArguments);
+        Assert.True(ElevationService.ShouldRelaunchElevatedAtStartup(restartArguments, settingEnabled: true, isElevated: false));
+    }
+
+    [Fact]
     public void CustodianArgumentsAreRemovedBeforeVelopackAndTuiParsing()
     {
         var filtered = ElevationService.RemoveCustodianArguments(

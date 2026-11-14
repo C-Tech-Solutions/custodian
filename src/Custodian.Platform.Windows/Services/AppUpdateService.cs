@@ -107,8 +107,16 @@ internal sealed class AppUpdateService
             update.Asset,
             silent: true,
             restart: restart,
-            Environment.GetCommandLineArgs().Skip(1).ToArray());
+            RestartArguments(Environment.GetCommandLineArgs().Skip(1)));
     }
+
+    /// <summary>
+    /// Arguments for the updated app when the update restarts it. Custodian's own launch arguments are
+    /// left out. The updater starts the new version without elevation, and a startup-elevation marker
+    /// carried over from this process would stop it from asking for elevation again.
+    /// </summary>
+    internal static string[] RestartArguments(IEnumerable<string> currentArguments)
+        => [.. ElevationService.RemoveCustodianArguments(currentArguments)];
 
     private static UpdateManagerContext CreateUpdateManager()
     {
