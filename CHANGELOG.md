@@ -8,6 +8,12 @@ All notable changes to Custodian are tracked here.
 
 - MFT scans read the `$MFT` directly from the volume device and build the scan from its records, which also gives MFT scans last-write times. When the direct read cannot run, the scan falls back to the previous enumeration and says why in its diagnostics. The CLI's `--mft-read enum` forces the previous path.
 
+### Security
+
+- Update packages are now fully verified before the updater uses them. A downloaded package that fails Custodian's signature policy is discarded before it can replace the updater (`Update.exe`).
+- Files in an update package are checked by their content as well as their name, so a renamed executable still has to be signed by an approved publisher. The package manifest is size-limited and read without DTD processing, and the program it names as the main executable must be signed by C-Tech Solutions.
+- The updater accepts only plain package file names from the release feed, so a feed can't point it at a network share or another folder.
+
 ## 1.5.6 - 2026-08-25
 
 ### Security
