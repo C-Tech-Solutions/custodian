@@ -9,7 +9,7 @@ public sealed class WhatsNewLinkBuilderTests
     {
         var url = WhatsNewLinkBuilder.BuildReleaseNotesUrl("1.3.0");
 
-        Assert.Equal("https://github.com/ctech1313/custodian/releases/tag/1.3.0", url);
+        Assert.Equal("https://github.com/C-Tech-Solutions/custodian/releases/tag/1.3.0", url);
     }
 
     [Fact]
@@ -17,7 +17,7 @@ public sealed class WhatsNewLinkBuilderTests
     {
         var url = WhatsNewLinkBuilder.BuildReleaseNotesUrl("1.4.0-preview.1+abc123");
 
-        Assert.Equal("https://github.com/ctech1313/custodian/releases/tag/1.4.0-preview.1", url);
+        Assert.Equal("https://github.com/C-Tech-Solutions/custodian/releases/tag/1.4.0-preview.1", url);
     }
 
     [Theory]

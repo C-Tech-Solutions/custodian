@@ -26,6 +26,7 @@
 - On a phone scan, confirm MFT and allocated-size controls are disabled, Open/Reveal opens the selected phone folder or reveals the selected file when possible, falls back cleanly to the nearest available folder or This PC, and Move to Recycle Bin stays blocked.
 - Copy one selected phone file, multiple selected files, and a selected folder to a PC folder; confirm selected folders copy recursively and filename conflicts are auto-renamed instead of overwritten.
 - Disconnect the phone or cancel mid-copy and confirm completed files remain, the current partial file is removed, and Custodian returns to a usable state.
+- In the Dark theme, choose Relaunch as administrator and close Custodian; confirm the Targets list, Folder Map, Bars chart, results list, and Recycle Bin list keep the theme and never flash white or gray.
 - Toggle View > Always open as administrator, close Custodian, and confirm the next launch requests elevation before opening; decline the prompt once and confirm Custodian opens without elevation and shows the warning banner.
 - With Always open as administrator on, run the new version's `Setup.exe` from a non-elevated session over an existing install; confirm there is no install-hook warning or error 740, the new version is installed, and the launch after install requests elevation.
 - With Always open as administrator on, accept an in-app update with Restart now and confirm the update applies and Custodian reopens elevated.
@@ -40,10 +41,13 @@
 - Offer a package with an unsigned or incorrectly signed `Custodian.*` binary, choose Restart now, and confirm Custodian displays an update error and remains usable instead of closing or entering a stuck shutdown state.
 - On a disposable Windows machine running Custodian 1.4, accept the normal 1.5.6 update, confirm the installed version is 1.5.6, and confirm GUI, CLI, and TUI relaunch correctly.
 - Offer genuine and modified 1.5.6 packages; confirm the genuine package is accepted and the signer-bypass and oversized packages are rejected before installation or extraction.
+- Offer a package that renames an unsigned executable to a non-executable extension, and a feed whose package file name is a path or network share; confirm both are rejected before the updater uses them.
 - Load an imported `.custodian-scan`; confirm Copy, Move, Recycle, and Permanent Delete are disabled and direct invocation is blocked while Copy Path, Copy Rows, CSV/JSON export, and guarded Open/Reveal still work.
+- In the TUI, open a `.custodian-scan` and confirm Recycle and Copy to PC are refused for its rows.
+- Open a `.custodian-scan` edited to replace a table with a view, add a generated column, or make a folder its own parent; confirm Custodian refuses to load it and the app stays usable.
 - Make certificate revocation unavailable; confirm only the update is blocked with retry guidance and the installed application remains usable.
 - Force update preparation and scheduling failures and confirm the shield closes, prior focus and normal input return, settings persistence resumes, and the update error dialog remains visible.
-- Open Help > About Custodian, confirm it reports version 1.5.6, and confirm Open GitHub launches `https://github.com/ctech1313/custodian`.
+- Open Help > About Custodian, confirm it reports version 1.5.6, and confirm Open GitHub launches `https://github.com/C-Tech-Solutions/custodian`.
 - For unsigned local update validation, run `scripts\prepare-local-update-test.ps1`, install the preserved baseline setup, set `CUSTODIAN_UPDATE_SOURCE` to the local release folder, and confirm Help > Check for Updates prompts for the update.
 - Enable Help > Automatically download updates on startup, relaunch, and confirm the available update downloads without a download prompt but still asks before restart/install.
 - Disable Help > Automatically download updates on startup, relaunch, and confirm no automatic update check/download starts; manual Help > Check for Updates still works.

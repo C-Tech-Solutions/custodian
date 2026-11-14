@@ -8,7 +8,7 @@ Security fixes are provided for the latest published Custodian release. Users sh
 
 Please report suspected vulnerabilities privately through GitHub Security Advisories for this repository:
 
-https://github.com/ctech1313/custodian/security/advisories/new
+https://github.com/C-Tech-Solutions/custodian/security/advisories/new
 
 Include the affected Custodian version, installation type, Windows version, and concise reproduction steps. Do not include private file listings, customer data, access tokens, or other sensitive local-machine data unless it is strictly necessary and has been minimized.
 
