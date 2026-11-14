@@ -1,5 +1,6 @@
 using System.IO;
 using Custodian.Core.Presentation;
+using Custodian.Platform.Windows.Services;
 
 namespace Custodian.App.Services;
 
@@ -24,7 +25,7 @@ internal sealed record DetailSelectionActionState(
 internal static class DetailSelectionActionService
 {
     internal const string ImportedScanFileOperationsMessage =
-        "File operations are unavailable for imported scans. Run a new live scan to enable them.";
+        FileLaunchSafety.ImportedScanFileOperationsMessage;
 
     internal static DetailSelectionActionState Build(
         IReadOnlyCollection<DetailRow> selectedRows,

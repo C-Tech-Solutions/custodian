@@ -101,22 +101,22 @@ public static class ScanTreeUpdater
     private static Dictionary<FileSystemEntry, FileSystemEntry> BuildParentMap(FileSystemEntry root)
     {
         var parents = new Dictionary<FileSystemEntry, FileSystemEntry>(ReferenceEqualityComparer.Instance);
-        AddChildren(root, parents);
-        return parents;
-    }
-
-    private static void AddChildren(
-        FileSystemEntry parent,
-        Dictionary<FileSystemEntry, FileSystemEntry> parents)
-    {
-        foreach (var child in parent.Children)
+        var pending = new Stack<FileSystemEntry>();
+        pending.Push(root);
+        while (pending.Count > 0)
         {
-            parents[child] = parent;
-            if (child.IsDirectory)
+            var parent = pending.Pop();
+            foreach (var child in parent.Children)
             {
-                AddChildren(child, parents);
+                parents[child] = parent;
+                if (child.IsDirectory)
+                {
+                    pending.Push(child);
+                }
             }
         }
+
+        return parents;
     }
 
     private static bool TryBuildAncestorPath(
