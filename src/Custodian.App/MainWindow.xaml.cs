@@ -115,6 +115,7 @@ public partial class MainWindow : Window
     private bool _isRecycleBinViewActive;
     private bool _suppressTargetSelection;
     private bool _suppressFolderMapSelection;
+    private bool _togglingFolderMapExpander;
     private bool _suppressChartScopeSelection;
     private string _recycleBinFilterText = string.Empty;
     private RecycleBinSortColumn _recycleBinSortColumn = RecycleBinSortColumn.DateDeleted;
@@ -1368,24 +1369,42 @@ public partial class MainWindow : Window
     {
         if (!_suppressFolderMapSelection && e.NewValue is FolderNode node)
         {
-            OpenFolderMapNode(node);
+            OpenFolderMapNode(node, switchScans: !_togglingFolderMapExpander);
         }
     }
 
     private void FolderTree_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Clicking the folder that is already selected raises no SelectedItemChanged, so open it here.
-        // That happens once the view has moved on, e.g. after switching drives in Targets. A click on
-        // the expander arrow only expands or collapses.
         var source = e.OriginalSource as DependencyObject;
-        if (FindVisualParent<ToggleButton>(source) is null &&
-            FindVisualParent<TreeViewItem>(source) is { IsSelected: true, DataContext: FolderNode node })
+        if (FindVisualParent<ToggleButton>(source) is { TemplatedParent: TreeViewItem expanderItem })
+        {
+            // Collapsing a folder that holds the selected one makes WPF select the collapsed folder,
+            // inside this call. That folder can belong to a scan that is not on screen, and tidying
+            // the map must not switch to it, so the arrow is toggled here, where that can be told apart.
+            e.Handled = true;
+            _togglingFolderMapExpander = true;
+            try
+            {
+                expanderItem.IsExpanded = !expanderItem.IsExpanded;
+            }
+            finally
+            {
+                _togglingFolderMapExpander = false;
+            }
+
+            return;
+        }
+
+        // Clicking the folder that is already selected raises no SelectedItemChanged, so open it here.
+        // That happens once the view has moved on, e.g. after switching drives in Targets.
+        if (FindVisualParent<TreeViewItem>(source) is { IsSelected: true, DataContext: FolderNode node })
         {
             OpenFolderMapNode(node);
         }
     }
 
-    private void OpenFolderMapNode(FolderNode node)
+    /// <param name="switchScans">False when the folder was selected by collapsing it, so it may only move within the scan on screen.</param>
+    private void OpenFolderMapNode(FolderNode node, bool switchScans = true)
     {
         var owner = _sessionScanCache.Values.FirstOrDefault(cached =>
             ReferenceEquals(cached.Preparation.RootNode, node.Root));
@@ -1409,6 +1428,11 @@ public partial class MainWindow : Window
             }
 
             NavigateToFolder(node.Entry);
+            return;
+        }
+
+        if (!switchScans)
+        {
             return;
         }
 
