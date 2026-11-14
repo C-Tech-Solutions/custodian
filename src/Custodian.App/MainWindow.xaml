@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Custodian.App.Controls"
         xmlns:services="clr-namespace:Custodian.App.Services"
-        xmlns:presentation="clr-namespace:Custodian.Core.Presentation;assembly=Custodian.Core"
         Title="Custodian Disk Analyzer"
         Icon="Assets/Custodian.ico"
         Height="880" Width="1400" MinHeight="720" MinWidth="1120"
@@ -20,33 +19,16 @@
         DragOver="Window_DragOver">
 
     <Window.Resources>
-        <HierarchicalDataTemplate DataType="{x:Type presentation:FolderNode}" ItemsSource="{Binding Children}">
-            <Grid MinWidth="240" Margin="0,1" ToolTip="{Binding FullPath}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                <TextBlock Grid.Column="1" Text="{Binding Size}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="8,0,0,0"/>
-                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,3,0,2">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <ProgressBar Height="3" Maximum="100" Value="{Binding Percent}" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="8,0,0,0"/>
-                </Grid>
-            </Grid>
-        </HierarchicalDataTemplate>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Custodian.App;component/Themes/FolderMap.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
 
-        <Style x:Key="SortableColumnHeaderText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource ColumnHeaderText}">
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="ToolTip" Value="Sort rows by this column"/>
-        </Style>
+            <Style x:Key="SortableColumnHeaderText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource ColumnHeaderText}">
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="ToolTip" Value="Sort rows by this column"/>
+            </Style>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid>
@@ -370,14 +352,16 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
                         <TextBlock Style="{StaticResource SectionHeader}" Text="FOLDER MAP" Margin="14,8,14,2"/>
-                        <TextBlock Grid.Row="1" Text="Click any scanned folder to jump there."
+                        <TextBlock Grid.Row="1" Text="Every drive and folder scanned this session. Click a folder to jump there."
                                    Foreground="{DynamicResource MutedBrush}"
                                    FontSize="11" TextWrapping="Wrap"
                                    Margin="14,0,14,6"/>
                         <TreeView x:Name="FolderTree" Grid.Row="2"
+                                  Style="{StaticResource FolderMapTree}"
                                   ItemsSource="{Binding FolderNodes}"
                                   SelectedItemChanged="FolderTree_SelectedItemChanged"
-                                  Margin="8,0,8,10"/>
+                                  PreviewMouseLeftButtonDown="FolderTree_PreviewMouseLeftButtonDown"
+                                  Margin="6,0,6,10"/>
                     </Grid>
                 </Grid>
             </Border>
