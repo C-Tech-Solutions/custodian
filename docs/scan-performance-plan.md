@@ -1,6 +1,8 @@
 # Scan performance plan
 
-Proposed 2026-11-12, updated the same day with an elevated MFT run and an elevated diagnostic. This is the outcome of an investigation. Nothing under `src/` or `tests/` has been changed yet.
+Proposed 2026-11-12, updated the same day with an elevated MFT run and an elevated diagnostic. This is the outcome of an investigation.
+
+**Status, 2026-11-14:** items 1, 2, 3 and 5 are merged: the parallel recursive engine (#50), the post-scan UI preparation (#51), the MFT per-file size path (#52) and the direct `$MFT` read (#54). Item 4 was dropped because item 5 went ahead. Items 6 and 7 are still open decisions. The findings below describe the code before that work.
 
 ## Goal
 

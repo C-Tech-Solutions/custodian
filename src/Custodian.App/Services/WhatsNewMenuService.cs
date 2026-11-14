@@ -140,8 +140,8 @@ internal sealed class WhatsNewMenuService(
 
 internal static class WhatsNewLinkBuilder
 {
-    internal const string ChangelogUrl = "https://github.com/ctech1313/custodian/blob/master/CHANGELOG.md";
-    private const string ReleaseTagUrlPrefix = "https://github.com/ctech1313/custodian/releases/tag/";
+    internal const string ChangelogUrl = "https://github.com/C-Tech-Solutions/custodian/blob/master/CHANGELOG.md";
+    private const string ReleaseTagUrlPrefix = "https://github.com/C-Tech-Solutions/custodian/releases/tag/";
 
     public static string BuildCurrentReleaseNotesUrl()
         => BuildReleaseNotesUrl(BuildCurrentVersionTag());

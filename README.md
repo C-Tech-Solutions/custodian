@@ -1,6 +1,6 @@
 # Custodian Disk Analyzer
 
-[![Latest release](https://img.shields.io/github/v/release/ctech1313/custodian?label=release)](https://github.com/ctech1313/custodian/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/C-Tech-Solutions/custodian?label=release)](https://github.com/C-Tech-Solutions/custodian/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#requirements)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 
@@ -18,7 +18,8 @@ and a CLI for repeatable server or workstation workflows.
   charts.
 - **Switch between drives without losing context** with a session scan cache
   that restores recent scan results, selected folder, detail mode, and chart
-  scope while Custodian stays open.
+  scope while Custodian stays open. The Folder Map lists every drive and folder
+  scanned in the session, so any of them is one click away.
 - **Choose the right scanner** with Auto mode, recursive scanning for folders
   and network shares, and optional NTFS MFT scanning for local NTFS volumes.
 - **Scan cloud sync roots safely** through provider-aware OneDrive, Nextcloud,
@@ -34,11 +35,13 @@ and a CLI for repeatable server or workstation workflows.
   delete, empty-bin actions, and confirmation prompts.
 - **Keep results portable** with `.custodian-scan` SQLite save files plus CSV
   and JSON export from the desktop app or CLI.
-- **Handle untrusted scan data defensively** with CSV formula neutralization,
-  remote-path confirmation before opening saved entries, hardened SQLite
-  connection handling, and redacted update-source logging.
+- **Handle untrusted scan data defensively** with saved-scan validation before
+  use, CSV formula neutralization, remote-path confirmation before opening saved
+  entries, hardened SQLite connection handling, and redacted update-source
+  logging.
 - **Stay updated** through Velopack-powered GitHub Releases for installed
-  desktop builds.
+  desktop builds. Every update package must pass Custodian's signature policy
+  before the updater uses it.
 
 ## Screenshots
 
@@ -79,13 +82,15 @@ intentionally download online-only placeholders. Android / MTP support is
 read-only for phone storage, and copy operations write only to the PC
 destination you choose. Opening entries from a saved scan prompts before touching
 network or remote paths, because saved scan files can come from untrusted
-sources.
+sources. Saved scan files are checked before use, and a scan opened from a file
+is review-only in both the desktop app and the TUI: Custodian won't copy, move,
+recycle, or delete files from it.
 
 ## Download
 
 Get the latest release from:
 
-https://github.com/ctech1313/custodian/releases/latest
+https://github.com/C-Tech-Solutions/custodian/releases/latest
 
 Release assets include:
 
@@ -130,6 +135,11 @@ in-app updates work with the setting on.
 Drive targets show whether a scan is currently running or already cached for
 the session. Uncached drives show a Start Scan prompt instead of clearing the
 workspace without direction.
+
+The Folder Map on the left lists every drive and folder scanned in the session,
+in path order, and stays in place while another target scans. Clicking a folder
+under another scan switches to that scan and opens the folder. The map fits the
+panel width and resizes with it.
 
 OneDrive, Nextcloud, and Dropbox roots appear under Targets when local desktop
 client metadata exposes a sync folder. OneDrive includes common

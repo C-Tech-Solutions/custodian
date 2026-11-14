@@ -12,7 +12,7 @@ Windows disk-usage analyzer for locked-down server/enterprise environments. .NET
   - `Storage/ScanStore.cs` — `.custodian-scan` save/load (SQLite). **This is the only load format.**
   - `Export/ScanExporter.cs` — CSV / JSON. **Export only** — never read back by the app.
 - `src/Custodian.App/` — WPF GUI. The composition root is `Program.cs` (custom `[STAThread] Main`, set via `<StartupObject>`).
-  - `MainWindow.xaml.cs` is a large monolith (~2.6k lines). **Do not add new logic here** — add a ViewModel or a `Services/` class and bind to it. Incrementally extracting from this file is ongoing work.
+  - `MainWindow.xaml.cs` is a large monolith (~5.7k lines). **Do not add new logic here** — add a ViewModel or a `Services/` class and bind to it. Incrementally extracting from this file is ongoing work.
   - `Services/` — WPF-specific orchestration such as `ThemeManager` and `WhatsNewMenuService`. Shared shell/update/portable-device logic belongs in `Custodian.Platform.Windows`.
 - `src/Custodian.Platform.Windows/` — Windows-only services shared by the WPF app and TUI.
   - `Services/` — Velopack updates, elevation settings, portable-device discovery/explorer integration, Recycle Bin operations, and UI settings persistence.

@@ -4,7 +4,7 @@ internal sealed record AboutInfo(string Version, string RepositoryUrl);
 
 internal static class AboutInfoProvider
 {
-    internal const string RepositoryUrl = "https://github.com/ctech1313/custodian";
+    internal const string RepositoryUrl = "https://github.com/C-Tech-Solutions/custodian";
     internal const string UnknownVersion = "Unknown";
 
     public static AboutInfo GetCurrent()

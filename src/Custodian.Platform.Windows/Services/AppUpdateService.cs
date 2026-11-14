@@ -10,7 +10,7 @@ namespace Custodian.Platform.Windows.Services;
 
 internal sealed class AppUpdateService
 {
-    private const string RepositoryUrl = "https://github.com/ctech1313/custodian";
+    private const string RepositoryUrl = "https://github.com/C-Tech-Solutions/custodian";
     private const string UpdateSourceOverrideVariable = "CUSTODIAN_UPDATE_SOURCE";
     private const string UpdateChannelOverrideVariable = "CUSTODIAN_UPDATE_CHANNEL";
     private const string GitHubAccessTokenVariable = "CUSTODIAN_GITHUB_TOKEN";

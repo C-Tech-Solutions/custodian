@@ -10,7 +10,7 @@ public sealed class AboutInfoProviderTests
         var about = AboutInfoProvider.Create("1.5.4+76286e9");
 
         Assert.Equal("1.5.4", about.Version);
-        Assert.Equal("https://github.com/ctech1313/custodian", about.RepositoryUrl);
+        Assert.Equal("https://github.com/C-Tech-Solutions/custodian", about.RepositoryUrl);
     }
 
     [Theory]
