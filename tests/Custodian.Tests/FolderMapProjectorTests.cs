@@ -134,6 +134,29 @@ public sealed class FolderMapProjectorTests
         Assert.All(root.Children, child => Assert.Same(root, child.Root));
     }
 
+    [Fact]
+    public void ScanHeadingsShowADriveOrFolderIconAndThePathWhenTheNameHidesIt()
+    {
+        var drive = Folder(@"C:\");
+        var users = Folder(@"C:\Users");
+        users.Children.Add(Folder(@"C:\Users\Public"));
+
+        var driveRoot = FolderNode.From(drive, parentBytes: 1);
+        var usersRoot = FolderNode.From(users, parentBytes: 1);
+        var publicFolder = usersRoot.Children.Single();
+
+        Assert.True(driveRoot.IsRoot);
+        Assert.Equal("\uEDA2", driveRoot.Icon);
+        Assert.Equal(string.Empty, driveRoot.Location);
+
+        Assert.True(usersRoot.IsRoot);
+        Assert.Equal("\uE8B7", usersRoot.Icon);
+        Assert.Equal(@"C:\Users", usersRoot.Location);
+
+        Assert.False(publicFolder.IsRoot);
+        Assert.Equal(string.Empty, publicFolder.Location);
+    }
+
     private static List<NotifyCollectionChangedEventArgs> Record(ObservableCollection<FolderNode> collection)
     {
         var changes = new List<NotifyCollectionChangedEventArgs>();

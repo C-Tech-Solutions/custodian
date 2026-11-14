@@ -22,6 +22,23 @@ public sealed class FolderNode
     /// </summary>
     public FolderNode Root => _root ?? this;
 
+    /// <summary>True for the top node of a scan. The folder map shows these as scan headings.</summary>
+    public bool IsRoot => _root is null;
+
+    /// <summary>Icon for a scan heading: a drive for a whole volume, a folder for anything else.</summary>
+    public string Icon => IsVolumeRoot ? "\uEDA2" : "\uE8B7";
+
+    /// <summary>
+    /// The scanned path, for a scan heading whose name doesn't already say it, such as a C:\Users
+    /// folder scan named "Users". Empty for drives and for folders inside a scan.
+    /// </summary>
+    public string Location => IsRoot && !IsVolumeRoot && !string.Equals(Name, FullPath, StringComparison.OrdinalIgnoreCase)
+        ? FullPath
+        : string.Empty;
+
+    private bool IsVolumeRoot => FullPath.Length > 0 &&
+        string.Equals(Path.GetPathRoot(FullPath), FullPath, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// Child folder nodes, largest first. Built from <see cref="Entry"/> on first access, so a
     /// tree view only pays for the levels it shows.
