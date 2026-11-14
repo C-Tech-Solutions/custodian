@@ -9,6 +9,11 @@ All notable changes to Custodian are tracked here.
 - The Folder Map lists every drive and folder scanned in the session, not only the scan on screen. Clicking a folder under another scan switches to that scan, opens the folder and selects its target. A scan leaves the map when it leaves the session cache (up to 8 scans are kept). Its rows now fit the panel and resize with it instead of scrolling sideways, each scan is a heading with a drive or folder icon, and expanding a folder with thousands of subfolders no longer stalls the window.
 - MFT scans read the `$MFT` directly from the volume device and build the scan from its records, which also gives MFT scans last-write times. When the direct read cannot run, the scan falls back to the previous enumeration and says why in its diagnostics. The CLI's `--mft-read enum` forces the previous path.
 
+### Fixed
+
+- Fixed installing and launching with View > Always open as administrator turned on. The setting used to put a Windows "run as administrator" compatibility flag on `Custodian.App.exe`. That flag made the installer's setup step and its launch of Custodian fail with error 740, and the previous version stayed installed. Custodian now asks for elevation itself as it starts, after any installer or update step has been handled, and those steps never ask for elevation.
+- On first launch, an existing Always open as administrator setting is moved off the compatibility flag automatically, so the setting stays on and later installs and updates work. If you still use an older version with the setting on, update from inside Custodian (Help > Check for Updates), or turn the setting off before you run a new `Setup.exe`. If you elevate by entering a different administrator account's credentials, Custodian runs as that account and can't move your setting, so the old flag stays. To clear it, open Properties for `%LOCALAPPDATA%\Custodian.DiskAnalyzer\current\Custodian.App.exe`, clear "Run this program as an administrator" on the Compatibility tab, then turn the setting back on in Custodian.
+
 ### Security
 
 - Update packages are now fully verified before the updater uses them. A downloaded package that fails Custodian's signature policy is discarded before it can replace the updater (`Update.exe`).
