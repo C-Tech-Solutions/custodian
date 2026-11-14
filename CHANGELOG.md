@@ -6,6 +6,7 @@ All notable changes to Custodian are tracked here.
 
 ### Changed
 
+- The Folder Map lists every drive and folder scanned in the session, not only the scan on screen. Clicking a folder under another scan switches to that scan, opens the folder and selects its target. A scan leaves the map when it leaves the session cache (up to 8 scans are kept).
 - MFT scans read the `$MFT` directly from the volume device and build the scan from its records, which also gives MFT scans last-write times. When the direct read cannot run, the scan falls back to the previous enumeration and says why in its diagnostics. The CLI's `--mft-read enum` forces the previous path.
 
 ## 1.5.6 - 2026-08-25

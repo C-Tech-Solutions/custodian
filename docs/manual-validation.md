@@ -15,6 +15,7 @@
 - Scan one drive, scan another drive, switch back to the first drive, and confirm the cached scan restores without rescanning.
 - Start scanning one drive, switch to another cached drive, and confirm the running drive keeps a `Scanning` badge until it completes.
 - Click an uncached drive and confirm the empty state shows a Start Scan prompt without starting automatically.
+- Scan two drives and confirm the Folder Map lists both, in drive order, while either is on screen and while a third target shows its Start Scan prompt. Expand a folder under the drive not on screen and click it; confirm the view switches to that drive, opens the folder, and selects the drive in Targets. Switch back through Targets, click the same folder again, and confirm it opens again.
 - Connect an Android phone in charging-only or locked state and confirm Custodian shows guidance to unlock the phone and choose USB File Transfer mode.
 - Unlock the phone, choose USB File Transfer mode, refresh Targets, and confirm each readable storage root appears as a phone target without starting a scan automatically.
 - Scan a phone storage root and confirm progress, cancellation, save/open, CSV/JSON export, charts, largest files/folders, extension summaries, search/filter, breadcrumbs, and session cache restore work.

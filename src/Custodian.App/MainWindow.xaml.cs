@@ -1365,8 +1365,83 @@ public partial class MainWindow : Window
 
     private void FolderTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        if (e.NewValue is FolderNode node) NavigateToFolder(node.Entry);
+        if (e.NewValue is FolderNode node)
+        {
+            OpenFolderMapNode(node);
+        }
     }
+
+    private void FolderTree_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Clicking the folder that is already selected raises no SelectedItemChanged, so open it here.
+        // That happens once the view has moved on, e.g. after switching drives in Targets. A click on
+        // the expander arrow only expands or collapses.
+        var source = e.OriginalSource as DependencyObject;
+        if (FindVisualParent<ToggleButton>(source) is null &&
+            FindVisualParent<TreeViewItem>(source) is { IsSelected: true, DataContext: FolderNode node })
+        {
+            OpenFolderMapNode(node);
+        }
+    }
+
+    private void OpenFolderMapNode(FolderNode node)
+    {
+        var owner = _sessionScanCache.Values.FirstOrDefault(cached =>
+            FolderMapProjector.Contains(cached.Result.Root, node.Entry));
+        if (owner is null)
+        {
+            return;
+        }
+
+        if (!_isRecycleBinViewActive && ReferenceEquals(owner.Result, _currentScan))
+        {
+            NavigateToFolder(node.Entry);
+            return;
+        }
+
+        var navigationVersion = BeginNavigation();
+        RunUiAction(() => ShowCachedScanFolderAsync(owner, node.FullPath, navigationVersion), "Navigation failed");
+    }
+
+    /// <summary>
+    /// Switches to another scan from the folder map and opens the clicked folder in it, the way
+    /// choosing that scan's target would, and keeps the Targets list on the matching row.
+    /// </summary>
+    private async Task ShowCachedScanFolderAsync(CachedScan cached, string folderPath, int navigationVersion)
+    {
+        RememberCurrentScanState();
+        cached.State = cached.State with { SelectedPath = folderPath, ViewMode = DetailViewMode.Contents };
+        MarkSessionScanCacheKeyUsed(cached.RootKey, enforceLimit: false);
+
+        if (_isRecycleBinViewActive)
+        {
+            await LeaveRecycleBinViewAsync();
+        }
+
+        if (FindTargetRowForCachedScan(cached) is { } target)
+        {
+            SelectTargetWithoutNavigation(target);
+        }
+
+        PathBox.Text = DisplayRootPath(cached.Result);
+        SetPortableScanControls(
+            cached.Result.SourceKind == ScanSourceKind.PortableDevice,
+            cached.Result.CloudProvider is not null);
+        await RestoreCachedScanAsync(cached, navigationVersion, showToast: false);
+    }
+
+    private TargetRow? FindTargetRowForCachedScan(CachedScan cached)
+        => TargetRows.FirstOrDefault(row => row.Kind switch
+        {
+            TargetKind.Drive or TargetKind.CloudProvider =>
+                TryGetScanCacheKey(row.RootPath, out var key) &&
+                string.Equals(key, cached.RootKey, StringComparison.OrdinalIgnoreCase),
+            TargetKind.PortableDevice =>
+                row.PortableTarget is { } portableTarget &&
+                TryFindCachedPortableScan(portableTarget, VisiblePortableTargets(), out var portableCached) &&
+                ReferenceEquals(portableCached, cached),
+            _ => false
+        });
 
     private void Back_Click(object sender, RoutedEventArgs e) => GoBack();
     private void Forward_Click(object sender, RoutedEventArgs e) => GoForward();
@@ -3050,9 +3125,19 @@ public partial class MainWindow : Window
         var cached = new CachedScan(key, result, state, preparation, loadedFromScanFile);
         _sessionScanCache[key] = cached;
         MarkSessionScanCacheKeyUsed(key, enforceLimit: true);
+        RefreshFolderMap();
         RefreshTargetStatus(result.RootPath);
         return cached;
     }
+
+    /// <summary>
+    /// Shows one folder map root per scan in the session cache. Called whenever the cache gains,
+    /// replaces or evicts a scan, or a scan's folder tree is rebuilt.
+    /// </summary>
+    private void RefreshFolderMap()
+        => FolderMapProjector.SyncRoots(
+            FolderNodes,
+            FolderMapProjector.OrderRoots(_sessionScanCache.Values.Select(cached => cached.Preparation.RootNode)));
 
     private async Task RefreshScanAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
     {
@@ -3090,6 +3175,7 @@ public partial class MainWindow : Window
             }
         }
 
+        RefreshFolderMap();
         await RefreshTargetUsageAfterTreeMutationAsync(result, destinationFolder);
         var visibleAfterTargetRefresh = ReferenceEquals(_currentScan, result) && !_isRecycleBinViewActive;
         if (!visibleAfterTargetRefresh)
@@ -3097,7 +3183,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        ReplaceCollection(FolderNodes, [preparation.RootNode]);
         _folderJumpSearch.Index = preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
@@ -3654,8 +3739,7 @@ public partial class MainWindow : Window
         StopLoadingAnimation();
         ResetPieZoom();
 
-        FolderNodes.Clear();
-        FolderNodes.Add(cached.Preparation.RootNode);
+        RefreshFolderMap();
         _folderJumpSearch.Index = cached.Preparation.FolderJumpIndex;
         _backStack.Clear();
         _forwardStack.Clear();
@@ -4238,7 +4322,6 @@ public partial class MainWindow : Window
         ResetEmptyStateText();
         ClearGlobalDetailRowsCache();
         _currentScan = null;
-        FolderNodes.Clear();
         DetailRows.Clear();
         _boundDetailRows = null;
         ChartSlices.Clear();
@@ -4306,7 +4389,6 @@ public partial class MainWindow : Window
         _backStack.Clear();
         _forwardStack.Clear();
 
-        FolderNodes.Clear();
         DetailRows.Clear();
         _boundDetailRows = null;
         ChartSlices.Clear();
