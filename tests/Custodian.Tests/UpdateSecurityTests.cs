@@ -941,6 +941,40 @@ public sealed class UpdateSecurityTests
         Assert.Equal([finalPath], Directory.GetFiles(directory.Path));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StagerVerifiesOffTheCallingThread(bool packageAlreadyDownloaded)
+    {
+        using var directory = new TempDirectory();
+        var asset = new VelopackAsset { FileName = "Custodian-2.0.0-full.nupkg" };
+        if (packageAlreadyDownloaded)
+        {
+            File.WriteAllText(Path.Combine(directory.Path, asset.FileName), "package");
+        }
+
+        // The caller stands in for a UI thread: a dedicated thread, not a pool thread. The download
+        // completes synchronously, as a local source's copy can, so only the stager can move work off it.
+        bool? verifiedOnPoolThread = null;
+        Task<string>? stage = null;
+        var caller = new Thread(() => stage = VerifiedUpdatePackageStager.StageAsync(
+            asset,
+            directory.Path,
+            (path, _) =>
+            {
+                File.WriteAllText(path, "package");
+                return Task.CompletedTask;
+            },
+            _ => verifiedOnPoolThread = Thread.CurrentThread.IsThreadPoolThread,
+            NullLogger.Instance,
+            CancellationToken.None));
+        caller.Start();
+        caller.Join();
+        await stage!;
+
+        Assert.True(verifiedOnPoolThread);
+    }
+
     [Fact]
     public async Task StagerDoesNotPlaceAPackageWhenCancelledDuringVerification()
     {

@@ -71,6 +71,11 @@ internal sealed class VerifyingUpdateManager : UpdateManager
 /// a temporary file next to its final path and moved into place only after it passes verification,
 /// so nothing unverified ever sits at the path Velopack uses.
 /// </summary>
+/// <remarks>
+/// Verification hashes the package and checks every executable's signature online, so it runs on
+/// the thread pool. Callers await this from the UI thread, and a package already on disk, or one a
+/// local source copies synchronously, would otherwise be checked there.
+/// </remarks>
 internal static class VerifiedUpdatePackageStager
 {
     public static async Task<string> StageAsync(
@@ -97,7 +102,7 @@ internal static class VerifiedUpdatePackageStager
         {
             try
             {
-                verify(packagePath);
+                await Task.Run(() => verify(packagePath), cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 logger.LogInformation("Update package {Package} is already downloaded and verified.", asset.FileName);
                 return packagePath;
@@ -118,7 +123,7 @@ internal static class VerifiedUpdatePackageStager
         {
             await download(stagingPath, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            verify(stagingPath);
+            await Task.Run(() => verify(stagingPath), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(stagingPath, packagePath, overwrite: true);
             logger.LogInformation("Downloaded and verified update package {Package}.", asset.FileName);
