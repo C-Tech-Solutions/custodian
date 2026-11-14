@@ -114,6 +114,7 @@ public partial class MainWindow : Window
     private ListSortDirection _detailSortDirection = ListSortDirection.Ascending;
     private bool _isRecycleBinViewActive;
     private bool _suppressTargetSelection;
+    private bool _suppressFolderMapSelection;
     private bool _suppressChartScopeSelection;
     private string _recycleBinFilterText = string.Empty;
     private RecycleBinSortColumn _recycleBinSortColumn = RecycleBinSortColumn.DateDeleted;
@@ -1365,7 +1366,7 @@ public partial class MainWindow : Window
 
     private void FolderTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        if (e.NewValue is FolderNode node)
+        if (!_suppressFolderMapSelection && e.NewValue is FolderNode node)
         {
             OpenFolderMapNode(node);
         }
@@ -1387,7 +1388,7 @@ public partial class MainWindow : Window
     private void OpenFolderMapNode(FolderNode node)
     {
         var owner = _sessionScanCache.Values.FirstOrDefault(cached =>
-            FolderMapProjector.Contains(cached.Result.Root, node.Entry));
+            ReferenceEquals(cached.Preparation.RootNode, node.Root));
         if (owner is null)
         {
             return;
@@ -1395,6 +1396,18 @@ public partial class MainWindow : Window
 
         if (!_isRecycleBinViewActive && ReferenceEquals(owner.Result, _currentScan))
         {
+            if (_selectedEntry is not null &&
+                string.Equals(_selectedEntry.FullPath, node.FullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                // Already open, so NavigateToFolder would skip it; the click still asks for its contents.
+                if (_viewMode != DetailViewMode.Contents)
+                {
+                    RunUiAction(() => ChangeViewModeAsync(DetailViewMode.Contents), "Failed to change view");
+                }
+
+                return;
+            }
+
             NavigateToFolder(node.Entry);
             return;
         }
@@ -1529,13 +1542,15 @@ public partial class MainWindow : Window
 
     private void ViewMode_Click(object sender, RoutedEventArgs e)
     {
-        RunUiAction(async () =>
-        {
-            if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
-            SetViewMode(mode);
-            await RefreshDetailsAsync(refreshContext: false);
-            RememberCurrentScanState();
-        }, "Failed to change view");
+        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out DetailViewMode mode)) return;
+        RunUiAction(() => ChangeViewModeAsync(mode), "Failed to change view");
+    }
+
+    private async Task ChangeViewModeAsync(DetailViewMode mode)
+    {
+        SetViewMode(mode);
+        await RefreshDetailsAsync(refreshContext: false);
+        RememberCurrentScanState();
     }
 
     // ============================================================
@@ -3135,9 +3150,21 @@ public partial class MainWindow : Window
     /// replaces or evicts a scan, or a scan's folder tree is rebuilt.
     /// </summary>
     private void RefreshFolderMap()
-        => FolderMapProjector.SyncRoots(
-            FolderNodes,
-            FolderMapProjector.OrderRoots(_sessionScanCache.Values.Select(cached => cached.Preparation.RootNode)));
+    {
+        // Removing the root that holds the selected folder makes the TreeView select its first
+        // remaining root. That is not a click, so it must not switch scans.
+        _suppressFolderMapSelection = true;
+        try
+        {
+            FolderMapProjector.SyncRoots(
+                FolderNodes,
+                FolderMapProjector.OrderRoots(_sessionScanCache.Values.Select(cached => cached.Preparation.RootNode)));
+        }
+        finally
+        {
+            _suppressFolderMapSelection = false;
+        }
+    }
 
     private async Task RefreshScanAfterTreeMutationAsync(ScanResult result, string? destinationFolder)
     {

@@ -1,5 +1,3 @@
-using Custodian.Core.Model;
-
 namespace Custodian.Core.Presentation;
 
 /// <summary>
@@ -58,19 +56,6 @@ public static class FolderMapProjector
         {
             target.RemoveAt(target.Count - 1);
         }
-    }
-
-    /// <summary>
-    /// True when <paramref name="entry"/> is a folder of the tree under <paramref name="root"/> itself,
-    /// not just a folder with the same path in another scan (a C:\ scan and a C:\Users scan both have
-    /// a C:\Users\Public, as different entries).
-    /// </summary>
-    public static bool Contains(FileSystemEntry root, FileSystemEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(root);
-        ArgumentNullException.ThrowIfNull(entry);
-        return ScanViewProjector.TryFindDirectoryByPath(root, entry.FullPath, out var found) &&
-            ReferenceEquals(found, entry);
     }
 
     private static int IndexOfReference(IEnumerable<FolderNode> items, FolderNode item, int start)

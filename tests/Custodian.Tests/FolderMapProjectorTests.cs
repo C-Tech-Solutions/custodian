@@ -102,33 +102,36 @@ public sealed class FolderMapProjectorTests
     }
 
     [Fact]
-    public void ContainsFindsTheRootAndItsOwnFolders()
+    public void RootTiesEveryFolderToItsOwnScanEvenWhenPathsOverlap()
     {
-        var root = Folder(@"C:\");
-        var users = Folder(@"C:\Users");
-        var publicFolder = Folder(@"C:\Users\Public");
-        users.Children.Add(publicFolder);
-        root.Children.Add(users);
+        var drive = Folder(@"C:\");
+        var driveUsers = Folder(@"C:\Users");
+        driveUsers.Children.Add(Folder(@"C:\Users\Public"));
+        drive.Children.Add(driveUsers);
+        var usersScan = Folder(@"C:\Users");
+        usersScan.Children.Add(Folder(@"C:\Users\Public"));
 
-        Assert.True(FolderMapProjector.Contains(root, root));
-        Assert.True(FolderMapProjector.Contains(root, publicFolder));
+        var driveRoot = FolderNode.From(drive, parentBytes: 1);
+        var usersRoot = FolderNode.From(usersScan, parentBytes: 1);
+        var drivePublic = driveRoot.Children.Single().Children.Single();
+        var usersPublic = usersRoot.Children.Single();
+
+        Assert.Same(driveRoot, driveRoot.Root);
+        Assert.Same(driveRoot, drivePublic.Root);
+        Assert.Same(usersRoot, usersPublic.Root);
     }
 
     [Fact]
-    public void ContainsRejectsTheSamePathFromAnotherScan()
+    public void RootTellsApartSiblingsWhosePathsDifferOnlyByCase()
     {
-        var driveRoot = Folder(@"C:\");
-        var driveUsers = Folder(@"C:\Users");
-        driveUsers.Children.Add(Folder(@"C:\Users\Public"));
-        driveRoot.Children.Add(driveUsers);
+        var storage = Folder(@"Phone\Internal storage");
+        storage.Children.Add(Folder(@"Phone\Internal storage\DCIM"));
+        storage.Children.Add(Folder(@"Phone\Internal storage\dcim"));
 
-        var usersScanRoot = Folder(@"C:\Users");
-        var usersScanPublic = Folder(@"C:\Users\Public");
-        usersScanRoot.Children.Add(usersScanPublic);
+        var root = FolderNode.From(storage, parentBytes: 1);
 
-        Assert.False(FolderMapProjector.Contains(driveRoot, usersScanPublic));
-        Assert.False(FolderMapProjector.Contains(driveRoot, Folder(@"D:\Data")));
-        Assert.True(FolderMapProjector.Contains(usersScanRoot, usersScanPublic));
+        Assert.Equal(2, root.Children.Count);
+        Assert.All(root.Children, child => Assert.Same(root, child.Root));
     }
 
     private static List<NotifyCollectionChangedEventArgs> Record(ObservableCollection<FolderNode> collection)
