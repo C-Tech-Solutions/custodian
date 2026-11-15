@@ -65,7 +65,7 @@ public sealed class ScanStore
 
         var sourceId = string.IsNullOrWhiteSpace(result.SourceId) ? result.RootPath : result.SourceId;
         var displayRootPath = string.IsNullOrWhiteSpace(result.DisplayRootPath) ? result.RootPath : result.DisplayRootPath;
-        await InsertMetadataAsync(connection, "format", "custodian-scan-v1", cancellationToken).ConfigureAwait(false);
+        await InsertMetadataAsync(connection, "format", ScanFormat, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "root_path", result.RootPath, cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "source_kind", result.SourceKind.ToString(), cancellationToken).ConfigureAwait(false);
         await InsertMetadataAsync(connection, "source_id", sourceId, cancellationToken).ConfigureAwait(false);
@@ -102,9 +102,28 @@ public sealed class ScanStore
 
         await EnsureOrdinaryTablesAsync(connection, cancellationToken).ConfigureAwait(false);
         var metadata = await LoadMetadataAsync(connection, cancellationToken).ConfigureAwait(false);
+        EnsureScanFormat(metadata);
+        var rootPath = RequireMetadata(metadata, "root_path");
+        var engine = RequireMetadata(metadata, "engine");
+        var startedAt = ParseTimestamp(RequireMetadata(metadata, "started_at"), "Scan file start time");
+        var completedAt = ParseTimestamp(RequireMetadata(metadata, "completed_at"), "Scan file completion time");
+
         var entryColumns = await LoadTableColumnsAsync(connection, "entries", cancellationToken).ConfigureAwait(false);
-        var portableObjectIdSelect = entryColumns.Contains("portable_object_id") ? "portable_object_id" : "''";
-        var portablePersistentIdSelect = entryColumns.Contains("portable_persistent_id") ? "portable_persistent_id" : "''";
+        var textColumns = new List<string> { "name", "full_path", "extension", "attributes" };
+        var portableObjectIdSelect = "''";
+        var portablePersistentIdSelect = "''";
+        if (entryColumns.Contains("portable_object_id"))
+        {
+            portableObjectIdSelect = "portable_object_id";
+            textColumns.Add(portableObjectIdSelect);
+        }
+
+        if (entryColumns.Contains("portable_persistent_id"))
+        {
+            portablePersistentIdSelect = "portable_persistent_id";
+            textColumns.Add(portablePersistentIdSelect);
+        }
+
         var byId = new Dictionary<long, FileSystemEntry>();
         var parentById = new Dictionary<long, long?>();
         var indexBuilder = new ScanGlobalIndexBuilder();
@@ -112,30 +131,48 @@ public sealed class ScanStore
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = $"""
-                SELECT id, parent_id, name, full_path, is_directory, logical_size_bytes, allocated_size_bytes, file_count, directory_count, extension, attributes, last_write_utc, {portableObjectIdSelect}, {portablePersistentIdSelect}
+                SELECT id, parent_id, name, full_path, is_directory, logical_size_bytes, allocated_size_bytes, file_count, directory_count, extension, attributes, last_write_utc, {portableObjectIdSelect}, {portablePersistentIdSelect},
+                    {EntryTypesMatchExpression(textColumns)}
                 FROM entries
                 ORDER BY id
                 """;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (reader.GetInt64(14) == 0)
+                {
+                    throw new InvalidDataException("Scan file entries contain a missing or wrongly typed value.");
+                }
+
                 var id = reader.GetInt64(0);
                 long? parentId = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                var isDirectory = reader.GetInt64(4);
                 var entry = new FileSystemEntry
                 {
                     Name = reader.GetString(2),
                     FullPath = reader.GetString(3),
-                    IsDirectory = reader.GetInt32(4) != 0,
+                    IsDirectory = isDirectory != 0,
                     LogicalSizeBytes = reader.GetInt64(5),
                     AllocatedSizeBytes = reader.GetInt64(6),
                     FileCount = reader.GetInt64(7),
                     DirectoryCount = reader.GetInt64(8),
                     Extension = reader.GetString(9),
                     Attributes = reader.GetString(10),
-                    LastWriteTime = reader.IsDBNull(11) ? null : ParseRoundTripDateTimeOffset(reader.GetString(11)),
+                    LastWriteTime = reader.IsDBNull(11) ? null : ParseTimestamp(reader.GetString(11), $"Scan file entry {id} last-write time"),
                     PortableObjectId = reader.GetString(12),
                     PortablePersistentId = reader.GetString(13)
                 };
+                if (isDirectory is not (0 or 1) ||
+                    entry.LogicalSizeBytes < 0 ||
+                    entry.AllocatedSizeBytes < 0 ||
+                    entry.FileCount < 0 ||
+                    entry.DirectoryCount < 0 ||
+                    string.IsNullOrWhiteSpace(entry.FullPath))
+                {
+                    throw new InvalidDataException(
+                        $"Scan file entry {id} has a negative size or count, an invalid folder flag, or no full path.");
+                }
+
                 if (!byId.TryAdd(id, entry))
                 {
                     throw new InvalidDataException($"Scan file contains duplicate entry ID {id}.");
@@ -148,7 +185,6 @@ public sealed class ScanStore
 
         var root = LinkEntryTree(byId, parentById);
 
-        var rootPath = metadata["root_path"];
         var result = new ScanResult
         {
             RootPath = rootPath,
@@ -160,19 +196,24 @@ public sealed class ScanStore
             PortableDeviceName = metadata.GetValueOrDefault("portable_device_name") ?? string.Empty,
             PortableStorageName = metadata.GetValueOrDefault("portable_storage_name") ?? string.Empty,
             CloudProvider = LoadCloudProviderMetadata(metadata),
-            Engine = metadata["engine"],
-            StartedAt = ParseRoundTripDateTimeOffset(metadata["started_at"]),
-            CompletedAt = ParseRoundTripDateTimeOffset(metadata["completed_at"]),
+            Engine = engine,
+            StartedAt = startedAt,
+            CompletedAt = completedAt,
             Root = root,
             GlobalIndex = indexBuilder.Build(root)
         };
 
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT path, reason FROM skipped_entries ORDER BY id";
+            command.CommandText = "SELECT path, reason, typeof(path) = 'text' AND typeof(reason) = 'text' FROM skipped_entries ORDER BY id";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (reader.GetInt64(2) == 0)
+                {
+                    throw new InvalidDataException("Scan file skipped entries contain a missing or wrongly typed value.");
+                }
+
                 result.SkippedEntries.Add(new SkippedEntry(reader.GetString(0), reader.GetString(1)));
             }
         }
@@ -227,8 +268,44 @@ public sealed class ScanStore
         return root;
     }
 
-    private static DateTimeOffset ParseRoundTripDateTimeOffset(string value)
-        => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    private const string ScanFormat = "custodian-scan-v1";
+
+    private static void EnsureScanFormat(IReadOnlyDictionary<string, string> metadata)
+    {
+        // Every version has written this marker, so a file without it is not a Custodian scan.
+        if (!metadata.TryGetValue("format", out var format))
+        {
+            throw new InvalidDataException("This file is not a Custodian scan.");
+        }
+
+        if (!string.Equals(format, ScanFormat, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("This scan file uses a format this version of Custodian can't open.");
+        }
+    }
+
+    private static string RequireMetadata(IReadOnlyDictionary<string, string> metadata, string key)
+        => metadata.TryGetValue(key, out var value)
+            ? value
+            : throw new InvalidDataException($"Scan file metadata is missing '{key}'.");
+
+    private static DateTimeOffset ParseTimestamp(string value, string description)
+        => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var timestamp)
+            ? timestamp
+            : throw new InvalidDataException($"{description} is not a valid timestamp.");
+
+    // SQLite keeps whatever type a value was written with, whatever the column declares, and the
+    // reader quietly turns text read as a number into 0. So each row reports whether every value
+    // has the type Custodian writes, and the loader checks that before reading the row.
+    private static string EntryTypesMatchExpression(IEnumerable<string> textColumns)
+    {
+        string[] integerColumns = ["id", "is_directory", "logical_size_bytes", "allocated_size_bytes", "file_count", "directory_count"];
+        var checks = integerColumns.Select(column => $"typeof({column}) = 'integer'")
+            .Concat(textColumns.Select(column => $"typeof({column}) = 'text'"))
+            .Append("typeof(parent_id) IN ('integer', 'null')")
+            .Append("typeof(last_write_utc) IN ('text', 'null')");
+        return string.Join(" AND ", checks);
+    }
 
     private static string CreateTemporarySavePath(string path)
     {
@@ -270,7 +347,8 @@ public sealed class ScanStore
 
     private static ScanSourceKind ParseSourceKind(string? value)
     {
-        return Enum.TryParse<ScanSourceKind>(value, ignoreCase: true, out var sourceKind)
+        // TryParse also accepts any number, so the result must be a defined kind.
+        return Enum.TryParse<ScanSourceKind>(value, ignoreCase: true, out var sourceKind) && Enum.IsDefined(sourceKind)
             ? sourceKind
             : ScanSourceKind.FileSystem;
     }
@@ -434,10 +512,15 @@ public sealed class ScanStore
     {
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT key, value FROM metadata";
+        command.CommandText = "SELECT key, value, typeof(key) = 'text' AND typeof(value) = 'text' FROM metadata";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
+            if (reader.GetInt64(2) == 0)
+            {
+                throw new InvalidDataException("Scan file metadata contains a missing or wrongly typed value.");
+            }
+
             metadata[reader.GetString(0)] = reader.GetString(1);
         }
 
