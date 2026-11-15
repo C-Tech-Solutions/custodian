@@ -30,6 +30,17 @@ try {
                     $entryName,
                     [IO.Compression.CompressionLevel]::Optimal) | Out-Null
             }
+
+            # The verifier checks that the manifest's mainExe is a Custodian-signed file, so the
+            # wrapped tree needs a manifest too. publish-velopack.ps1 packs with the same mainExe.
+            $manifestEntry = $archive.CreateEntry("Custodian.DiskAnalyzer.nuspec")
+            $manifestWriter = [IO.StreamWriter]::new($manifestEntry.Open())
+            try {
+                $manifestWriter.Write("<package><metadata><mainExe>Custodian.App.exe</mainExe></metadata></package>")
+            }
+            finally {
+                $manifestWriter.Dispose()
+            }
         }
         finally {
             $archive.Dispose()
