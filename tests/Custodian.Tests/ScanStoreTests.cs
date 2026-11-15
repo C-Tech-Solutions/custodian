@@ -451,6 +451,117 @@ public sealed class ScanStoreTests
     }
 
     [Fact]
+    public async Task LoadRejectsFileWithoutScanFormat()
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, "DELETE FROM metadata WHERE key = 'format';");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("not a Custodian scan", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadRejectsUnsupportedScanFormat()
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, "UPDATE metadata SET value = 'custodian-scan-v2' WHERE key = 'format';");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("format", error.Message);
+    }
+
+    [Theory]
+    [InlineData("root_path")]
+    [InlineData("engine")]
+    [InlineData("started_at")]
+    [InlineData("completed_at")]
+    public async Task LoadRejectsMissingRequiredMetadata(string key)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, $"DELETE FROM metadata WHERE key = '{key}';");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains(key, error.Message);
+    }
+
+    [Theory]
+    [InlineData("UPDATE metadata SET value = 'last tuesday' WHERE key = 'started_at';", "start time")]
+    [InlineData("UPDATE entries SET last_write_utc = 'yesterday' WHERE id = 3;", "entry 3 last-write time")]
+    public async Task LoadRejectsInvalidTimestamps(string sql, string expected)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, sql);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains(expected, error.Message);
+    }
+
+    [Theory]
+    // INTEGER columns keep text that isn't a number, and TEXT columns keep blobs.
+    [InlineData("UPDATE entries SET logical_size_bytes = 'big' WHERE id = 3;", "entries")]
+    [InlineData("UPDATE entries SET parent_id = 1.5 WHERE id = 3;", "entries")]
+    [InlineData("UPDATE entries SET full_path = x'41' WHERE id = 3;", "entries")]
+    [InlineData("UPDATE entries SET last_write_utc = x'00' WHERE id = 3;", "entries")]
+    [InlineData("UPDATE entries SET portable_object_id = x'00' WHERE id = 3;", "entries")]
+    [InlineData("UPDATE metadata SET value = x'41' WHERE key = 'engine';", "metadata")]
+    [InlineData("INSERT INTO skipped_entries (path, reason) VALUES ('C:\\x', x'00');", "skipped entries")]
+    public async Task LoadRejectsWronglyTypedValues(string sql, string table)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, sql);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.StartsWith($"Scan file {table} contain", error.Message);
+        Assert.Contains("missing or wrongly typed value", error.Message);
+    }
+
+    [Fact]
+    public async Task LoadRejectsNullEntryValues()
+    {
+        using var temp = await SavedSampleAsync();
+        // Rebuild entries without its NOT NULL constraints so a value can be NULL.
+        await ExecuteAsync(temp.Path, """
+            CREATE TABLE entries_copy AS SELECT * FROM entries;
+            DROP TABLE entries;
+            ALTER TABLE entries_copy RENAME TO entries;
+            UPDATE entries SET extension = NULL WHERE id = 3;
+            """);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("wrongly typed", error.Message);
+    }
+
+    [Theory]
+    [InlineData("logical_size_bytes = -1")]
+    [InlineData("allocated_size_bytes = -1")]
+    [InlineData("file_count = -1")]
+    [InlineData("directory_count = -1")]
+    [InlineData("is_directory = 2")]
+    [InlineData("full_path = ''")]
+    [InlineData("full_path = '   '")]
+    public async Task LoadRejectsInvalidEntryValues(string assignment)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, $"UPDATE entries SET {assignment} WHERE id = 3;");
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new ScanStore().LoadAsync(temp.Path));
+        Assert.Contains("entry 3", error.Message);
+    }
+
+    [Theory]
+    [InlineData("42")]
+    [InlineData("NotAKind")]
+    public async Task LoadTreatsUnknownSourceKindAsFileSystem(string sourceKind)
+    {
+        using var temp = await SavedSampleAsync();
+        await ExecuteAsync(temp.Path, $"UPDATE metadata SET value = '{sourceKind}' WHERE key = 'source_kind';");
+
+        var loaded = await new ScanStore().LoadAsync(temp.Path);
+
+        Assert.Equal(ScanSourceKind.FileSystem, loaded.SourceKind);
+    }
+
+    [Fact]
     public async Task SaveAndLoadHandleVeryDeepTrees()
     {
         const int depth = 100_000;
