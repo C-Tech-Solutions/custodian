@@ -1365,9 +1365,9 @@ $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\.github
 $ciWorkflowLines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\.github\workflows\ci.yml"))
 $releasePreflight = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "assert-release-preflight.ps1")
 $recoveryPreflight = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "assert-release-draft-recovery.ps1")
-if ($releaseWorkflow -notmatch '(?m)^\s{8}default: 1\.5\.7\s*$' -or
-    $releasePreflight -notmatch '(?m)^\$expectedVersion = "1\.5\.7"\s*$') {
-    throw "The regular protected release path must be pinned to Custodian 1.5.7."
+if ($releaseWorkflow -notmatch '(?m)^\s{8}default: 1\.5\.8\s*$' -or
+    $releasePreflight -notmatch '(?m)^\$expectedVersion = "1\.5\.8"\s*$') {
+    throw "The regular protected release path must be pinned to Custodian 1.5.8."
 }
 if ($recoveryPreflight -notmatch '(?m)^\$expectedVersion = "1\.5\.5"\s*$') {
     throw "The preserved empty-draft recovery path must remain pinned to Custodian 1.5.5."

@@ -57,6 +57,12 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
+## What's New In 1.5.8
+
+- Opening a file that isn't a Custodian scan, or a scan file with missing or
+  invalid values, now fails with a message that says what is wrong, instead of
+  a generic error or wrong sizes.
+
 ## What's New In 1.5.7
 
 - Faster scans. MFT scans read the `$MFT` directly from the volume, recursive
@@ -213,7 +219,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.7
+.\scripts\publish-velopack.ps1 -Version 1.5.8
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -221,7 +227,7 @@ GitHub Releases so installed apps can discover updates:
 
 ```powershell
 $env:GH_TOKEN = "<token with release access>"
-.\scripts\upload-velopack-github.ps1 -Version 1.5.7 -ExpectedCommit <40-character-SHA>
+.\scripts\upload-velopack-github.ps1 -Version 1.5.8 -ExpectedCommit <40-character-SHA>
 ```
 
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
@@ -259,7 +265,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.7 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.8 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's

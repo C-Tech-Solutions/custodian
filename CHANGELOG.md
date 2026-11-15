@@ -4,6 +4,8 @@ All notable changes to Custodian are tracked here.
 
 ## Unreleased
 
+## 1.5.8 - 2026-11-15
+
 ### Changed
 
 - Opening a file that isn't a Custodian scan, or a scan file with missing or invalid values, now fails with a message that says what is wrong. Before, it failed with a generic error or, for some bad values, opened with wrong sizes. Custodian checks the file's format marker, that the required details are present, that timestamps are valid, and that every entry has the expected value types, no negative sizes or counts, and a full path. It doesn't check that folder totals match their contents.
