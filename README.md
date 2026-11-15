@@ -57,19 +57,23 @@ The desktop app keeps targets, scan navigation, sortable detail rows, summary
 metrics, and charts visible in one workspace so repeated cleanup passes do not
 require jumping between windows.
 
-## What's New In 1.5.6
+## What's New In 1.5.7
 
-- Update packages now enforce explicit publisher and file-identity rules for
-  all executable content, independently fail closed when certificate
-  revocation status is unavailable, and reject unsafe or oversized archives
-  before extraction.
-- Imported `.custodian-scan` files are review-only for file mutations: Copy,
-  Move, Recycle, and Permanent Delete require a new live scan, while paths and
-  rows can still be copied or exported.
-- Release assets now include an SPDX SBOM, SHA-256 checksums, GitHub artifact
-  attestations, and immutable-release protection.
+- Faster scans. MFT scans read the `$MFT` directly from the volume, recursive
+  scans work through several folders at once, and the desktop app shows
+  results without first building the whole folder tree.
+- The Folder Map lists every drive and folder scanned in the session, so any
+  of them is one click away.
+- View > Always open as administrator no longer breaks installs and updates
+  (error 740). Custodian now asks for elevation itself as it starts.
+- Saved scans are checked before use, and the terminal UI treats opened scans
+  as review-only, as the desktop app already did.
+- Every update package must pass Custodian's signature policy before the
+  updater uses it.
 
-No evidence of compromise was identified during the security review.
+If you use Always open as administrator on an older version, update from
+inside Custodian (Help > Check for Updates), or turn the setting off before you
+run a new `Setup.exe`.
 
 ## Privacy And Safety
 
@@ -209,7 +213,7 @@ The portable output is written to `artifacts\portable\Custodian`.
 The primary installer and update channel are built with Velopack:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.6
+.\scripts\publish-velopack.ps1 -Version 1.5.7
 ```
 
 Release assets are written under `artifacts\velopack`. Publish those assets to
@@ -217,7 +221,7 @@ GitHub Releases so installed apps can discover updates:
 
 ```powershell
 $env:GH_TOKEN = "<token with release access>"
-.\scripts\upload-velopack-github.ps1 -Version 1.5.6 -ExpectedCommit <40-character-SHA>
+.\scripts\upload-velopack-github.ps1 -Version 1.5.7 -ExpectedCommit <40-character-SHA>
 ```
 
 The repo pins `vpk` 0.0.626 because newer tool builds require a .NET runtime
@@ -255,7 +259,7 @@ $env:CUSTODIAN_AZURE_SIGNING_PROFILE = "<certificate-profile>"
 Build signed Velopack release assets with:
 
 ```powershell
-.\scripts\publish-velopack.ps1 -Version 1.5.6 -Sign
+.\scripts\publish-velopack.ps1 -Version 1.5.7 -Sign
 ```
 
 The `-Sign` switch uses `scripts\sign-azure-artifact.ps1` through Velopack's

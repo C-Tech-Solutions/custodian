@@ -1,5 +1,5 @@
 #define MyAppName "Custodian Disk Analyzer"
-#define MyAppVersion "1.5.6"
+#define MyAppVersion "1.5.7"
 #define MyAppPublisher "Custodian"
 #define PublishDir "..\artifacts\portable\Custodian"
 
